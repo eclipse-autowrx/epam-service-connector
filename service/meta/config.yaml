@@ -1,0 +1,48 @@
+
+# Commented sections are optional. Uncomment them if you want to include them in config
+
+publisher: # General publisher info section
+    author: "Author name"
+    company: "Author company"
+
+# How to build and sign package
+build:
+    os: linux
+    arch: x86
+    symlinks: copy
+    sign_pkcs12: aos-user-sp.p12
+    # context: string, optional
+
+# Information about publishing process (URI, cert, etc)
+publish:
+    url: aoscloud.io
+    service_uid: [service_uid]
+    tls_pkcs12: aos-user-sp.p12
+    version: "0.1.2"
+
+# Service configuration
+configuration:
+    state:
+        filename: state.dat
+        required: False
+
+    # Startup command
+    cmd: /usr/bin/python3 -u syncer.py
+
+    # Service working dir
+    workingDir: '/'
+
+    # Quotas assigned to service
+    # quotas:
+        # cpu: 50
+        # mem: 32MB
+        # state: 64KB
+        # storage: 64MB
+        # upload_speed: 128KB
+        # download_speed: 128KB
+        # upload: 64MB
+        # download: 64MB
+        # temp: 32KB
+
+# For additional information please visit the page:
+# https://docs.aoscloud.io/bin/view/Home/Architecture/General/Data%20formats/Service%20formats/Containers%20configuration%20file/
