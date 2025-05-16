@@ -1,0 +1,2 @@
+[console_scripts]
+kuksa-client = kuksa_client.__main__:main

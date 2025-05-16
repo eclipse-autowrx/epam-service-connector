@@ -16,9 +16,9 @@ build:
 # Information about publishing process (URI, cert, etc)
 publish:
     url: aoscloud.io
-    service_uid: [service_uid]
+    service_uid: 54d0b98c-e986-4bec-b065-bef119b9aa0f
     tls_pkcs12: aos-user-sp.p12
-    version: "0.1.2"
+    version: "0.9.92"
 
 # Service configuration
 configuration:
@@ -27,7 +27,14 @@ configuration:
         required: False
 
     # Startup command
-    cmd: /usr/bin/python3 -u syncer.py
+    # cmd: python3 -u kuksa_test_client.py
+    cmd: bash run.sh
+
+    layers:
+        - "aos-pylibs-layer"
+
+    resources:
+        - kuksa
 
     # Service working dir
     workingDir: '/'

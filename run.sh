@@ -1,8 +1,8 @@
 # Prepare environment variable for KUKSA
-export KUKSA_DATABROKER_METADATA_FILE=/home/root/vss.json
+#export KUKSA_DATABROKER_METADATA_FILE=/home/root/vss.json
 
 # Execute KUKSA
-./databroker-amd64 &
+#./databroker-amd64 &
 
 
 # Prepare environment variable for python

@@ -1,0 +1,10 @@
+#
+A:
+  type: branch
+  description: Branch A.
+
+A.SignalY:
+  datatype: float
+  type: sensor
+  unit: y
+  description: Volume in y.
