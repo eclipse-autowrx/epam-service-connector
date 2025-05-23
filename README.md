@@ -15,42 +15,31 @@ This guidance aim to setup a serivce on EPAM unit to receive python code from pl
     - meta
         - config.yaml
     - src
-        - syncer.py             // this is the main app to connect between unit and plsyground.digital.auto.
-        - ...
+        - app
+            - syncer.py             // this is the main app to connect between unit and plsyground.digital.auto.
+            - ...
 - run.sh                        // this is a temporary solution to execute KUKSA and service manually while waiting for layer and service developement
 ```
 
 # Installation
 
-## Step 1: copy KUKSA data broker to unit
+## Step 1: Create unit and service on AOS Edge website
+[How to](https://docs.aosedge.tech/docs/quick-start/)
 
-> Notice: in my case, unit ssh port is `8992`, consider to change it to match with your device
+Output: ypu will get a `service ID`
 
-### Chip intel
+## Step 2: 
+Go to file: service/meta/config.yaml, line 19, change `service_id` to `service ID`
+
+## Step 3: sign and publish your service
 ```bash
-scp -P 8992 -r kuksa/databroker-amd64 root@localhost:/home/root
+cd service
+aos-signer sign
+aos-signer upload
 ```
 
-### Chip ARM (Raspberry, Potenta, Jetson Orin, Jetson Nano,...)
-```bash
-scp -P 8992 -r kuksa/databroker-arm64 root@localhost:/home/root
-```
+Then wait for service deploy to unit. It take a few minutes.
 
-## Step 2: copy VSS JSON file to unit
-```bash
-scp -P 8992 -r kuksa/vss.json root@localhost:/home/root
-```
-
-## Step 3: copy Python libs to unit
-```bash
-scp -P 8992 -r python-packages root@localhost:/home/root
-```
-
-## Step 4: Execute run.sh
-```bash
-ssh -P 8992 root@localhost
-
-cd /home/root
-chmod +x run.sh
-./run.sh
+# Step 4: 
+Go to playground.digital.auto add a asset and perform test.
 ```
