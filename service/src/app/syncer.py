@@ -13,7 +13,7 @@ from kuksa_client.grpc import EntryType
 import socket
 import pathlib
 
-BORKER_IP = '172.29.0.1'
+BORKER_IP = 'Server'
 BROKER_PORT = 55555
 
 MAIN_APP_PATH = '/storage/main.py'

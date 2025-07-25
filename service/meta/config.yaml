@@ -26,13 +26,13 @@ publish:
     url: aoscloud.io
     service_uid: 54d0b98c-e986-4bec-b065-bef119b9aa0f
     tls_pkcs12: aos-user-sp.p12
-    version: "0.9.92"
+    version: "0.9.101"
 
 # Service configuration
 configuration:
     state:
-        filename: state.dat
-        required: False
+        filename: default_state.dat
+        required: True
 
     # Startup command
     # cmd: python3 -u kuksa_test_client.py
@@ -50,13 +50,13 @@ configuration:
     # Quotas assigned to service
     quotas:
         cpu: 100
-        mem: 256MB
+        mem: 100MB
         state: 128KB
-        storage: 128MB
-        upload_speed: 1MB
-        download_speed: 1MB
-        upload: 512MB
-        download: 512MB
+        storage: 20000KB
+        # upload_speed: 1MB
+        # download_speed: 1MB
+        # upload: 512MB
+        # download: 512MB
         temp: 128KB
 
 # For additional information please visit the page:
