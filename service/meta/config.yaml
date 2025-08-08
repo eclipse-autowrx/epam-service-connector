@@ -26,7 +26,7 @@ publish:
     url: aoscloud.io
     service_uid: 54d0b98c-e986-4bec-b065-bef119b9aa0f
     tls_pkcs12: aos-user-sp.p12
-    version: "0.9.101"
+    version: "0.9.105"
 
 # Service configuration
 configuration:
