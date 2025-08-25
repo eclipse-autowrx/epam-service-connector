@@ -16,7 +16,7 @@ publisher: # General publisher info section
 # How to build and sign package
 build:
     os: linux
-    arch: x86
+    arch: arm64
     symlinks: copy
     sign_pkcs12: aos-user-sp.p12
     # context: string, optional
@@ -24,9 +24,10 @@ build:
 # Information about publishing process (URI, cert, etc)
 publish:
     url: aoscloud.io
-    service_uid: 54d0b98c-e986-4bec-b065-bef119b9aa0f
+    #service_uid: 54d0b98c-e986-4bec-b065-bef119b9aa0f
+    service_uid: f0e2e5b1-1f59-44e7-973c-20d7296f2b23
     tls_pkcs12: aos-user-sp.p12
-    version: "0.9.105"
+    version: "0.0.2"
 
 # Service configuration
 configuration:
@@ -35,7 +36,7 @@ configuration:
         required: True
 
     # Startup command
-    # cmd: python3 -u kuksa_test_client.py
+    #cmd: python3 -u kuksa_test_client.py
     cmd: bash run.sh
 
     layers:
@@ -49,7 +50,7 @@ configuration:
 
     # Quotas assigned to service
     quotas:
-        cpu: 100
+        cpu: 40
         mem: 100MB
         state: 128KB
         storage: 20000KB

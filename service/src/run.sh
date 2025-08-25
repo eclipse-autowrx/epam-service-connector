@@ -10,3 +10,4 @@ ifconfig
 
 cd app
 /usr/bin/python3 -u syncer.py
+#/usr/bin/python3 -u kuksa_test_client.py

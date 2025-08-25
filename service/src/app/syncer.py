@@ -13,12 +13,12 @@ from kuksa_client.grpc import EntryType
 import socket
 import pathlib
 
-BORKER_IP = 'Server'
+BROKER_IP = 'Server'
 BROKER_PORT = 55555
 
 MAIN_APP_PATH = '/storage/main.py'
 
-print(">>>>>>>>>>>>> BORKER_IP", BORKER_IP)
+print(">>>>>>>>>>>>> BORKER_IP", BROKER_IP)
 
 
 DEFAULT_KIT_SERVER = 'https://kit.digitalauto.tech'
@@ -30,10 +30,10 @@ TIME_TO_KEEP_RUNNER_ALIVE = 3*60
 lsOfRunner = []
 lsOfApiSubscriber = {}
 sio = socketio.AsyncClient()
-client = VSSClient("Server",
-            55555,
+client = VSSClient(BROKER_IP,
+            BROKER_PORT,
             root_certificates=pathlib.Path("/etc/kuksa-val/CA.pem"),
-            token=pathlib.Path("/etc/kuksa-val//provide-all.token")
+            token=pathlib.Path("/etc/kuksa-val/provide-all.token")
             .expanduser()
             .read_text(encoding="utf-8")
             .rstrip("\n"),
@@ -356,10 +356,10 @@ def writeSignalsValue(input_str):
     json_str = json.dumps(input_str)
     signal_values = json.loads(json_str)
     with KClient(
-            "Server",
-            55555,
+            BROKER_IP,
+            BROKER_PORT,
             root_certificates=pathlib.Path("/etc/kuksa-val/CA.pem"),
-            token=pathlib.Path("/etc/kuksa-val//provide-all.token")
+            token=pathlib.Path("/etc/kuksa-val/provide-all.token")
             .expanduser()
             .read_text(encoding="utf-8")
             .rstrip("\n"),

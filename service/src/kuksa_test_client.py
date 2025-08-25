@@ -1,11 +1,3 @@
-# Copyright (c) 2025 Eclipse Foundation.
-# 
-# This program and the accompanying materials are made available under the
-# terms of the MIT License which is available at
-# https://opensource.org/licenses/MIT.
-#
-# SPDX-License-Identifier: MIT
-
 import pathlib
 import time
 
@@ -18,6 +10,9 @@ import socketio
 
 sio = socketio.Client()
 """================================="""
+print("================================================")
+print("KUKSA_TEST_CLIENT STARTED")
+print("================================================")
 
 with VSSClient(
     "Server",
@@ -31,8 +26,8 @@ with VSSClient(
     while True:
         current_values = client.get_current_values(["Vehicle.Speed"])
         if current_values["Vehicle.Speed"] is not None:
-            print(">>>>>>>>>>> Vehicle.Speed:", current_values["Vehicle.Speed"].value)
+            print("Vehicle.Speed:", current_values["Vehicle.Speed"].value)
         else:
-            print(">>>>>>>>>>> Vehicle.Speed is empty")
+            print("Vehicle.Speed is empty")
 
         time.sleep(5)
