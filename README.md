@@ -23,8 +23,12 @@ This guidance aim to setup a serivce on EPAM unit to receive python code from pl
 
 # Installation
 
+## Step 0: Follow this guide to prapare a Raspberry device with AOS
+https://github.com/aosedge/meta-aos-rpi
+
 ## Step 1: Create unit and service on AOS Edge website
 [How to](https://docs.aosedge.tech/docs/quick-start/)
+
 
 Output: you will get a `service ID`
 
