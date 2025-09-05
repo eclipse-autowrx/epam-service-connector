@@ -27,7 +27,7 @@ publish:
     #service_uid: 54d0b98c-e986-4bec-b065-bef119b9aa0f
     service_uid: f0e2e5b1-1f59-44e7-973c-20d7296f2b23
     tls_pkcs12: aos-user-sp.p12
-    version: "0.0.2"
+    version: "0.0.13"
 
 # Service configuration
 configuration:
@@ -36,8 +36,8 @@ configuration:
         required: True
 
     # Startup command
-    #cmd: python3 -u kuksa_test_client.py
-    cmd: bash run.sh
+    cmd: python3 -u /app/syncer.py
+    #cmd: bash run.sh
 
     layers:
         - "aos-pylibs-layer"
