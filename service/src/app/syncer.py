@@ -30,7 +30,7 @@ print(">>>>>>>>>>>>> BORKER_IP", BROKER_IP)
 
 
 DEFAULT_KIT_SERVER = 'https://kit.digitalauto.tech'
-DEFAULT_RUNTIME_NAME = 'EPAM-SERVICE-001'
+DEFAULT_RUNTIME_NAME = 'EPAM-SERVICE-PI-001'
 
 TIME_TO_KEEP_SUBSCRIBER_ALIVE = 60
 TIME_TO_KEEP_RUNNER_ALIVE = 3*60
@@ -63,15 +63,6 @@ async def send_app_run_reply(master_id, is_done, retcode, content):
         "code": retcode
     })
 
-async def send_app_deploy_reply(master_id, content, is_finish):
-    await sio.emit("messageToKit-kitReply", {
-        "token": "12a-124-45634-12345-1swer",
-        "request_from": master_id,
-        "cmd": "deploy-request",
-        "data": "",
-        "result": content,
-        "is_finish": is_finish
-    })
 
 def process_done(master_id: str, retcode: int):
     asyncio.run(send_app_run_reply(master_id, True, retcode, ""))
@@ -106,28 +97,38 @@ async def messageToKit(data):
         appName = "App name"
         if "name" in data["data"]:
             appName = data["data"]["name"]
+
+        await sio.emit("messageToKit-kitReply", {
+                "kit_id": CLIENT_ID,
+                "request_from": data["request_from"],
+                "cmd": "run_python_app",
+                "result": "AOS Received app code successfully\r\n",
+                "data": ""
+            })
         
         try:
             writeCodeToFile(data["data"]["code"], filename=MAIN_APP_PATH)
 
+            await sio.emit("messageToKit-kitReply", {
+                "kit_id": CLIENT_ID,
+                "request_from": data["request_from"],
+                "cmd": "run_python_app",
+                "result": "AOS write app code successfully\r\n",
+                "data": ""
+            })
+
         except Exception as e:
             print("Exception on write main file")
             print(str(e))
-        # try:
-        # usedAPIs = data["usedAPIs"]
-        # if isinstance(usedAPIs,list) and len(usedAPIs)>0:
-        #     appendMockSignal(usedAPIs)
-        # except Exception as e:
-        #     print("Fail to appendMockSignal for usedAPIs")
-        #     print(str(e))
 
-        proc = subpiper(
-            master_id=data["request_from"],
-            cmd='ls /storage',
-            stdout_callback=my_stdout_callback,
-            stderr_callback=my_stderr_callback,
-            finished_callback=process_done
-        )
+
+        await sio.emit("messageToKit-kitReply", {
+                "kit_id": CLIENT_ID,
+                "request_from": data["request_from"],
+                "cmd": "run_python_app",
+                "result": "AOS start run app code successfully\r\n",
+                "data": ""
+            })
 
         proc = subpiper(
             master_id=data["request_from"],

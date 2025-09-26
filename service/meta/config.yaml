@@ -27,7 +27,7 @@ publish:
     #service_uid: 54d0b98c-e986-4bec-b065-bef119b9aa0f
     service_uid: f0e2e5b1-1f59-44e7-973c-20d7296f2b23
     tls_pkcs12: aos-user-sp.p12
-    version: "0.0.13"
+    version: "0.0.17"
 
 # Service configuration
 configuration:
@@ -50,7 +50,7 @@ configuration:
 
     # Quotas assigned to service
     quotas:
-        cpu: 40
+        cpu: 10000
         mem: 100MB
         state: 128KB
         storage: 20000KB
