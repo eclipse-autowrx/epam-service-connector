@@ -16,9 +16,57 @@ This guidance aim to setup a serivce on EPAM unit to receive python code from pl
 # Installation
 
 ## Step 1: Create unit and service on AOS Edge website
-[How to](https://docs.aosedge.tech/docs/quick-start/)
+
+Follow this guide and create the Aos service: [AosEdge Quick start](https://docs.aosedge.tech/docs/quick-start/)
 
 Output: you will get a `service ID`
+
+Here are some hints to get you started with Aos solutions:
+
+1. If using virtualbox, the version 7.1.6 is recommended. There is a [bug](https://github.com/VirtualBox/virtualbox/issues/271) in version 7.2.x which makes it unsuitable for AosCore.
+
+1. Be aware that if the unit is created behind a corporate proxy, it may interfere with connection to AosCloud.
+
+1. When creating a service in AosCloud, reserve at least the amount of resources given by `meta/config.yaml`.
+
+   e.g. 
+   ```yaml
+       # Quotas assigned to service
+       quotas:
+           cpu: 10000
+           mem: 100MB
+           state: 128KB
+           storage: 20MB
+           # upload_speed: 1MB
+           # download_speed: 1MB
+           # upload: 512MB
+           # download: 512MB
+           temp: 128KB
+   ```
+   ![Service resources](assets/images/01_epam_service_resource.png)
+
+1. This service has dependency to "aos-pylibs-layer". This layer must be uploaded to AosCloud Layers tab.
+   
+   You can download the latest version from the layer from [here](https://github.com/aosedge/meta-aos-vm/releases).
+
+   e.g. aos-pylibs-layer-genericx86-64-1.0.0.tar.gz
+
+   ![Layers tab](assets/images/02_layer.png)
+
+1. download `unitconfig.json` from the release page in previous step.
+   
+   create a new Target System and paste the json contents there.
+
+   ![Target systems](assets/images/03_target_system.png)
+
+1. After all the steps as in the official Aos Quick Start, make sure of the following:
+   1. Unit is `Online`
+   2. Service status is `ready`
+   3. In the Unit Details, Subject/Service status is `Installed`
+
+1. Finally fetch the `system id` from the `UUID` of the `Services` tab
+   
+   ![service id](assets/images/04_service_id.png)
 
 ## Step 2: 
 Go to file: service/meta/config.yaml, line 19, change `service_id` to `service ID`
