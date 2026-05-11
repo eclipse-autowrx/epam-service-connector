@@ -35,6 +35,7 @@ export default function Page({ data, config }: PluginProps) {
   const [connectionStatus, setConnectionStatus] = React.useState<'disconnected' | 'connecting' | 'connected'>('disconnected')
   const [selectedPreset, setSelectedPreset] = React.useState('custom')
   const [autoIncVersion, setAutoIncVersion] = React.useState(true)
+  const [activeEditorTab, setActiveEditorTab] = React.useState<'cpp' | 'yaml'>('cpp')
   const cppCodeRef = React.useRef(cppCode)
   const yamlConfigRef = React.useRef(yamlConfig)
   cppCodeRef.current = cppCode
@@ -42,7 +43,7 @@ export default function Page({ data, config }: PluginProps) {
 
   // Docker instances state
   const [dockerInstances, setDockerInstances] = React.useState<DockerInstance[]>([])
-  const [filterOnline, setFilterOnline] = React.useState<boolean>(false)
+  const [filterOnline, setFilterOnline] = React.useState<boolean>(true)
   const [selectedInstance, setSelectedInstance] = React.useState<string>('')
   const [showDockerPanel, setShowDockerPanel] = React.useState<boolean>(true)
 
@@ -55,6 +56,7 @@ export default function Page({ data, config }: PluginProps) {
   const [certStatus, setCertStatus] = React.useState<{ loaded: boolean; source: string; size?: number; message?: string } | null>(null)
   const [isUploadingCert, setIsUploadingCert] = React.useState<boolean>(false)
   const [certError, setCertError] = React.useState<string>('')
+  const [showAdvanced, setShowAdvanced] = React.useState<boolean>(false)
 
   // AosCloud state
   const [aosServices, setAosServices] = React.useState<any[]>([])
@@ -175,8 +177,9 @@ export default function Page({ data, config }: PluginProps) {
       width: '320px',
       display: 'flex',
       flexDirection: 'column' as const,
-      gap: '16px',
-      flexShrink: 0
+      gap: '8px',
+      flexShrink: 0,
+      overflow: 'hidden'
     },
     card: {
       backgroundColor: 'white',
@@ -220,16 +223,35 @@ export default function Page({ data, config }: PluginProps) {
     textarea: {
       flex: 1,
       width: '100%',
-      padding: '16px',
+      padding: '12px 16px 12px 0',
       fontFamily: "'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace",
       fontSize: '13px',
-      lineHeight: 1.6,
+      lineHeight: '20px',
       border: 'none',
       resize: 'none' as const,
-      backgroundColor: '#1e293b',
-      color: '#e2e8f0',
+      backgroundColor: '#ffffff',
+      color: '#1f2937',
       outline: 'none',
       minHeight: '220px'
+    },
+    editorContainer: {
+      display: 'flex',
+      flex: 1,
+      overflow: 'auto',
+      backgroundColor: '#ffffff'
+    },
+    lineNumbers: {
+      padding: '12px 8px 12px 12px',
+      fontFamily: "'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace",
+      fontSize: '13px',
+      lineHeight: '20px',
+      color: '#9ca3af',
+      backgroundColor: '#f9fafb',
+      borderRight: '1px solid #e5e7eb',
+      textAlign: 'right' as const,
+      userSelect: 'none' as const,
+      minWidth: '40px',
+      flexShrink: 0
     },
     actions: {
       display: 'flex',
@@ -350,22 +372,25 @@ export default function Page({ data, config }: PluginProps) {
     },
     logsCard: {
       flex: 1,
-      minHeight: '180px',
+      minHeight: '120px',
+      maxHeight: '300px',
       display: 'flex',
-      flexDirection: 'column' as const
+      flexDirection: 'column' as const,
+      overflow: 'hidden'
     },
     logs: {
       flex: 1,
       padding: '12px 16px',
-      backgroundColor: '#1e293b',
+      backgroundColor: '#f9fafb',
       fontFamily: "'Monaco', 'Menlo', 'Ubuntu Mono', monospace",
       fontSize: '12px',
       lineHeight: 1.5,
       overflowY: 'auto' as const,
-      maxHeight: '180px'
+      maxHeight: '180px',
+      borderTop: '1px solid #e5e7eb'
     },
     logEntry: {
-      color: '#e2e8f0',
+      color: '#374151',
       marginBottom: '2px',
       whiteSpace: 'pre-wrap' as const,
       wordBreak: 'break-all'
@@ -532,14 +557,20 @@ export default function Page({ data, config }: PluginProps) {
     })
 
     service.onDeployStatus((message: any) => {
-      addLog(`[Deploy] ${message.message || JSON.stringify(message)}`)
+      if (message.type === 'aos_build_deploy' && message.message && message.message.includes('\n')) {
+        message.message.split('\n').filter((l: string) => l.trim()).forEach((line: string) => addLog(line))
+      } else {
+        addLog(`[Deploy] ${message.message || JSON.stringify(message)}`)
+      }
       if (message.status === 'success') {
-        setBuildStatus('Deployment successful!')
+        setBuildStatus('Build completed successfully!')
         setIsBuilding(false)
+        localStorage.removeItem('aos_build_id')
         refreshApps()
       } else if (message.status === 'error') {
-        setBuildStatus(`Deployment failed: ${message.error || 'Unknown error'}`)
+        setBuildStatus('Build failed')
         setIsBuilding(false)
+        localStorage.removeItem('aos_build_id')
       }
     })
 
@@ -596,13 +627,10 @@ export default function Page({ data, config }: PluginProps) {
             localStorage.removeItem('aos_build_id')
           })
         }
-        setTimeout(() => {
-          checkCertificate()
-          if (!aosCloudLoadedRef.current) {
-            aosCloudLoadedRef.current = true
-            fetchAosCloudServices()
-          }
-        }, 1000)
+        setTimeout(async () => {
+          await checkCertificate()
+          await fetchAosCloudServices()
+        }, 500)
       })
       .catch((err) => {
         console.error('[AOS] Connection failed:', err)
@@ -665,11 +693,38 @@ export default function Page({ data, config }: PluginProps) {
               suffix: kit.suffix || (kit.kit_id || kit.instance_id || '').split('-')[0]
             }))
 
-          setDockerInstances(instances)
+          // Ping each instance to verify it's actually alive
+          const verified = await Promise.all(instances.map(async (inst: DockerInstance) => {
+            try {
+              const pingResult = await new Promise<boolean>((resolve) => {
+                if (!aosServiceRef.current?.isServiceConnected()) { resolve(false); return }
+                const timeout = setTimeout(() => resolve(false), 2000)
+                const pingId = 'ping-' + inst.instance_id + '-' + Date.now()
+                const s = aosServiceRef.current as any
+                if (s.socket) {
+                  s.socket.emit('messageToKit', {
+                    id: pingId, cmd: 'aos_list_apps', to_kit_id: inst.instance_id, type: 'aos_list_apps'
+                  })
+                  const handler = (msg: any) => {
+                    if (msg.id === pingId || msg.kit_id === inst.instance_id) {
+                      clearTimeout(timeout)
+                      s.socket.off('messageToKit-kitReply', handler)
+                      resolve(true)
+                    }
+                  }
+                  s.socket.on('messageToKit-kitReply', handler)
+                  setTimeout(() => { s.socket.off('messageToKit-kitReply', handler) }, 2500)
+                } else { resolve(false) }
+              })
+              return { ...inst, online: pingResult }
+            } catch { return { ...inst, online: false } }
+          }))
+
+          setDockerInstances(verified)
 
           // Auto-select first online instance if none selected
-          if (!selectedInstance && instances.length > 0) {
-            const firstOnline = instances.find((i: DockerInstance) => i.online)
+          if (!selectedInstance && verified.length > 0) {
+            const firstOnline = verified.find((i: DockerInstance) => i.online)
             if (firstOnline) {
               setSelectedInstance(firstOnline.instance_id)
             }
@@ -801,7 +856,9 @@ export default function Page({ data, config }: PluginProps) {
         if (alertRes.status === 'success') setAlerts(alertRes.alerts || [])
       } catch (e) { /* alerts are optional */ }
     } catch (err: any) {
-      addLog(`[AosCloud] Failed to load services: ${err.message}`)
+      if (!err.message?.includes('Not connected')) {
+        addLog(`[AosCloud] Failed to load services: ${err.message}`)
+      }
     } finally {
       setIsLoadingAosCloud(false)
     }
@@ -927,6 +984,8 @@ export default function Page({ data, config }: PluginProps) {
       if (result.status === 'success') {
         addLog(`[Cert] Certificate uploaded: ${result.message}`)
         setCertStatus({ loaded: true, source: 'manual', size: file.size, message: result.message })
+        addLog(`[AosCloud] Refreshing services...`)
+        fetchAosCloudServices()
       } else {
         setCertError(result.message || 'Upload failed')
       }
@@ -954,7 +1013,14 @@ export default function Page({ data, config }: PluginProps) {
 
     setIsBuilding(true)
     setBuildStatus('Starting build...')
+    addLog(`[Build] Target: ${selectedInstance}`)
     addLog('[Build] Starting AOS application build...')
+
+    const stageLabels: Record<string, string> = {
+      init: 'Init', config: 'Config', proto: 'Proto',
+      compile: 'Compile', bundle: 'Bundle',
+      sign: 'Sign', upload: 'Publish', error: 'Error'
+    }
 
     try {
       const response = await aosServiceRef.current.buildAndDeploy({
@@ -965,34 +1031,40 @@ export default function Page({ data, config }: PluginProps) {
       })
 
       if (response.message && response.message.includes('\n')) {
-        response.message.split('\n').filter((l: string) => l.trim()).forEach((line: string) => {
-          addLog(line)
-        })
+        const lines = response.message.split('\n').filter((l: string) => l.trim())
+        for (let i = 0; i < lines.length; i++) {
+          addLog(lines[i])
+          setBuildStatus(`${lines[i].split(']')[1]?.trim().slice(0, 40) || 'Building...'}`)
+          if (i < lines.length - 1) {
+            await new Promise(r => setTimeout(r, 300))
+          }
+        }
       } else {
-        addLog(`[Build] ${response.message || 'Build started: ' + response.appId}`)
-      }
-
-      if (response.buildId) {
-        localStorage.setItem('aos_build_id', response.buildId)
+        addLog(`[Build] ${response.message || JSON.stringify(response)}`)
       }
 
       if (response.status === 'success') {
         setBuildStatus('Build completed successfully!')
         setIsBuilding(false)
-        localStorage.removeItem('aos_build_id')
         refreshApps()
       } else if (response.status === 'error') {
-        setBuildStatus(`Build failed`)
+        const lastLog = (response.message || '').split('\n').filter((l: string) => l.trim()).pop() || 'Unknown error'
+        setBuildStatus(`Build failed: ${lastLog.replace(/^\[.*?\]\s*/, '').slice(0, 80)}`)
         setIsBuilding(false)
-        localStorage.removeItem('aos_build_id')
       } else {
-        setBuildStatus('Building...')
+        setBuildStatus('Build completed')
+        setIsBuilding(false)
       }
     } catch (err: any) {
-      addLog(`[Error] Build failed: ${err.message}`)
-      setBuildStatus(`Build failed: ${err.message}`)
+      const msg = err.message || 'Unknown error'
+      if (msg.includes('\n')) {
+        msg.split('\n').filter((l: string) => l.trim()).forEach((line: string) => addLog(line))
+      } else {
+        addLog(`[Error] ${msg}`)
+      }
+      const lastLine = msg.split('\n').filter((l: string) => l.trim()).pop() || msg
+      setBuildStatus(`Build failed: ${lastLine.replace(/^\[.*?\]\s*/, '').slice(0, 80)}`)
       setIsBuilding(false)
-      localStorage.removeItem('aos_build_id')
     }
   }
 
@@ -1074,8 +1146,8 @@ export default function Page({ data, config }: PluginProps) {
     return React.createElement('div', { style: styles.page },
       React.createElement('div', { style: styles.emptyState },
         React.createElement('div', { style: styles.emptyIcon }, '📦'),
-        React.createElement('h2', { style: { margin: '0 0 8px 0', fontSize: '18px', fontWeight: 600, color: '#1f2937' } }, 'No Prototype Selected'),
-        React.createElement('p', { style: styles.emptyText }, 'Please select a prototype to use the AOS Cloud Deployment plugin.')
+        React.createElement('h2', { style: { margin: '0 0 8px 0', fontSize: '18px', fontWeight: 600, color: '#1f2937' } }, 'AOS Cloud Deployment'),
+        React.createElement('p', { style: styles.emptyText }, 'This plugin is available inside a Prototype. Go to Prototype Library, open a prototype, and select the "aos-cloud" tab.')
       )
     )
   }
@@ -1107,56 +1179,49 @@ export default function Page({ data, config }: PluginProps) {
 
         React.createElement('div', { style: { fontSize: '13px', lineHeight: 1.8, color: '#374151' } },
 
-          React.createElement('h3', { style: { fontSize: '14px', marginTop: 0, marginBottom: '8px' } }, '1. Start Docker Toolchain'),
-          React.createElement('pre', { style: {
-            backgroundColor: '#1e293b', color: '#e2e8f0', padding: '12px 14px', borderRadius: '6px',
-            fontSize: '12px', lineHeight: 1.6, overflowX: 'auto', marginBottom: '16px', whiteSpace: 'pre-wrap'
-          } },
-            'cp .env.example .env\n' +
-            'docker run -d --network host \\\n' +
-            '  --env-file .env \\\n' +
-            '  -v ~/.aos/security/aos-user-sp.p12:/certs/aos-user-sp.p12:ro \\\n' +
-            '  --name aos-broadcaster \\\n' +
-            '  --entrypoint "node" \\\n' +
-            '  aos-edge-toolchain:proxy \\\n' +
-            '  /usr/local/bin/aos-broadcaster.js'
-          ),
-
-          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '2. Build & Deploy'),
+          React.createElement('h3', { style: { fontSize: '14px', marginTop: 0, marginBottom: '8px' } }, '1. Select a Docker Instance'),
           React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px' } },
-            'Edit C++ code and config.yaml, then click Build & Deploy. ' +
-            'The toolchain cross-compiles for ARM64, signs with your .p12 certificate, and uploads to AosCloud. ' +
-            'The edge unit pulls and runs the new version automatically.'
+            'Choose an online Docker instance from the left panel. This is the build server that compiles, signs, and uploads your service to AosCloud.'
           ),
 
-          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '3. View App Logs on Edge Unit'),
-          React.createElement('p', { style: { color: '#6b7280', marginBottom: '8px' } },
-            'Services run inside crun containers. Stdout goes to journald, not the serial console. Connect via USB-UART:'
-          ),
-          React.createElement('pre', { style: {
-            backgroundColor: '#1e293b', color: '#e2e8f0', padding: '12px 14px', borderRadius: '6px',
-            fontSize: '12px', lineHeight: 1.6, overflowX: 'auto', marginBottom: '16px', whiteSpace: 'pre-wrap'
-          } },
-            '# Connect to RPi5 via USB-UART serial\n' +
-            'sudo minicom -b 115200 -D /dev/ttyUSB0\n\n' +
-            '# On the RPi5 — real-time app logs\n' +
-            'sudo journalctl -f | grep AosEdge\n\n' +
-            '# Recent logs (last 5 minutes)\n' +
-            'sudo journalctl --since "5 min ago" | grep -i hello'
+          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '2. Choose a Service'),
+          React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px' } },
+            'Select a service from the AosCloud Service dropdown on the left. This determines which service on AosCloud will receive your new version. ' +
+            'The version auto-increments based on the latest deployed version.'
           ),
 
-          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '4. Certificate'),
-          React.createElement('p', { style: { color: '#6b7280', marginBottom: '4px' } }, 'Required for signing and uploading. Provide via:'),
+          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '3. Select a Preset or Write Code'),
+          React.createElement('p', { style: { color: '#6b7280', marginBottom: '4px' } },
+            'Use the preset dropdown (top-right) to load a pre-built application, or write your own C++ code and YAML config:'
+          ),
           React.createElement('ul', { style: { color: '#6b7280', marginBottom: '16px', paddingLeft: '20px' } },
-            React.createElement('li', null, React.createElement('strong', null, 'CERT_FILE'), ' env var — mount .p12 into Docker container'),
-            React.createElement('li', null, React.createElement('strong', null, 'UI Upload'), ' — use the Certificate panel on the left'),
-            React.createElement('li', null, React.createElement('strong', null, 'Azure Key Vault'), ' — set AZURE_KEY_VAULT_NAME for production')
+            React.createElement('li', null, React.createElement('strong', null, 'main.cpp'), ' — your C++ application source code'),
+            React.createElement('li', null, React.createElement('strong', null, 'config.yaml'), ' — service metadata: architecture, version, resource quotas, entry point')
           ),
 
-          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '5. Standalone vs Plugin'),
+          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '4. Build & Deploy'),
+          React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px' } },
+            'Click the Build & Deploy button. The system compiles your code, signs the package, and uploads it to AosCloud. ' +
+            'The edge unit receives the update via OTA and runs your service automatically. ' +
+            'Watch the Build Logs panel on the right for progress.'
+          ),
+
+          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '5. Monitor'),
+          React.createElement('p', { style: { color: '#6b7280', marginBottom: '4px' } },
+            'After deployment, you can:'
+          ),
+          React.createElement('ul', { style: { color: '#6b7280', marginBottom: '16px', paddingLeft: '20px' } },
+            React.createElement('li', null, 'Check service status in the ', React.createElement('strong', null, 'Units'), ' panel'),
+            React.createElement('li', null, 'View CPU/RAM usage in the ', React.createElement('strong', null, 'Monitoring'), ' panel'),
+            React.createElement('li', null, 'Request service logs via ', React.createElement('strong', null, 'Fetch Logs'), ' button')
+          ),
+
+          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, 'Available Presets'),
           React.createElement('ul', { style: { color: '#6b7280', paddingLeft: '20px', marginBottom: 0 } },
-            React.createElement('li', null, React.createElement('strong', null, 'Standalone: '), 'npm run standalone:dev → http://localhost:3011/standalone.html'),
-            React.createElement('li', null, React.createElement('strong', null, 'Plugin: '), 'npm run build → index.js loaded by digital.auto host')
+            React.createElement('li', null, React.createElement('strong', null, 'Hello AOS'), ' — simple hello world service'),
+            React.createElement('li', null, React.createElement('strong', null, 'Signal Writer'), ' — writes vehicle signals to KUKSA Databroker'),
+            React.createElement('li', null, React.createElement('strong', null, 'EV Range Extender'), ' — battery management with power-save mode'),
+            React.createElement('li', null, React.createElement('strong', null, 'Signal Reporter'), ' — relays signals to the live dashboard')
           )
         )
       )
@@ -1166,18 +1231,7 @@ export default function Page({ data, config }: PluginProps) {
     React.createElement('header', { style: styles.header },
       React.createElement('div', { style: styles.headerLeft },
         React.createElement('h1', { style: styles.title }, 'AOS Cloud Deployment'),
-        React.createElement('span', { style: { ...styles.statusIndicator, ...styles[`status${connectionStatus.charAt(0).toUpperCase() + connectionStatus.slice(1)}`] } },
-          connectionStatus === 'connected' ? '● Connected' : connectionStatus === 'connecting' ? '● Connecting...' : '○ Disconnected'
-        ),
-        selectedInstance && React.createElement('span', {
-          style: {
-            fontSize: '12px',
-            padding: '4px 10px',
-            borderRadius: '4px',
-            backgroundColor: '#f3f4f6',
-            color: '#6b7280'
-          }
-        }, `Target: ${selectedInstance.substring(0, 12)}...`)
+        
       ),
       React.createElement('div', { style: styles.headerRight },
         React.createElement('button', {
@@ -1194,18 +1248,25 @@ export default function Page({ data, config }: PluginProps) {
           onChange: (e: any) => handlePresetChange(e.target.value),
           style: styles.select
         },
-          React.createElement('option', { value: 'custom' }, 'Custom'),
-          React.createElement('option', { value: 'helloAos' }, 'Hello AOS'),
-          React.createElement('option', { value: 'kuksaWriter' }, 'KUKSA Writer'),
-          React.createElement('option', { value: 'kuksaReader' }, 'KUKSA Reader'),
-          React.createElement('option', { value: 'evRangeExtender' }, 'EV Range Extender'),
-          React.createElement('option', { value: 'signalReporter' }, 'Signal Reporter')
+          React.createElement('option', { value: 'custom' }, 'Write your own code'),
+          React.createElement('optgroup', { label: 'Example Presets' },
+            React.createElement('option', { value: 'helloAos' }, 'Hello AOS — simple starter'),
+            React.createElement('option', { value: 'kuksaWriter' }, 'Signal Writer — write vehicle signals'),
+            React.createElement('option', { value: 'kuksaReader' }, 'KUKSA Reader — read vehicle signals'),
+            React.createElement('option', { value: 'evRangeExtender' }, 'EV Range Extender — battery management'),
+            React.createElement('option', { value: 'signalReporter' }, 'Signal Reporter — relay to dashboard')
+          )
         ),
+        React.createElement('span', {
+          style: { fontSize: '12px', color: '#6b7280', fontWeight: 500 },
+          title: 'The compiled binary name. Must match the "cmd" field in config.yaml (e.g. cmd: /my-app). Auto-filled when selecting a preset.'
+        }, 'App name:'),
         React.createElement('input', {
           type: 'text',
           value: appName,
           onChange: (e: any) => setAppName(e.target.value),
-          placeholder: 'App name',
+          placeholder: 'e.g. my-service',
+          title: 'Binary name for the compiled service. Must match cmd in config.yaml.',
           style: { ...styles.input, ...styles.inputSm }
         })
       )
@@ -1285,6 +1346,50 @@ export default function Page({ data, config }: PluginProps) {
           )
         ),
 
+        // Certificate Panel (collapsible)
+        React.createElement('div', { style: { ...styles.card, marginTop: '8px', padding: showAdvanced ? 0 : '8px 12px' } },
+          React.createElement('div', {
+            onClick: () => setShowAdvanced(!showAdvanced),
+            style: {
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: showAdvanced ? '8px 12px' : 0, cursor: 'pointer', userSelect: 'none'
+            }
+          },
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 500, color: '#374151' } },
+              React.createElement('span', null, '🔐'),
+              'Certificate',
+              React.createElement('span', {
+                style: {
+                  width: '8px', height: '8px', borderRadius: '50%',
+                  backgroundColor: certStatus === null ? '#d97706' : certStatus.loaded ? '#16a34a' : '#dc2626'
+                }
+              }),
+              React.createElement('span', { style: { fontSize: '11px', fontWeight: 400, color: certStatus === null ? '#d97706' : certStatus.loaded ? '#16a34a' : '#dc2626' } },
+                certStatus === null ? 'Checking...' : certStatus.loaded ? 'Loaded' : 'Missing'
+              )
+            ),
+            React.createElement('span', { style: { fontSize: '10px', color: '#9ca3af' } }, showAdvanced ? '▲ Hide' : '▼ Upload')
+          ),
+          showAdvanced && React.createElement('div', { style: { padding: '0 12px 12px', borderTop: '1px solid #f3f4f6', marginTop: '8px', paddingTop: '10px' } },
+            certError && React.createElement('div', { style: { fontSize: '12px', color: '#dc2626', marginBottom: '8px' } }, certError),
+            React.createElement('label', {
+              style: {
+                ...styles.button, ...styles.buttonSm,
+                ...(connectionStatus !== 'connected' || isUploadingCert ? styles.buttonDisabled : {}),
+                textAlign: 'center', cursor: connectionStatus === 'connected' && !isUploadingCert ? 'pointer' : 'not-allowed',
+                display: 'block'
+              }
+            },
+              React.createElement('input', {
+                type: 'file', accept: '.p12,.pfx', onChange: handleCertUpload,
+                disabled: connectionStatus !== 'connected' || isUploadingCert,
+                style: { display: 'none' }
+              }),
+              isUploadingCert ? 'Uploading...' : '📁 Upload .p12 file'
+            )
+          )
+        ),
+
         // AosCloud Service Card
         React.createElement('div', { style: { ...styles.card, marginTop: '12px' } },
           React.createElement('div', { style: styles.cardHeader },
@@ -1305,7 +1410,7 @@ export default function Page({ data, config }: PluginProps) {
               onChange: (e: any) => handleServiceChange(e.target.value),
               style: { ...styles.select, width: '100%', fontSize: '12px', padding: '6px 8px' }
             },
-              React.createElement('option', { value: '' }, aosServices.length ? '— Select service —' : 'Click ↻ to load'),
+              React.createElement('option', { value: '' }, isLoadingAosCloud ? 'Loading services...' : aosServices.length ? '— Select service —' : 'No services found'),
               ...aosServices.map((s: any) =>
                 React.createElement('option', { key: s.uuid, value: s.uuid }, s.title || s.uuid)
               )
@@ -1345,7 +1450,12 @@ export default function Page({ data, config }: PluginProps) {
             React.createElement('div', { style: styles.cardTitle },
               React.createElement('span', { style: styles.cardIcon }, '🖥️'),
               `Units (${serviceUnits.length})`
-            )
+            ),
+            React.createElement('button', {
+              onClick: () => { if (selectedServiceUuid) loadServiceDetails(selectedServiceUuid) },
+              style: styles.iconButton,
+              title: 'Refresh units status'
+            }, '↻')
           ),
           React.createElement('div', { style: { maxHeight: '150px', overflowY: 'auto' } },
             ...serviceUnits.map((u: any) =>
@@ -1467,112 +1577,47 @@ export default function Page({ data, config }: PluginProps) {
           )
         ),
 
-        // Certificate Panel
-        React.createElement('div', { style: styles.card },
-          React.createElement('div', { style: styles.cardHeader },
-            React.createElement('div', { style: styles.cardTitle },
-              React.createElement('span', { style: styles.cardIcon }, '🔐'),
-              'Certificate'
-            ),
-            React.createElement('button', {
-              onClick: checkCertificate,
-              disabled: connectionStatus !== 'connected',
-              style: styles.iconButton,
-              title: 'Check status'
-            }, '↻')
-          ),
-          React.createElement('div', { style: { padding: '12px' } },
-            // Status indicator
-            certStatus
-              ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' } },
-                  React.createElement('span', {
-                    style: {
-                      width: '10px', height: '10px', borderRadius: '50%',
-                      backgroundColor: certStatus.loaded ? '#16a34a' : '#dc2626'
-                    }
-                  }),
-                  React.createElement('span', { style: { fontSize: '13px', fontWeight: 500 } },
-                    certStatus.loaded ? 'Certificate loaded' : 'No certificate'
-                  ),
-                  certStatus.source !== 'none' && React.createElement('span', {
-                    style: {
-                      fontSize: '10px', padding: '2px 6px', borderRadius: '8px',
-                      backgroundColor: certStatus.source === 'keyvault' ? '#dbeafe' : '#f3e8ff',
-                      color: certStatus.source === 'keyvault' ? '#2563eb' : '#7c3aed'
-                    }
-                  }, certStatus.source === 'keyvault' ? 'Key Vault' : 'Manual')
-                )
-              : React.createElement('div', { style: { fontSize: '12px', color: '#6c757d', marginBottom: '10px' } },
-                  connectionStatus === 'connected' ? 'Checking...' : 'Connect to check status'
-                ),
-            // Error
-            certError && React.createElement('div', { style: { fontSize: '12px', color: '#dc2626', marginBottom: '8px' } },
-              certError
-            ),
-            // Upload button
-            React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
-              React.createElement('label', {
-                style: {
-                  ...styles.button, ...styles.buttonSm,
-                  ...(connectionStatus !== 'connected' || isUploadingCert ? styles.buttonDisabled : {}),
-                  textAlign: 'center', cursor: connectionStatus === 'connected' && !isUploadingCert ? 'pointer' : 'not-allowed'
-                }
-              },
-                React.createElement('input', {
-                  type: 'file',
-                  accept: '.p12,.pfx',
-                  onChange: handleCertUpload,
-                  disabled: connectionStatus !== 'connected' || isUploadingCert,
-                  style: { display: 'none' }
-                }),
-                isUploadingCert ? 'Uploading...' : '📁 Upload .p12 file'
-              ),
-              React.createElement('div', { style: { fontSize: '11px', color: '#9ca3af', textAlign: 'center' } },
-                'Or set AZURE_KEY_VAULT_NAME env on Docker for Key Vault'
-              )
-            )
-          )
-        )
-
       ),  // End of dockerColumn
 
-      // Middle Column - Code Editors
+      // Middle Column - Tabbed Code Editor
       React.createElement('div', { style: styles.editorsColumn },
 
-        // C++ Editor Card
-        React.createElement('div', { style: { ...styles.card, ...styles.editorCard } },
-          React.createElement('div', { style: styles.cardHeader },
-            React.createElement('div', { style: styles.cardTitle },
-              React.createElement('span', { style: styles.cardIcon }, '📄'),
-              React.createElement('span', null, 'main.cpp'),
-              React.createElement('span', { style: styles.cardBadge }, 'C++')
-            )
+        // Editor with tabs
+        React.createElement('div', { style: { ...styles.card, ...styles.editorCard, flex: 1, display: 'flex', flexDirection: 'column' as const } },
+          // Tab bar
+          React.createElement('div', { style: { display: 'flex', borderBottom: '1px solid #e5e7eb', background: '#f9fafb' } },
+            React.createElement('button', {
+              onClick: () => setActiveEditorTab('cpp'),
+              style: {
+                padding: '8px 16px', fontSize: '13px', fontWeight: 500, border: 'none', cursor: 'pointer',
+                background: activeEditorTab === 'cpp' ? '#fff' : 'transparent',
+                color: activeEditorTab === 'cpp' ? '#2563eb' : '#6b7280',
+                borderBottom: activeEditorTab === 'cpp' ? '2px solid #2563eb' : '2px solid transparent'
+              }
+            }, '📄 main.cpp'),
+            React.createElement('button', {
+              onClick: () => setActiveEditorTab('yaml'),
+              style: {
+                padding: '8px 16px', fontSize: '13px', fontWeight: 500, border: 'none', cursor: 'pointer',
+                background: activeEditorTab === 'yaml' ? '#fff' : 'transparent',
+                color: activeEditorTab === 'yaml' ? '#2563eb' : '#6b7280',
+                borderBottom: activeEditorTab === 'yaml' ? '2px solid #2563eb' : '2px solid transparent'
+              }
+            }, '⚙️ config.yaml')
           ),
-          React.createElement('textarea', {
-            style: styles.textarea,
-            value: cppCode,
-            onChange: (e: any) => setCppCode(e.target.value),
-            placeholder: '// Enter your C++ code here...',
-            spellCheck: false
-          })
-        ),
-
-        // YAML Config Card
-        React.createElement('div', { style: { ...styles.card, ...styles.editorCard } },
-          React.createElement('div', { style: styles.cardHeader },
-            React.createElement('div', { style: styles.cardTitle },
-              React.createElement('span', { style: styles.cardIcon }, '⚙️'),
-              React.createElement('span', null, 'config.yaml'),
-              React.createElement('span', { style: styles.cardBadge }, 'YAML')
-            )
-          ),
-          React.createElement('textarea', {
-            style: styles.textarea,
-            value: yamlConfig,
-            onChange: (e: any) => setYamlConfig(e.target.value),
-            placeholder: '# Enter your YAML configuration here...',
-            spellCheck: false
-          })
+          // Active editor with line numbers
+          React.createElement('div', { style: styles.editorContainer },
+            React.createElement('pre', { style: styles.lineNumbers },
+              (activeEditorTab === 'cpp' ? cppCode : yamlConfig).split('\n').map((_: string, i: number) => `${i + 1}`).join('\n')
+            ),
+            React.createElement('textarea', {
+              style: { ...styles.textarea, flex: 1 },
+              value: activeEditorTab === 'cpp' ? cppCode : yamlConfig,
+              onChange: (e: any) => activeEditorTab === 'cpp' ? setCppCode(e.target.value) : setYamlConfig(e.target.value),
+              placeholder: activeEditorTab === 'cpp' ? '// Enter your C++ code here...' : '# Enter your YAML configuration here...',
+              spellCheck: false
+            })
+          )
         ),
 
         // Action Buttons
@@ -1632,15 +1677,30 @@ export default function Page({ data, config }: PluginProps) {
       // Right Column - Status & Logs
       React.createElement('div', { style: styles.statusColumn },
 
-        // Status Card
-        buildStatus && React.createElement('div', { style: styles.card },
-          React.createElement('div', { style: styles.cardHeader },
-            React.createElement('div', { style: styles.cardTitle },
-              React.createElement('span', { style: styles.cardIcon }, '📊'),
-              'Build Status'
-            )
+        // Build Status Banner
+        buildStatus && React.createElement('div', {
+          style: {
+            padding: '10px 14px',
+            borderRadius: '8px',
+            fontSize: '13px',
+            fontWeight: 500,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            backgroundColor: buildStatus.includes('successfully') ? '#f0fdf4' :
+                             buildStatus.includes('failed') || buildStatus.includes('Error') ? '#fef2f2' : '#eff6ff',
+            color: buildStatus.includes('successfully') ? '#166534' :
+                   buildStatus.includes('failed') || buildStatus.includes('Error') ? '#991b1b' : '#1e40af',
+            border: `1px solid ${buildStatus.includes('successfully') ? '#bbf7d0' :
+                     buildStatus.includes('failed') || buildStatus.includes('Error') ? '#fecaca' : '#bfdbfe'}`
+          }
+        },
+          React.createElement('span', null,
+            buildStatus.includes('successfully') ? '✓' :
+            buildStatus.includes('failed') || buildStatus.includes('Error') ? '✗' :
+            isBuilding ? '⟳' : '●'
           ),
-          React.createElement('div', { style: styles.statusContent }, buildStatus)
+          buildStatus
         ),
 
         // Deployed Apps Card (hide when empty)
@@ -1712,23 +1772,40 @@ export default function Page({ data, config }: PluginProps) {
           )
         ),
 
-        // Service Logs Card (from AosCloud)
+        // Service Stdout Panel
         React.createElement('div', { style: { ...styles.card, ...styles.logsCard } },
           React.createElement('div', { style: styles.cardHeader },
             React.createElement('div', { style: styles.cardTitle },
               React.createElement('span', { style: styles.cardIcon }, '📡'),
-              'Service Logs'
+              'Service Output'
             ),
             React.createElement('div', { style: { display: 'flex', gap: '4px' } },
               React.createElement('button', {
-                onClick: requestServiceLog,
-                disabled: isRequestingLog || !selectedServiceUuid || !selectedMonitorUnit,
+                onClick: async () => {
+                  if (!aosServiceRef.current || !selectedMonitorUnit) return
+                  setIsRequestingLog(true)
+                  try {
+                    const unit = serviceUnits.find((u: any) => u.uid === selectedMonitorUnit)
+                    const sshPort = unit?.sshPort || 8942
+                    const res = await aosServiceRef.current.getServiceStdout(sshPort, 80)
+                    if (res.status === 'success' && res.logs) {
+                      setServiceLogs(res.logs.split('\n').filter((l: string) => l.trim()).map((l: string, i: number) => ({ id: i, text: l })))
+                    } else {
+                      setServiceLogs([{ id: 0, text: res.message || 'No output available' }])
+                    }
+                  } catch (err: any) {
+                    setServiceLogs([{ id: 0, text: `Error: ${err.message}` }])
+                  } finally {
+                    setIsRequestingLog(false)
+                  }
+                },
+                disabled: isRequestingLog || !selectedMonitorUnit,
                 style: {
                   ...styles.button, ...styles.buttonSm,
-                  ...(isRequestingLog || !selectedServiceUuid || !selectedMonitorUnit ? styles.buttonDisabled : {})
+                  ...(isRequestingLog || !selectedMonitorUnit ? styles.buttonDisabled : {})
                 },
-                title: 'Request service logs from AosCloud (last 60 min)'
-              }, isRequestingLog ? '⟳ Requesting...' : '📥 Fetch Logs'),
+                title: 'Fetch service stdout from VM'
+              }, isRequestingLog ? '⟳ Loading...' : '↻ Refresh'),
               React.createElement('button', {
                 onClick: () => setServiceLogs([]),
                 style: styles.iconButton,
@@ -1739,27 +1816,15 @@ export default function Page({ data, config }: PluginProps) {
           React.createElement('div', { style: styles.logs },
             serviceLogs.length === 0
               ? React.createElement('div', { style: styles.empty },
-                  selectedServiceUuid
-                    ? 'Click "Fetch Logs" to request service logs from the unit'
-                    : 'Select a service first'
+                  selectedMonitorUnit
+                    ? 'Click Refresh to view service output from the VM'
+                    : 'Select a unit first'
                 )
-              : serviceLogs.map((log: any, i: number) =>
+              : serviceLogs.map((log: any) =>
                   React.createElement('div', {
-                    key: log.id || i,
-                    style: styles.logEntry
-                  },
-                    React.createElement('span', {
-                      style: {
-                        color: log.state === 'ok' ? '#16a34a' : log.state === 'error' ? '#dc2626' : '#d97706',
-                        marginRight: '6px',
-                        fontSize: '10px'
-                      }
-                    }, `[${log.state || 'pending'}]`),
-                    React.createElement('span', null,
-                      `${log.serviceTitle || log.service || ''} | ${log.dateFrom ? new Date(log.dateFrom).toLocaleTimeString() : ''} - ${log.dateTill ? new Date(log.dateTill).toLocaleTimeString() : ''}`
-                    ),
-                    log.error && React.createElement('span', { style: { color: '#dc2626', marginLeft: '6px' } }, log.error)
-                  )
+                    key: log.id,
+                    style: { ...styles.logEntry, fontSize: '11px', lineHeight: 1.4 }
+                  }, log.text)
                 )
           )
         ),

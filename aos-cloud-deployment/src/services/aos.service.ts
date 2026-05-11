@@ -158,10 +158,11 @@ export class AosService {
     const messageId = 'aos-msg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9)
 
     return new Promise((resolve, reject) => {
+      const timeoutMs = cmd === 'aos_build_deploy' ? 180000 : 60000
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(messageId)
-        reject(new Error('Request timeout'))
-      }, 60000) // 60 second timeout for builds
+        reject(new Error(`Request timeout (${timeoutMs / 1000}s) — check if the Docker instance is responding`))
+      }, timeoutMs)
 
       this.pendingRequests.set(messageId, { resolve, reject, timeout })
 
@@ -310,6 +311,11 @@ export class AosService {
     return this.sendCommand('aos_get_build_status', { buildId })
   }
 
+  // Get service stdout from VM via SSH
+  async getServiceStdout(sshPort: number, lines: number = 50, filter?: string): Promise<any> {
+    return this.sendCommand('aos_get_service_stdout', { sshPort, lines, filter })
+  }
+
   // Upload a .p12 certificate to the toolchain container
   async uploadCertificate(certBase64: string, certName: string = 'aos-user-sp'): Promise<any> {
     return this.sendCommand('aos_upload_cert', { certData: certBase64, certName })
@@ -354,6 +360,7 @@ export class AosService {
 
   onDeployStatus(callback: (message: any) => void): void {
     this.messageHandlers.set('aos-deploy-status', callback)
+    this.messageHandlers.set('aos_build_deploy', callback)
   }
 
   onAppStatus(callback: (message: any) => void): void {

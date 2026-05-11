@@ -82,6 +82,14 @@ const signalServer = http.createServer((req, res) => {
   } else if (req.method === 'GET' && req.url === '/signals') {
     res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
     res.end(JSON.stringify(signalHistory.slice(-100)));
+  } else if (req.method === 'GET' && req.url.startsWith('/build-status/')) {
+    const buildId = req.url.split('/')[2];
+    const build = buildHistory.get(buildId);
+    res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
+    res.end(JSON.stringify(build || { status: 'not_found' }));
+  } else if (req.method === 'GET' && req.url === '/builds') {
+    res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
+    res.end(JSON.stringify(getBuildStatus()));
   } else {
     res.writeHead(404, corsHeaders);
     res.end();
@@ -172,6 +180,7 @@ async function main() {
         'aos_request_service_log',
         'aos_get_service_log_status',
         'aos_get_build_status',
+        'aos_get_service_stdout',
         'aos_signal_stream'
       ],
       type: 'aos-edge-toolchain',
@@ -253,6 +262,19 @@ async function main() {
         case 'aos_get_service_log_status':
           response = await handleGetServiceLogStatus(data);
           break;
+        case 'aos_get_service_stdout': {
+          const sshPort = data.sshPort || 8942;
+          const lines = data.lines || 50;
+          const filter = data.filter || 'crun|aos-service|RangeExt|Reporter|Writer';
+          try {
+            const sshCmd = `sshpass -p Password1 ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p ${sshPort} root@localhost "journalctl --no-pager -n ${lines} 2>&1 | grep -iE '${filter}'"`;
+            const { stdout } = await execAsync(sshCmd, { timeout: 15000 });
+            response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: stdout };
+          } catch (err) {
+            response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'error', message: err.message?.slice(-200) || 'SSH failed' };
+          }
+          break;
+        }
         case 'aos_get_build_status':
           response = {
             kit_id: instanceId,
@@ -389,12 +411,12 @@ function getBuildStatus(buildId) {
   return all;
 }
 
-async function handleBuildDeploy(data) {
+async function handleBuildDeploy(data, buildId) {
   const appName = data.name || 'hello-aos';
   const cppCode = data.cppCode || '';
   const yamlConfig = data.yamlConfig || '';
 
-  const buildId = crypto.randomBytes(6).toString('hex');
+  if (!buildId) buildId = crypto.randomBytes(6).toString('hex');
   const buildDir = path.join('/workspace/builds', buildId);
 
   buildHistory.set(buildId, {

@@ -124,6 +124,8 @@ aos-prov unit-new -N hpc-unit --nodes 2 --skip-check-version
 
 ### 1.3 Post-provisioning setup (required after every VM boot)
 
+**Important:** AOS services cannot be restarted individually via `systemctl restart`. If services are stuck or not connecting, you must **power cycle the entire VM** (`VBoxManage controlvm <uuid> poweroff` then `startvm`). After each boot, the fixes below must be applied before the unit can go Online on AosCloud.
+
 ```bash
 # Set SELinux to Permissive (required for crun containers)
 sshpass -p 'Password1' ssh -p <SSH_PORT> root@localhost "setenforce 0"
