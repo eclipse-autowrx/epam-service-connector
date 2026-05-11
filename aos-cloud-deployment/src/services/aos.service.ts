@@ -311,9 +311,9 @@ export class AosService {
     return this.sendCommand('aos_get_build_status', { buildId })
   }
 
-  // Get service stdout from VM via SSH
-  async getServiceStdout(sshPort: number, lines: number = 50, filter?: string): Promise<any> {
-    return this.sendCommand('aos_get_service_stdout', { sshPort, lines, filter })
+  // Get service stdout from VM via SSH or AosCloud API
+  async getServiceStdout(sshPort: number, lines: number = 50, filter?: string, serviceUuid?: string, unitUid?: string, subjectId?: string): Promise<any> {
+    return this.sendCommand('aos_get_service_stdout', { sshPort, lines, filter, serviceUuid, unitUid, subjectId })
   }
 
   // Upload a .p12 certificate to the toolchain container

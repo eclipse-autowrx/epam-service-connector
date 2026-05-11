@@ -1754,6 +1754,20 @@ export default function Page({ data, config }: PluginProps) {
               React.createElement('span', { style: styles.cardIcon }, '📋'),
               'Build Logs'
             ),
+            buildLogs.length > 0 && React.createElement('button', {
+              onClick: () => {
+                const text = buildLogs.join('\n')
+                const blob = new Blob([text], { type: 'text/plain' })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `build-log-${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.txt`
+                a.click()
+                URL.revokeObjectURL(url)
+              },
+              style: styles.iconButton,
+              title: 'Download build log'
+            }, '💾'),
             React.createElement('button', {
               onClick: () => setBuildLogs([]),
               style: styles.iconButton,
@@ -1787,7 +1801,7 @@ export default function Page({ data, config }: PluginProps) {
                   try {
                     const unit = serviceUnits.find((u: any) => u.uid === selectedMonitorUnit)
                     const sshPort = unit?.sshPort || 8942
-                    const res = await aosServiceRef.current.getServiceStdout(sshPort, 80)
+                    const res = await aosServiceRef.current.getServiceStdout(sshPort, 80, undefined, selectedServiceUuid, selectedMonitorUnit, selectedSubjectId)
                     if (res.status === 'success' && res.logs) {
                       setServiceLogs(res.logs.split('\n').filter((l: string) => l.trim()).map((l: string, i: number) => ({ id: i, text: l })))
                     } else {
@@ -1806,6 +1820,20 @@ export default function Page({ data, config }: PluginProps) {
                 },
                 title: 'Fetch service stdout from VM'
               }, isRequestingLog ? '⟳ Loading...' : '↻ Refresh'),
+              serviceLogs.length > 0 && React.createElement('button', {
+                onClick: () => {
+                  const text = serviceLogs.map((l: any) => l.text).join('\n')
+                  const blob = new Blob([text], { type: 'text/plain' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `service-log-${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.txt`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                },
+                style: styles.iconButton,
+                title: 'Download log as text file'
+              }, '💾'),
               React.createElement('button', {
                 onClick: () => setServiceLogs([]),
                 style: styles.iconButton,

@@ -267,11 +267,74 @@ async function main() {
           const lines = data.lines || 50;
           const filter = data.filter || 'crun|aos-service|RangeExt|Reporter|Writer';
           try {
+            // Check if sshpass is available (only works when broadcaster runs alongside VMs)
+            await execAsync('which sshpass', { timeout: 3000 });
             const sshCmd = `sshpass -p Password1 ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p ${sshPort} root@localhost "journalctl --no-pager -n ${lines} 2>&1 | grep -iE '${filter}'"`;
             const { stdout } = await execAsync(sshCmd, { timeout: 15000 });
             response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: stdout };
           } catch (err) {
-            response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'error', message: err.message?.slice(-200) || 'SSH failed' };
+            // Fallback: request logs via AosCloud REST API
+            try {
+              const serviceUuid = data.serviceUuid;
+              const unitUid = data.unitUid;
+              const subjectId = data.subjectId;
+              if (!serviceUuid || !unitUid || !subjectId) {
+                response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: 'Select a service and unit to fetch logs from AosCloud.' };
+                break;
+              }
+
+              // Check for existing completed log requests first
+              const existing = await curlAosCloud(`service-logs/?limit=10`);
+              const items = existing.items || [];
+              const ready = items.find(l => (l.state === 'ok' || l.state === 'done') && l.service === serviceUuid);
+
+              if (ready) {
+                // Download and extract the tar.gz log file
+                try {
+                  const tmpFile = `/tmp/service-log-${ready.id}.tar.gz`;
+                  await execAsync(
+                    `curl -k --http1.1 -o ${tmpFile} ${aoscloudUrl}/api/v10/service-logs/${ready.id}/download-log-file/ ` +
+                    `--cert ${certPath} --cert-type P12`,
+                    { env: { ...process.env }, timeout: 30000 }
+                  );
+                  // Extract and read the log content
+                  const { stdout: logContent } = await execAsync(
+                    `tar xzf ${tmpFile} -O 2>/dev/null || cat ${tmpFile}`,
+                    { timeout: 10000 }
+                  );
+                  await execAsync(`rm -f ${tmpFile}`).catch(() => {});
+                  response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: logContent || 'Log file is empty.' };
+                } catch (dlErr) {
+                  response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: `Log available (ID: ${ready.id}) but download/extract failed: ${dlErr.message?.slice(-100)}` };
+                }
+              } else {
+                // Create a new log request
+                const now = new Date();
+                const from = new Date(now.getTime() - 30 * 60000);
+                const payload = JSON.stringify({
+                  unit: unitUid,
+                  service: serviceUuid,
+                  subject: subjectId,
+                  request_type: 'log',
+                  date_from: from.toISOString(),
+                  date_till: now.toISOString()
+                });
+                try {
+                  await execAsync(
+                    `curl -k --http1.1 -X POST ${aoscloudUrl}/api/v10/service-logs/ ` +
+                    `--cert ${certPath} --cert-type P12 ` +
+                    `-H "accept: application/json" -H "Content-Type: application/json" ` +
+                    `-d '${payload}'`,
+                    { env: { ...process.env }, timeout: 15000 }
+                  );
+                  response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: 'Log request sent to AosCloud.\n\nThe unit will collect and upload logs. This may take 1-2 minutes.\nClick Refresh again to check if logs are ready.' };
+                } catch (reqErr) {
+                  response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: `Failed to request logs: ${reqErr.message?.slice(-100)}` };
+                }
+              }
+            } catch {
+              response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: 'Could not reach AosCloud. Check certificate and connectivity.' };
+            }
           }
           break;
         }
