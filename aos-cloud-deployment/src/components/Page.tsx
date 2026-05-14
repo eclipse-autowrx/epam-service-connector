@@ -1737,26 +1737,12 @@ export default function Page({ data, config }: PluginProps) {
             React.createElement('div', { style: { ...styles.cardTitle, fontSize: '13px', gap: '6px' } },
               React.createElement(Icon, { name: 'box', size: 15, color: '#2563eb' }),
               'Docker',
-              React.createElement('span', { style: { fontSize: '11px', fontWeight: 400, color: '#6b7280' } },
-                ` · ${onlineCount}/${dockerInstances.length} online`
-              )
+              React.createElement('span', {
+                style: { fontSize: '11px', fontWeight: 400, color: '#6b7280' },
+                title: `${onlineCount} of ${dockerInstances.length} broadcasters reachable`
+              }, ` · ${onlineCount} online`)
             ),
             React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-              React.createElement('label', {
-                style: {
-                  display: 'flex', alignItems: 'center', gap: '4px',
-                  fontSize: '11px', color: '#6b7280', cursor: 'pointer', userSelect: 'none'
-                },
-                title: 'Show only online instances'
-              },
-                React.createElement('input', {
-                  type: 'checkbox',
-                  checked: filterOnline,
-                  onChange: (e: any) => setFilterOnline(e.target.checked),
-                  style: { cursor: 'pointer', margin: 0 }
-                }),
-                'Online'
-              ),
               React.createElement('button', {
                 onClick: () => fetchDockerInstances(),
                 style: { ...styles.iconButton, width: '22px', height: '22px', fontSize: '12px' },
