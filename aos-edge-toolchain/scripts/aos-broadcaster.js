@@ -1029,27 +1029,58 @@ async function handleGetUnitMonitoring(data) {
   try {
     const result = await curlAosCloud(`units/${unitUid}/monitoring/`);
 
-    if (result.message && !result.nodes) {
+    // Detect explicit error envelope (rare; usually the call either 200s with an
+    // array of nodes, or curlAosCloud throws).
+    if (!Array.isArray(result) && result && result.message && !result.nodes) {
       return { kit_id: instanceId, type: 'aos_get_unit_monitoring', status: 'error', message: result.message };
     }
 
-    const node = (result.nodes || [])[0] || {};
-    const services = node.services || result.services || [];
+    // Real shape from /api/v10/units/<uid>/monitoring/:
+    //   [ { cpu:[{value,measurementType,nodeId,...}], ram:[...], disk:[{partition,value,...}], ... },
+    //     { ...secondary node... }, {} ]
+    // Each metric is a *time-series array* of measurements; we want the most
+    // recent "node"-level entry. Service-level entries are surfaced separately.
+    const nodes = Array.isArray(result) ? result : (result.nodes || []);
+    const node  = nodes[0] || {};
+
+    const pickNode = (arr) => (arr || []).find((m) => m.measurementType === 'node');
+
+    const cpuM = pickNode(node.cpu);
+    const ramM = pickNode(node.ram);
+
+    // Disk: AosCore reports several partitions ("var", "workdirs", "states",
+    // "storages"). Sum the user-visible writable partitions; the others are
+    // usually negligible read-only mounts.
+    const diskUsed = (node.disk || [])
+      .filter((m) => m.measurementType === 'node' && ['var', 'workdirs'].includes(m.partition))
+      .reduce((s, m) => s + (m.value || 0), 0);
+
+    // Service-level CPU/RAM (per service-instance running on this unit).
+    const serviceMap = new Map();
+    const collect = (arr, key) => {
+      for (const m of (arr || [])) {
+        if (m.measurementType !== 'service' || !m.serviceId) continue;
+        const k = m.serviceId;
+        if (!serviceMap.has(k)) serviceMap.set(k, { id: k, cpu: 0, ram: 0 });
+        if (key === 'cpu') serviceMap.get(k).cpu = m.value || 0;
+        if (key === 'ram') serviceMap.get(k).ram = m.value || 0;
+      }
+    };
+    collect(node.cpu, 'cpu');
+    collect(node.ram, 'ram');
+    const services = Array.from(serviceMap.values());
 
     return {
       kit_id: instanceId,
       type: 'aos_get_unit_monitoring',
       status: 'success',
       unitUid,
-      cpu: node.cpu || result.cpu || 0,
-      ram: { used: node.ram_used || 0, total: node.ram_total || 0 },
-      disk: { used: node.disk_used || 0, total: node.disk_total || 0 },
-      services: services.map((s) => ({
-        id: s.service_id || s.id,
-        name: s.name || s.service_id,
-        cpu: s.cpu || 0,
-        ram: s.ram || 0
-      })),
+      cpu: cpuM ? cpuM.value : 0,
+      // Totals are not present in the monitoring response; UI falls back to
+      // showing absolute values (in MB) when total === 0.
+      ram:  { used: ramM ? ramM.value : 0, total: 0 },
+      disk: { used: diskUsed, total: 0 },
+      services,
       raw: result
     };
   } catch (error) {

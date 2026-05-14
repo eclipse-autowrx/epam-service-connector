@@ -94,6 +94,48 @@ export default function Page({ data, config }: PluginProps) {
   const buildLogsRef = React.useRef<HTMLDivElement>(null)
   const pollingIntervalRef = React.useRef<any>(null)
 
+  // Unit-detail overlay: opened when the user clicks a unit row. Holds the
+  // uid of the unit to show details for; null = closed.
+  const [detailUnitUid, setDetailUnitUid] = React.useState<string | null>(null)
+
+  // Lucide-style line icons. Path strings copied from lucide.dev (the same
+  // set the host uses). Multiple subpaths joined with '|'. Renders as a 24x24
+  // viewBox SVG with currentColor stroke — colour and size controlled by the
+  // caller via props or ambient CSS.
+  const ICONS: Record<string, string> = {
+    'container':       'M22 7.7c0-.6-.4-1.2-.8-1.5l-6.3-3.9a1.7 1.7 0 0 0-1.8 0l-10.3 6c-.5.2-.8.8-.8 1.4v6.6c0 .5.3 1.2.8 1.5l6.3 3.9a1.7 1.7 0 0 0 1.8 0l10.3-6c.5-.3.8-1 .8-1.5Z|M10 21.9V14L2.1 9.1|M10 14l11.9-6.9|M14 19.5V8.5',
+    'shield-check':    'M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.79 17 5 19 5a1 1 0 0 1 1 1z|m9 12 2 2 4-4',
+    'cloud':           'M17.5 19a4.5 4.5 0 1 0 0-9c0-3.31-2.69-6-6-6a6 6 0 0 0-5.29 8.79c-1.43.95-2.21 2.65-2.21 4.21a4 4 0 0 0 4 4z',
+    'server':          'M5 12h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z|M5 4h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z|M6 8h.01|M6 16h.01',
+    'clipboard-list':  'M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2|M15 2H9a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1z|M12 11h4|M12 16h4|M8 11h.01|M8 16h.01',
+    'rocket':          'M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z|m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z|M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0|M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5',
+    'activity':        'M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.5.5 0 0 1-.96 0L9.68 3.18a.5.5 0 0 0-.96 0l-2.35 8.36A2 2 0 0 1 4.45 13H2',
+    'triangle-alert':  'm21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3z|M12 9v4|M12 17h.01',
+    'file-code':       'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z|M14 2v4a2 2 0 0 0 2 2h4|m9 18 3-3-3-3|m5 12-3 3 3 3',
+    'settings':        'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z|M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+    'refresh':         'M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8|M21 3v5h-5|M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16|M8 16H3v5',
+    'x':               'M18 6 6 18|m6 6 12 12',
+    'upload':          'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4|M17 8l-5-5-5 5|M12 3v12',
+    'trash':           'M3 6h18|m19 6-1.4 14a2 2 0 0 1-2 1.8H8.4a2 2 0 0 1-2-1.8L5 6|M10 11v6|M14 11v6|M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2',
+    'copy':            'M16 2H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z|M4 6c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2',
+    'check':           'M20 6 9 17l-5-5',
+    'chevron-down':    'm6 9 6 6 6-6',
+    'chevron-up':      'm18 15-6-6-6 6',
+    'maximize':        'M8 3H5a2 2 0 0 0-2 2v3|M21 8V5a2 2 0 0 0-2-2h-3|M3 16v3a2 2 0 0 0 2 2h3|M16 21h3a2 2 0 0 0 2-2v-3'
+  }
+  const Icon = ({ name, size = 16, stroke = 2, color = 'currentColor', style }: { name: string; size?: number; stroke?: number; color?: string; style?: any }) => {
+    const d = ICONS[name]
+    if (!d) return null
+    return React.createElement('svg', {
+      width: size, height: size, viewBox: '0 0 24 24',
+      fill: 'none', stroke: color, strokeWidth: stroke,
+      strokeLinecap: 'round', strokeLinejoin: 'round',
+      style: { display: 'inline-block', flexShrink: 0, verticalAlign: 'middle', ...(style || {}) }
+    }, ...d.split('|').map((p: string, i: number) =>
+      React.createElement('path', { key: i, d: p })
+    ))
+  }
+
   // Styles
   const styles = {
     page: {
@@ -314,7 +356,8 @@ export default function Page({ data, config }: PluginProps) {
       border: '2px solid rgba(255, 255, 255, 0.3)',
       borderTopColor: 'white',
       borderRadius: '50%',
-      animation: 'spin 0.8s linear infinite'
+      animation: 'aos-spin 0.8s linear infinite',
+      display: 'inline-block'
     },
     statusContent: {
       padding: '12px 16px',
@@ -1122,6 +1165,16 @@ export default function Page({ data, config }: PluginProps) {
         setBuildStatus('Build completed successfully!')
         setIsBuilding(false)
         refreshApps()
+        // Refresh the AosCloud Service card so the new version shows up
+        // (and, if auto-inc is on, the editor bumps to the next version
+        // ready for the next build). Small delay gives AosCloud a moment
+        // to register the freshly uploaded version.
+        if (selectedServiceUuid) {
+          setTimeout(() => {
+            loadServiceDetails(selectedServiceUuid)
+            addLog('[AosCloud] Refreshed service versions and units')
+          }, 1000)
+        }
       } else if (response.status === 'error') {
         const lastLog = (response.message || '').split('\n').filter((l: string) => l.trim()).pop() || 'Unknown error'
         setBuildStatus(`Build failed: ${lastLog.replace(/^\[.*?\]\s*/, '').slice(0, 80)}`)
@@ -1229,6 +1282,15 @@ export default function Page({ data, config }: PluginProps) {
 
   return React.createElement('div', { style: styles.page },
 
+    // Global keyframes for build-progress animations. Injected once; the GPU
+    // handles painting on the compositor thread, so there is no JS cost while
+    // animations run.
+    React.createElement('style', null,
+      '@keyframes aos-spin { to { transform: rotate(360deg); } }' +
+      '@keyframes aos-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }' +
+      '@keyframes aos-bar { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }'
+    ),
+
     // Quick Guide Overlay
     showGuide && React.createElement('div', {
       style: {
@@ -1302,6 +1364,209 @@ export default function Page({ data, config }: PluginProps) {
       )
     ),
 
+    // Unit Detail Overlay — opens when user clicks a unit row in the Units
+    // card. Shows that unit's monitoring + alerts in a focused, scrollable
+    // modal. Closes on backdrop click or ✕ Close button. The Clear button
+    // empties the alert list (does NOT close the alerts area).
+    detailUnitUid && React.createElement('div', {
+      onClick: () => setDetailUnitUid(null),
+      style: {
+        position: 'fixed' as const, inset: 0, zIndex: 1000,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '20px'
+      }
+    },
+      React.createElement('div', {
+        onClick: (e: any) => e.stopPropagation(),
+        style: {
+          backgroundColor: 'white', borderRadius: '12px',
+          width: '640px', maxWidth: '95vw', maxHeight: '85vh',
+          display: 'flex', flexDirection: 'column' as const,
+          boxShadow: '0 20px 60px rgba(0,0,0,0.3)', overflow: 'hidden' as const
+        }
+      },
+        // Modal header
+        React.createElement('div', {
+          style: {
+            display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+            gap: '12px',
+            padding: '14px 18px', borderBottom: '1px solid #e5e7eb', flexShrink: 0
+          }
+        },
+          (() => {
+            const u = serviceUnits.find((x: any) => x.uid === detailUnitUid)
+            const shortUid = (detailUnitUid || '').length > 12 ? (detailUnitUid || '').substring(0, 8) + '…' : (detailUnitUid || '')
+            const chip = (bg: string, fg: string, text: string, title?: string) =>
+              React.createElement('span', {
+                title,
+                style: {
+                  fontSize: '11px', padding: '2px 8px', borderRadius: '10px',
+                  backgroundColor: bg, color: fg, whiteSpace: 'nowrap' as const,
+                  display: 'inline-flex', alignItems: 'center', gap: '4px'
+                }
+              }, text)
+            return React.createElement('div', { style: { display: 'flex', alignItems: 'flex-start', gap: '10px', minWidth: 0, flex: 1 } },
+              React.createElement(Icon, { name: 'server', size: 22, color: '#6366f1', style: { marginTop: '2px' } }),
+              React.createElement('div', { style: { minWidth: 0, flex: 1 } },
+                React.createElement('div', { style: { fontSize: '14px', fontWeight: 600, color: '#1f2937', wordBreak: 'break-word' as const } }, u?.name || 'Unit'),
+                React.createElement('div', {
+                  style: { display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', flexWrap: 'wrap' as const }
+                },
+                  // Short UID + copy
+                  React.createElement('span', {
+                    style: {
+                      fontSize: '11px', fontFamily: 'monospace',
+                      backgroundColor: '#f3f4f6', color: '#374151',
+                      padding: '2px 8px', borderRadius: '10px',
+                      display: 'inline-flex', alignItems: 'center', gap: '4px'
+                    },
+                    title: detailUnitUid || ''
+                  },
+                    shortUid,
+                    React.createElement('button', {
+                      onClick: () => { if (detailUnitUid) { navigator.clipboard.writeText(detailUnitUid); addLog(`[Copied] Unit UID: ${detailUnitUid}`) } },
+                      style: { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '11px', padding: 0 },
+                      title: 'Copy full UID'
+                    }, '📋')
+                  ),
+                  u?.version && chip('#dbeafe', '#1d4ed8', `v${u.version}`),
+                  u && chip(u.online ? '#dcfce7' : '#fee2e2', u.online ? '#16a34a' : '#dc2626', u.online ? '●Online' : '●Offline')
+                )
+              )
+            )
+          })(),
+          React.createElement('button', {
+            onClick: () => setDetailUnitUid(null),
+            style: { border: 'none', background: 'none', fontSize: '14px', cursor: 'pointer', color: '#6b7280', padding: '4px 8px', flexShrink: 0, whiteSpace: 'nowrap' as const, display: 'inline-flex', alignItems: 'center', gap: '4px' },
+            title: 'Close'
+          },
+            React.createElement(Icon, { name: 'x', size: 14 }),
+            'Close'
+          )
+        ),
+        // Modal body — scrollable
+        React.createElement('div', {
+          style: {
+            padding: '14px 18px', overflowY: 'auto' as const, flex: 1,
+            display: 'flex', flexDirection: 'column' as const, gap: '14px'
+          }
+        },
+          // Monitoring section
+          React.createElement('div', null,
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' } },
+              React.createElement('div', { style: { fontSize: '12px', fontWeight: 600, color: '#374151', display: 'flex', alignItems: 'center', gap: '6px' } },
+                React.createElement(Icon, { name: 'activity', size: 14, color: '#3b82f6' }),
+                'Resource Monitoring'
+              ),
+              React.createElement('button', {
+                onClick: () => loadUnitMonitoring(detailUnitUid),
+                style: { ...styles.iconButton, width: '22px', height: '22px', fontSize: '12px' },
+                title: 'Refresh'
+              }, '↻')
+            ),
+            !unitMonitoring
+              ? React.createElement('div', { style: { fontSize: '12px', color: '#6b7280', fontStyle: 'italic' as const } }, 'Loading…')
+              : unitMonitoring.status === 'error'
+                ? React.createElement('div', { style: { fontSize: '12px', color: '#6b7280', fontStyle: 'italic' as const } },
+                    unitMonitoring.message?.includes('forbidden')
+                      ? 'No monitoring data — your service may not be running on this unit'
+                      : (unitMonitoring.message || 'Unavailable')
+                  )
+                : (() => {
+                    const fmtMB = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`
+                    const ramUsed = unitMonitoring.ram?.used || 0
+                    const diskUsed = unitMonitoring.disk?.used || 0
+                    const cpuVal = unitMonitoring.cpu || 0
+                    // AosCore reports CPU as the sum of all-core percentages
+                    // (Linux "Solaris-mode-off" convention — same as `top`).
+                    // So a 4-core unit can legitimately report up to 400 %.
+                    // We label it accordingly and don't pretend it's per-core.
+                    const isMultiCore = cpuVal > 100
+                    return React.createElement('div', { style: { display: 'flex', flexDirection: 'column' as const, gap: '8px' } },
+                      // CPU
+                      React.createElement('div', null,
+                        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '3px' } },
+                          React.createElement('span', {
+                            style: { color: '#6b7280' },
+                            title: 'Total CPU usage across all cores. Values >100 % mean more than one core is busy.'
+                          }, isMultiCore ? 'CPU (all cores)' : 'CPU'),
+                          React.createElement('span', { style: { fontWeight: 500 } },
+                            isMultiCore
+                              ? `${Math.round(cpuVal)} % (≈${(cpuVal / 100).toFixed(1)} cores)`
+                              : `${Math.round(cpuVal)} %`
+                          )
+                        ),
+                        React.createElement('div', { style: { height: '6px', backgroundColor: '#e5e7eb', borderRadius: '3px', overflow: 'hidden' as const } },
+                          React.createElement('div', { style: {
+                            height: '100%',
+                            // For >100 %, scale the bar against an 8-core ceiling (800 %).
+                            // Caps at 100 % bar width; gives a visual sense of "very busy".
+                            width: `${Math.min((cpuVal / (isMultiCore ? 800 : 100)) * 100, 100)}%`,
+                            backgroundColor: cpuVal > 80 ? '#dc2626' : '#3b82f6',
+                            borderRadius: '3px', transition: 'width 0.3s'
+                          } })
+                        )
+                      ),
+                      // RAM
+                      React.createElement('div', null,
+                        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '3px' } },
+                          React.createElement('span', { style: { color: '#6b7280' } }, 'RAM'),
+                          React.createElement('span', { style: { fontWeight: 500 } }, ramUsed ? fmtMB(ramUsed) : '—')
+                        )
+                      ),
+                      // Disk
+                      React.createElement('div', null,
+                        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '3px' } },
+                          React.createElement('span', { style: { color: '#6b7280' } }, 'Disk'),
+                          React.createElement('span', { style: { fontWeight: 500 } }, diskUsed ? fmtMB(diskUsed) : '—')
+                        )
+                      )
+                    )
+                  })()
+          ),
+          // Alerts section
+          React.createElement('div', null,
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' } },
+              React.createElement('div', { style: { fontSize: '12px', fontWeight: 600, color: '#374151', display: 'flex', alignItems: 'center', gap: '6px' } },
+                React.createElement(Icon, { name: 'triangle-alert', size: 14, color: '#d97706' }),
+                `Alerts (${alerts.length})`
+              ),
+              alerts.length > 0 && React.createElement('button', {
+                onClick: () => { setAlerts([]); addLog('[Alerts] Cleared') },
+                style: {
+                  fontSize: '11px', padding: '3px 10px', cursor: 'pointer',
+                  border: '1px solid #fca5a5', borderRadius: '4px',
+                  background: 'white', color: '#dc2626',
+                  display: 'flex', alignItems: 'center', gap: '4px'
+                },
+                title: 'Clear all alerts from the list'
+              },
+                React.createElement(Icon, { name: 'trash', size: 12 }),
+                'Clear'
+              )
+            ),
+            alerts.length === 0
+              ? React.createElement('div', { style: { fontSize: '12px', color: '#6b7280', fontStyle: 'italic' as const } }, 'No alerts')
+              : React.createElement('div', { style: { maxHeight: '220px', overflowY: 'auto' as const, border: '1px solid #f3f4f6', borderRadius: '6px' } },
+                  ...alerts.map((a: any, i: number) =>
+                    React.createElement('div', {
+                      key: a.id || i,
+                      style: { padding: '8px 10px', borderBottom: '1px solid #f3f4f6', fontSize: '11px' }
+                    },
+                      React.createElement('div', { style: { color: '#dc2626', fontWeight: 500 } }, a.tag || 'Alert'),
+                      React.createElement('div', { style: { color: '#6b7280', marginTop: '2px' } },
+                        typeof a.message === 'string' ? a.message : JSON.stringify(a.message)
+                      ),
+                      a.timestamp && React.createElement('div', { style: { color: '#9ca3af', marginTop: '2px', fontSize: '10px' } }, a.timestamp)
+                    )
+                  )
+                )
+          )
+        )
+      )
+    ),
+
     // Header
     React.createElement('header', { style: styles.header },
       React.createElement('div', { style: styles.headerLeft },
@@ -1356,7 +1621,7 @@ export default function Page({ data, config }: PluginProps) {
           // Compact header: title + count + filter toggle + refresh, all on one row
           React.createElement('div', { style: { ...styles.cardHeader, padding: '8px 12px' } },
             React.createElement('div', { style: { ...styles.cardTitle, fontSize: '13px', gap: '6px' } },
-              React.createElement('span', { style: { fontSize: '14px' } }, '🐳'),
+              React.createElement(Icon, { name: 'container', size: 15, color: '#2563eb' }),
               'Docker',
               React.createElement('span', { style: { fontSize: '11px', fontWeight: 400, color: '#6b7280' } },
                 ` · ${onlineCount}/${dockerInstances.length} online`
@@ -1421,23 +1686,47 @@ export default function Page({ data, config }: PluginProps) {
             onClick: () => setShowAdvanced(!showAdvanced),
             style: {
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: showAdvanced ? '8px 12px' : 0, cursor: 'pointer', userSelect: 'none'
+              padding: showAdvanced ? '8px 12px' : 0, cursor: 'pointer', userSelect: 'none',
+              gap: '8px'
             }
           },
-            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 500, color: '#374151' } },
-              React.createElement('span', null, '🔐'),
-              'Certificate',
+            React.createElement('div', {
+              style: {
+                display: 'flex', alignItems: 'center', gap: '6px',
+                fontSize: '13px', fontWeight: 500, color: '#374151',
+                minWidth: 0, flex: 1
+              }
+            },
+              React.createElement(Icon, { name: 'shield-check', size: 15, color: '#0891b2' }),
+              React.createElement('span', { style: { flexShrink: 0 } }, 'Certificate'),
               React.createElement('span', {
                 style: {
-                  width: '8px', height: '8px', borderRadius: '50%',
+                  width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0,
                   backgroundColor: certStatus === null ? '#d97706' : certStatus.loaded ? '#16a34a' : '#dc2626'
                 }
               }),
-              React.createElement('span', { style: { fontSize: '11px', fontWeight: 400, color: certStatus === null ? '#d97706' : certStatus.loaded ? '#16a34a' : '#dc2626' } },
-                certStatus === null ? 'Checking...' : certStatus.loaded ? 'Loaded' : 'Missing'
+              React.createElement('span', {
+                title: certStatus === null ? 'Checking certificate…' : certStatus.loaded ? 'Certificate loaded' : 'No certificate',
+                style: {
+                  fontSize: '11px', fontWeight: 400,
+                  color: certStatus === null ? '#d97706' : certStatus.loaded ? '#16a34a' : '#dc2626',
+                  whiteSpace: 'nowrap' as const, overflow: 'hidden' as const, textOverflow: 'ellipsis' as const
+                }
+              },
+                certStatus === null ? 'Checking…' : certStatus.loaded ? 'Loaded' : 'Missing'
               )
             ),
-            React.createElement('span', { style: { fontSize: '10px', color: '#9ca3af' } }, showAdvanced ? '▲ Hide' : '▼ Upload / replace .p12')
+            React.createElement('span', {
+              title: showAdvanced ? 'Collapse' : 'Upload / replace .p12',
+              style: {
+                fontSize: '11px', color: '#6b7280', flexShrink: 0,
+                whiteSpace: 'nowrap' as const,
+                display: 'inline-flex', alignItems: 'center', gap: '4px'
+              }
+            },
+              React.createElement(Icon, { name: showAdvanced ? 'chevron-up' : 'chevron-down', size: 12 }),
+              showAdvanced ? '' : 'Manage'
+            )
           ),
           showAdvanced && React.createElement('div', { style: { padding: '0 12px 12px', borderTop: '1px solid #f3f4f6', marginTop: '8px', paddingTop: '10px' } },
             React.createElement('div', {
@@ -1448,7 +1737,7 @@ export default function Page({ data, config }: PluginProps) {
                 display: 'flex', alignItems: 'flex-start', gap: '6px'
               }
             },
-              React.createElement('span', { style: { flexShrink: 0 } }, '⚠️'),
+              React.createElement(Icon, { name: 'triangle-alert', size: 14, color: '#d97706', style: { marginTop: '1px' } }),
               React.createElement('span', null,
                 'Upload your own .p12 to sign and deploy services under your AosCloud identity. ' +
                 'Replaces any previously uploaded certificate on this broadcaster.'
@@ -1483,7 +1772,12 @@ export default function Page({ data, config }: PluginProps) {
                   disabled: connectionStatus !== 'connected' || isUploadingCert || isRemovingCert,
                   style: { display: 'none' }
                 }),
-                isUploadingCert ? 'Uploading...' : (certStatus?.loaded ? '📁 Replace .p12' : '📁 Upload .p12')
+                isUploadingCert
+                  ? 'Uploading...'
+                  : React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '6px', justifyContent: 'center' } },
+                      React.createElement(Icon, { name: 'upload', size: 14 }),
+                      certStatus?.loaded ? 'Replace .p12' : 'Upload .p12'
+                    )
               ),
               certStatus?.loaded && React.createElement('button', {
                 onClick: handleCertRemove,
@@ -1491,10 +1785,18 @@ export default function Page({ data, config }: PluginProps) {
                 style: {
                   ...styles.button, ...styles.buttonSm,
                   ...(connectionStatus !== 'connected' || isUploadingCert || isRemovingCert ? styles.buttonDisabled : {}),
-                  backgroundColor: 'transparent', color: '#dc2626', border: '1px solid #fca5a5'
+                  backgroundColor: 'transparent', color: '#dc2626', border: '1px solid #fca5a5',
+                  display: 'inline-flex', alignItems: 'center', gap: '6px', justifyContent: 'center'
                 },
                 title: 'Delete the uploaded certificate from the broadcaster'
-              }, isRemovingCert ? 'Removing...' : '✕ Remove')
+              },
+                isRemovingCert
+                  ? 'Removing...'
+                  : React.createElement(React.Fragment, null,
+                      React.createElement(Icon, { name: 'x', size: 14 }),
+                      'Remove'
+                    )
+              )
             )
           )
         ),
@@ -1503,7 +1805,7 @@ export default function Page({ data, config }: PluginProps) {
         React.createElement('div', { style: styles.card },
           React.createElement('div', { style: styles.cardHeader },
             React.createElement('div', { style: styles.cardTitle },
-              React.createElement('span', { style: styles.cardIcon }, '☁️'),
+              React.createElement(Icon, { name: 'cloud', size: 16, color: '#3b82f6' }),
               'AosCloud Service'
             ),
             React.createElement('button', {
@@ -1540,14 +1842,21 @@ export default function Page({ data, config }: PluginProps) {
               'Auto-sync service_uid to config.yaml'
             ),
             serviceName && React.createElement('div', {
-              style: { display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px' }
+              style: { display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px', minWidth: 0 }
             },
-              React.createElement('span', { style: { fontSize: '11px', color: '#6c757d', fontFamily: 'monospace' } },
-                selectedServiceUuid.substring(0, 8) + '...'
-              ),
+              React.createElement('span', {
+                title: selectedServiceUuid,
+                style: {
+                  fontSize: '11px', color: '#6c757d', fontFamily: 'monospace',
+                  flex: 1, minWidth: 0,
+                  whiteSpace: 'nowrap' as const,
+                  overflow: 'hidden' as const,
+                  textOverflow: 'ellipsis' as const
+                }
+              }, selectedServiceUuid),
               React.createElement('button', {
                 onClick: () => { navigator.clipboard.writeText(selectedServiceUuid); addLog(`[Copied] Service UUID: ${selectedServiceUuid}`) },
-                style: { ...styles.iconButton, width: '20px', height: '20px', fontSize: '11px' },
+                style: { ...styles.iconButton, width: '20px', height: '20px', fontSize: '11px', flexShrink: 0 },
                 title: selectedServiceUuid
               }, '📋')
             ),
@@ -1572,8 +1881,11 @@ export default function Page({ data, config }: PluginProps) {
         serviceUnits.length > 0 && React.createElement('div', { style: styles.card },
           React.createElement('div', { style: styles.cardHeader },
             React.createElement('div', { style: styles.cardTitle },
-              React.createElement('span', { style: styles.cardIcon }, '🖥️'),
-              `Units (${serviceUnits.length})`
+              React.createElement(Icon, { name: 'server', size: 16, color: '#6366f1' }),
+              `Units (${serviceUnits.length})`,
+              React.createElement('span', {
+                style: { fontSize: '10px', fontWeight: 400, color: '#9ca3af', marginLeft: '4px' }
+              }, '— click for details')
             ),
             React.createElement('button', {
               onClick: () => { if (selectedServiceUuid) loadServiceDetails(selectedServiceUuid) },
@@ -1585,11 +1897,19 @@ export default function Page({ data, config }: PluginProps) {
             ...serviceUnits.map((u: any) =>
               React.createElement('div', {
                 key: u.uid,
-                onClick: () => loadUnitMonitoring(u.uid),
+                onClick: () => { loadUnitMonitoring(u.uid); setDetailUnitUid(u.uid) },
+                onMouseEnter: (e: any) => {
+                  if (selectedMonitorUnit !== u.uid) e.currentTarget.style.backgroundColor = '#f9fafb'
+                },
+                onMouseLeave: (e: any) => {
+                  e.currentTarget.style.backgroundColor = selectedMonitorUnit === u.uid ? '#f0f7ff' : 'transparent'
+                },
+                title: 'Click to view monitoring + alerts',
                 style: {
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6',
-                  backgroundColor: selectedMonitorUnit === u.uid ? '#f0f7ff' : 'transparent'
+                  backgroundColor: selectedMonitorUnit === u.uid ? '#f0f7ff' : 'transparent',
+                  transition: 'background-color 0.15s'
                 }
               },
                 React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 } },
@@ -1609,102 +1929,20 @@ export default function Page({ data, config }: PluginProps) {
                   }, `v${u.version}`),
                   u.error && React.createElement('span', {
                     style: { fontSize: '10px', color: '#dc2626' }, title: u.error
-                  }, '⚠')
+                  }, '⚠'),
+                  // Click affordance — chevron makes the row obviously expandable
+                  React.createElement('span', {
+                    style: { fontSize: '12px', color: '#9ca3af', flexShrink: 0, marginLeft: '2px' },
+                    title: 'Click to open details'
+                  }, '›')
                 )
               )
             )
           )
         ),
 
-        // Unit Monitoring (hide when error/forbidden)
-        unitMonitoring && unitMonitoring.status !== 'error' && React.createElement('div', { style: styles.card },
-          React.createElement('div', { style: styles.cardHeader },
-            React.createElement('div', { style: styles.cardTitle },
-              React.createElement('span', { style: styles.cardIcon }, '📈'),
-              'Monitoring'
-            ),
-            React.createElement('button', {
-              onClick: () => loadUnitMonitoring(selectedMonitorUnit),
-              style: styles.iconButton, title: 'Refresh'
-            }, '↻')
-          ),
-          unitMonitoring.status === 'error'
-          ? React.createElement('div', { style: { padding: '12px', fontSize: '12px', color: '#6c757d', textAlign: 'center' } },
-              unitMonitoring.message?.includes('forbidden') ? 'Monitoring not available with current certificate' : (unitMonitoring.message || 'Unavailable')
-            )
-          : React.createElement('div', { style: { padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '8px' } },
-            // CPU bar
-            React.createElement('div', null,
-              React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '3px' } },
-                React.createElement('span', { style: { color: '#6c757d' } }, 'CPU'),
-                React.createElement('span', { style: { fontWeight: 500 } }, `${Math.round(unitMonitoring.cpu || 0)}%`)
-              ),
-              React.createElement('div', { style: { height: '6px', backgroundColor: '#e5e7eb', borderRadius: '3px', overflow: 'hidden' } },
-                React.createElement('div', { style: { height: '100%', width: `${Math.min(unitMonitoring.cpu || 0, 100)}%`, backgroundColor: (unitMonitoring.cpu || 0) > 80 ? '#dc2626' : '#3b82f6', borderRadius: '3px', transition: 'width 0.3s' } })
-              )
-            ),
-            // RAM bar
-            React.createElement('div', null,
-              React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '3px' } },
-                React.createElement('span', { style: { color: '#6c757d' } }, 'RAM'),
-                React.createElement('span', { style: { fontWeight: 500 } },
-                  unitMonitoring.ram?.total ? `${Math.round((unitMonitoring.ram.used / unitMonitoring.ram.total) * 100)}%` : '—'
-                )
-              ),
-              React.createElement('div', { style: { height: '6px', backgroundColor: '#e5e7eb', borderRadius: '3px', overflow: 'hidden' } },
-                React.createElement('div', { style: {
-                  height: '100%',
-                  width: unitMonitoring.ram?.total ? `${Math.min((unitMonitoring.ram.used / unitMonitoring.ram.total) * 100, 100)}%` : '0%',
-                  backgroundColor: '#8b5cf6', borderRadius: '3px', transition: 'width 0.3s'
-                } })
-              )
-            ),
-            // Disk bar
-            React.createElement('div', null,
-              React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '3px' } },
-                React.createElement('span', { style: { color: '#6c757d' } }, 'Disk'),
-                React.createElement('span', { style: { fontWeight: 500 } },
-                  unitMonitoring.disk?.total ? `${Math.round((unitMonitoring.disk.used / unitMonitoring.disk.total) * 100)}%` : '—'
-                )
-              ),
-              React.createElement('div', { style: { height: '6px', backgroundColor: '#e5e7eb', borderRadius: '3px', overflow: 'hidden' } },
-                React.createElement('div', { style: {
-                  height: '100%',
-                  width: unitMonitoring.disk?.total ? `${Math.min((unitMonitoring.disk.used / unitMonitoring.disk.total) * 100, 100)}%` : '0%',
-                  backgroundColor: '#f59e0b', borderRadius: '3px', transition: 'width 0.3s'
-                } })
-              )
-            )
-          )
-        ),
-
-        // Alerts
-        alerts.length > 0 && React.createElement('div', { style: styles.card },
-          React.createElement('div', { style: styles.cardHeader },
-            React.createElement('div', { style: styles.cardTitle },
-              React.createElement('span', { style: styles.cardIcon }, '⚠️'),
-              `Alerts (${alerts.length})`
-            ),
-            React.createElement('button', {
-              onClick: () => setAlerts([]),
-              style: styles.iconButton,
-              title: 'Clear alerts'
-            }, '✕')
-          ),
-          React.createElement('div', { style: { maxHeight: '120px', overflowY: 'auto' } },
-            ...alerts.slice(0, 8).map((a: any, i: number) =>
-              React.createElement('div', {
-                key: a.id || i,
-                style: { padding: '6px 12px', borderBottom: '1px solid #f3f4f6', fontSize: '11px' }
-              },
-                React.createElement('div', { style: { color: '#dc2626', fontWeight: 500 } }, a.tag || 'Alert'),
-                React.createElement('div', { style: { color: '#6c757d', marginTop: '2px' } },
-                  typeof a.message === 'string' ? a.message.substring(0, 80) : JSON.stringify(a.message).substring(0, 80)
-                )
-              )
-            )
-          )
-        ),
+        // Monitoring + Alerts moved to the Unit Detail overlay (opens on
+        // unit-row click) to avoid duplication with the inline cards.
 
       ),  // End of dockerColumn
 
@@ -1721,18 +1959,26 @@ export default function Page({ data, config }: PluginProps) {
                 padding: '8px 16px', fontSize: '13px', fontWeight: 500, border: 'none', cursor: 'pointer',
                 background: activeEditorTab === 'cpp' ? '#fff' : 'transparent',
                 color: activeEditorTab === 'cpp' ? '#2563eb' : '#6b7280',
-                borderBottom: activeEditorTab === 'cpp' ? '2px solid #2563eb' : '2px solid transparent'
+                borderBottom: activeEditorTab === 'cpp' ? '2px solid #2563eb' : '2px solid transparent',
+                display: 'inline-flex', alignItems: 'center', gap: '6px'
               }
-            }, '📄 main.cpp'),
+            },
+              React.createElement(Icon, { name: 'file-code', size: 14 }),
+              'main.cpp'
+            ),
             React.createElement('button', {
               onClick: () => setActiveEditorTab('yaml'),
               style: {
                 padding: '8px 16px', fontSize: '13px', fontWeight: 500, border: 'none', cursor: 'pointer',
                 background: activeEditorTab === 'yaml' ? '#fff' : 'transparent',
                 color: activeEditorTab === 'yaml' ? '#2563eb' : '#6b7280',
-                borderBottom: activeEditorTab === 'yaml' ? '2px solid #2563eb' : '2px solid transparent'
+                borderBottom: activeEditorTab === 'yaml' ? '2px solid #2563eb' : '2px solid transparent',
+                display: 'inline-flex', alignItems: 'center', gap: '6px'
               }
-            }, '⚙️ config.yaml')
+            },
+              React.createElement(Icon, { name: 'settings', size: 14 }),
+              'config.yaml'
+            )
           ),
           // Active editor with line numbers
           React.createElement('div', { style: styles.editorContainer },
@@ -1797,7 +2043,7 @@ export default function Page({ data, config }: PluginProps) {
               gap: '6px'
             }
           },
-            React.createElement('span', null, '⚠️'),
+            React.createElement(Icon, { name: 'triangle-alert', size: 14, color: '#d97706' }),
             React.createElement('span', null, 'Select a Docker instance from the list to build & deploy')
           )
         )
@@ -1821,13 +2067,20 @@ export default function Page({ data, config }: PluginProps) {
             color: buildStatus.includes('successfully') ? '#166534' :
                    buildStatus.includes('failed') || buildStatus.includes('Error') ? '#991b1b' : '#1e40af',
             border: `1px solid ${buildStatus.includes('successfully') ? '#bbf7d0' :
-                     buildStatus.includes('failed') || buildStatus.includes('Error') ? '#fecaca' : '#bfdbfe'}`
+                     buildStatus.includes('failed') || buildStatus.includes('Error') ? '#fecaca' : '#bfdbfe'}`,
+            ...(isBuilding ? { animation: 'aos-pulse 1.6s ease-in-out infinite' } : {})
           }
         },
-          React.createElement('span', null,
-            buildStatus.includes('successfully') ? '✓' :
-            buildStatus.includes('failed') || buildStatus.includes('Error') ? '✗' :
-            isBuilding ? '⟳' : '●'
+          React.createElement('span', {
+            style: { display: 'inline-flex', alignItems: 'center', ...(isBuilding ? { animation: 'aos-spin 1s linear infinite' } : {}) }
+          },
+            buildStatus.includes('successfully')
+              ? React.createElement(Icon, { name: 'check', size: 14 })
+              : buildStatus.includes('failed') || buildStatus.includes('Error')
+                ? React.createElement(Icon, { name: 'x', size: 14 })
+                : isBuilding
+                  ? React.createElement(Icon, { name: 'refresh', size: 14 })
+                  : '●'
           ),
           buildStatus
         ),
@@ -1836,7 +2089,7 @@ export default function Page({ data, config }: PluginProps) {
         deployedApps.length > 0 && React.createElement('div', { style: styles.card },
           React.createElement('div', { style: styles.cardHeader },
             React.createElement('div', { style: styles.cardTitle },
-              React.createElement('span', { style: styles.cardIcon }, '🚀'),
+              React.createElement(Icon, { name: 'rocket', size: 16, color: '#dc2626' }),
               'Deployed Apps'
             ),
             React.createElement('button', {
@@ -1877,10 +2130,29 @@ export default function Page({ data, config }: PluginProps) {
         ),
 
         // Build Logs Card
-        React.createElement('div', { style: { ...styles.card, ...styles.logsCard } },
+        React.createElement('div', { style: { ...styles.card, ...styles.logsCard, position: 'relative' as const } },
+          // Indeterminate progress bar — fills the gap during long silent steps
+          // (uploading, signing, AosCloud round-trip). Pure CSS, GPU-painted.
+          isBuilding && React.createElement('div', {
+            style: {
+              position: 'absolute' as const, top: 0, left: 0, right: 0,
+              height: '2px', overflow: 'hidden', backgroundColor: '#dbeafe',
+              borderTopLeftRadius: '8px', borderTopRightRadius: '8px',
+              pointerEvents: 'none' as const
+            }
+          },
+            React.createElement('div', {
+              style: {
+                position: 'absolute' as const, top: 0, left: 0,
+                height: '100%', width: '25%',
+                backgroundColor: '#3b82f6',
+                animation: 'aos-bar 1.4s ease-in-out infinite'
+              }
+            })
+          ),
           React.createElement('div', { style: styles.cardHeader },
             React.createElement('div', { style: styles.cardTitle },
-              React.createElement('span', { style: styles.cardIcon }, '📋'),
+              React.createElement(Icon, { name: 'clipboard-list', size: 16, color: '#374151' }),
               'Build Logs'
             ),
             buildLogs.length > 0 && React.createElement('button', {
@@ -1919,7 +2191,7 @@ export default function Page({ data, config }: PluginProps) {
         React.createElement('div', { style: { ...styles.card, ...styles.logsCard } },
           React.createElement('div', { style: styles.cardHeader },
             React.createElement('div', { style: styles.cardTitle },
-              React.createElement('span', { style: styles.cardIcon }, '📡'),
+              React.createElement(Icon, { name: 'activity', size: 16, color: '#374151' }),
               'Service Output'
             ),
             React.createElement('div', { style: { display: 'flex', gap: '4px' } },
