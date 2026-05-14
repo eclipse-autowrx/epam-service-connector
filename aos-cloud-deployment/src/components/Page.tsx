@@ -1514,52 +1514,115 @@ export default function Page({ data, config }: PluginProps) {
                       : (unitMonitoring.message || 'Unavailable')
                   )
                 : (() => {
-                    const fmtMB = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`
+                    const fmtBytes = (n: number) => {
+                      if (!n) return '0'
+                      if (n < 1024) return `${n} B`
+                      if (n < 1048576) return `${(n / 1024).toFixed(0)} KB`
+                      if (n < 1073741824) return `${(n / 1048576).toFixed(1)} MB`
+                      return `${(n / 1073741824).toFixed(2)} GB`
+                    }
+                    const hw: any = unitMonitoring.hw || null
                     const ramUsed = unitMonitoring.ram?.used || 0
-                    const diskUsed = unitMonitoring.disk?.used || 0
+                    const ramTotal = unitMonitoring.ram?.total || 0
                     const cpuVal = unitMonitoring.cpu || 0
-                    // AosCore reports CPU as the sum of all-core percentages
-                    // (Linux "Solaris-mode-off" convention — same as `top`).
-                    // So a 4-core unit can legitimately report up to 400 %.
-                    // We label it accordingly and don't pretend it's per-core.
-                    const isMultiCore = cpuVal > 100
-                    return React.createElement('div', { style: { display: 'flex', flexDirection: 'column' as const, gap: '8px' } },
+                    // AosCloud reports CPU as milli-CPU (1000 = one full core).
+                    // Compute usage relative to total available CPU on this node:
+                    //    cores_busy = cpuVal / 1000
+                    //    pct_total  = cpuVal / (numCpus * 1000) * 100
+                    const numCpus = hw?.numCpus || 1
+                    const coresBusy = cpuVal / 1000
+                    const cpuPctTotal = (cpuVal / (numCpus * 1000)) * 100
+                    const partitions: Array<{ name: string; used: number; total: number }> =
+                      unitMonitoring.diskPartitions || []
+
+                    return React.createElement('div', { style: { display: 'flex', flexDirection: 'column' as const, gap: '10px' } },
+                      // Hardware summary header
+                      hw && React.createElement('div', {
+                        style: {
+                          fontSize: '11px', color: '#6b7280', backgroundColor: '#f9fafb',
+                          border: '1px solid #e5e7eb', borderRadius: '4px', padding: '6px 10px'
+                        }
+                      },
+                        React.createElement('div', { style: { display: 'flex', gap: '6px', alignItems: 'baseline', flexWrap: 'wrap' as const } },
+                          hw.cpuModel && React.createElement('span', { style: { color: '#374151', fontWeight: 500, wordBreak: 'break-word' as const } }, hw.cpuModel),
+                          hw.cpuModel && React.createElement('span', null, '·'),
+                          React.createElement('span', null, `${hw.numCores} core${hw.numCores === 1 ? '' : 's'}`),
+                          hw.numThreads && hw.numThreads !== hw.numCores && React.createElement('span', null, ` / ${hw.numThreads} threads`),
+                          hw.ramTotal > 0 && React.createElement('span', null, '·'),
+                          hw.ramTotal > 0 && React.createElement('span', null, `${fmtBytes(hw.ramTotal)} RAM`),
+                          hw.nodeCount > 1 && React.createElement('span', null, '·'),
+                          hw.nodeCount > 1 && React.createElement('span', null, `${hw.nodeCount} nodes (showing node 0)`)
+                        )
+                      ),
+
                       // CPU
                       React.createElement('div', null,
                         React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '3px' } },
                           React.createElement('span', {
                             style: { color: '#6b7280' },
-                            title: 'Total CPU usage across all cores. Values >100 % mean more than one core is busy.'
-                          }, isMultiCore ? 'CPU (all cores)' : 'CPU'),
+                            title: hw ? `${cpuVal} milli-CPU on a ${numCpus}-core node = ${coresBusy.toFixed(2)} cores busy` : 'CPU value reported in milli-CPU; total core count unknown'
+                          }, 'CPU'),
                           React.createElement('span', { style: { fontWeight: 500 } },
-                            isMultiCore
-                              ? `${Math.round(cpuVal)} % (≈${(cpuVal / 100).toFixed(1)} cores)`
-                              : `${Math.round(cpuVal)} %`
+                            hw
+                              ? `${cpuPctTotal.toFixed(1)}% · ${coresBusy.toFixed(2)} / ${numCpus} cores`
+                              : `${coresBusy.toFixed(2)} cores busy (total unknown)`
                           )
                         ),
                         React.createElement('div', { style: { height: '6px', backgroundColor: '#e5e7eb', borderRadius: '3px', overflow: 'hidden' as const } },
                           React.createElement('div', { style: {
                             height: '100%',
-                            // For >100 %, scale the bar against an 8-core ceiling (800 %).
-                            // Caps at 100 % bar width; gives a visual sense of "very busy".
-                            width: `${Math.min((cpuVal / (isMultiCore ? 800 : 100)) * 100, 100)}%`,
-                            backgroundColor: cpuVal > 80 ? '#dc2626' : '#3b82f6',
+                            width: `${Math.min(hw ? cpuPctTotal : (coresBusy * 100 / 4), 100)}%`,
+                            backgroundColor: cpuPctTotal > 80 ? '#dc2626' : cpuPctTotal > 50 ? '#d97706' : '#3b82f6',
                             borderRadius: '3px', transition: 'width 0.3s'
                           } })
                         )
                       ),
+
                       // RAM
                       React.createElement('div', null,
                         React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '3px' } },
                           React.createElement('span', { style: { color: '#6b7280' } }, 'RAM'),
-                          React.createElement('span', { style: { fontWeight: 500 } }, ramUsed ? fmtMB(ramUsed) : '—')
+                          React.createElement('span', { style: { fontWeight: 500 } },
+                            ramTotal
+                              ? `${((ramUsed / ramTotal) * 100).toFixed(1)}% · ${fmtBytes(ramUsed)} / ${fmtBytes(ramTotal)}`
+                              : (ramUsed ? `${fmtBytes(ramUsed)} (total unknown)` : '—')
+                          )
+                        ),
+                        ramTotal > 0 && React.createElement('div', { style: { height: '6px', backgroundColor: '#e5e7eb', borderRadius: '3px', overflow: 'hidden' as const } },
+                          React.createElement('div', { style: {
+                            height: '100%',
+                            width: `${Math.min((ramUsed / ramTotal) * 100, 100)}%`,
+                            backgroundColor: (ramUsed / ramTotal) > 0.85 ? '#dc2626' : (ramUsed / ramTotal) > 0.65 ? '#d97706' : '#8b5cf6',
+                            borderRadius: '3px', transition: 'width 0.3s'
+                          } })
                         )
                       ),
-                      // Disk
-                      React.createElement('div', null,
-                        React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '3px' } },
-                          React.createElement('span', { style: { color: '#6b7280' } }, 'Disk'),
-                          React.createElement('span', { style: { fontWeight: 500 } }, diskUsed ? fmtMB(diskUsed) : '—')
+
+                      // Disk — per-partition rows
+                      partitions.length > 0 && React.createElement('div', null,
+                        React.createElement('div', { style: { fontSize: '12px', color: '#6b7280', marginBottom: '4px' } }, 'Disk'),
+                        React.createElement('div', { style: { display: 'flex', flexDirection: 'column' as const, gap: '6px', paddingLeft: '8px' } },
+                          ...partitions.map((p) => {
+                            const pct = p.total ? (p.used / p.total) * 100 : 0
+                            return React.createElement('div', { key: p.name },
+                              React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '2px', color: '#6b7280' } },
+                                React.createElement('span', { style: { fontFamily: 'monospace' } }, p.name),
+                                React.createElement('span', { style: { fontWeight: 500, color: '#374151' } },
+                                  p.total
+                                    ? `${pct.toFixed(1)}% · ${fmtBytes(p.used)} / ${fmtBytes(p.total)}`
+                                    : (p.used ? `${fmtBytes(p.used)} (total unknown)` : '—')
+                                )
+                              ),
+                              p.total > 0 && React.createElement('div', { style: { height: '4px', backgroundColor: '#e5e7eb', borderRadius: '2px', overflow: 'hidden' as const } },
+                                React.createElement('div', { style: {
+                                  height: '100%',
+                                  width: `${Math.min(pct, 100)}%`,
+                                  backgroundColor: pct > 85 ? '#dc2626' : pct > 65 ? '#d97706' : '#f59e0b',
+                                  borderRadius: '2px', transition: 'width 0.3s'
+                                } })
+                              )
+                            )
+                          })
                         )
                       )
                     )
@@ -1882,21 +1945,7 @@ export default function Page({ data, config }: PluginProps) {
                 React.createElement('option', { key: s.uuid, value: s.uuid }, s.title || s.uuid)
               )
             ),
-            // Auto-sync service_uid checkbox
-            React.createElement('label', {
-              style: {
-                display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px',
-                fontSize: '11px', color: '#6b7280', cursor: 'pointer', userSelect: 'none'
-              }
-            },
-              React.createElement('input', {
-                type: 'checkbox',
-                checked: autoSyncServiceUid,
-                onChange: (e: any) => setAutoSyncServiceUid(e.target.checked),
-                style: { cursor: 'pointer' }
-              }),
-              'Auto-sync service_uid to config.yaml'
-            ),
+            // Service UUID display (right under the dropdown so the link is obvious)
             serviceName && React.createElement('div', {
               style: { display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px', minWidth: 0 }
             },
@@ -1915,6 +1964,23 @@ export default function Page({ data, config }: PluginProps) {
                 style: { ...styles.iconButton, width: '20px', height: '20px', fontSize: '11px', flexShrink: 0 },
                 title: selectedServiceUuid
               }, '📋')
+            ),
+            // Auto-sync service_uid checkbox (sits under the UUID — it's a
+            // setting that controls what happens to that UUID when copied
+            // into config.yaml)
+            React.createElement('label', {
+              style: {
+                display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px',
+                fontSize: '11px', color: '#6b7280', cursor: 'pointer', userSelect: 'none'
+              }
+            },
+              React.createElement('input', {
+                type: 'checkbox',
+                checked: autoSyncServiceUid,
+                onChange: (e: any) => setAutoSyncServiceUid(e.target.checked),
+                style: { cursor: 'pointer' }
+              }),
+              'Auto-sync service_uid to config.yaml'
             ),
             serviceVersions.length > 0 && React.createElement('div', {
               style: { display: 'flex', gap: '4px', marginTop: '6px', flexWrap: 'wrap' }

@@ -1027,7 +1027,13 @@ async function handleGetUnitMonitoring(data) {
   if (!unitUid) return { kit_id: instanceId, type: 'aos_get_unit_monitoring', status: 'error', message: 'No unitUid provided' };
 
   try {
-    const result = await curlAosCloud(`units/${unitUid}/monitoring/`);
+    // Fetch monitoring AND unit detail in parallel. Unit detail provides the
+    // hardware totals (CPU count, RAM total, partition sizes) that the
+    // monitoring endpoint omits — without them we can't render real %.
+    const [result, unitDetail] = await Promise.all([
+      curlAosCloud(`units/${unitUid}/monitoring/`),
+      curlAosCloud(`units/${unitUid}/`).catch(() => null)
+    ]);
 
     // Detect explicit error envelope (rare; usually the call either 200s with an
     // array of nodes, or curlAosCloud throws).
@@ -1048,12 +1054,13 @@ async function handleGetUnitMonitoring(data) {
     const cpuM = pickNode(node.cpu);
     const ramM = pickNode(node.ram);
 
-    // Disk: AosCore reports several partitions ("var", "workdirs", "states",
-    // "storages"). Sum the user-visible writable partitions; the others are
-    // usually negligible read-only mounts.
-    const diskUsed = (node.disk || [])
-      .filter((m) => m.measurementType === 'node' && ['var', 'workdirs'].includes(m.partition))
-      .reduce((s, m) => s + (m.value || 0), 0);
+    // Per-partition disk usage from monitoring (node-level entries only).
+    const partUsed = {};
+    for (const m of (node.disk || [])) {
+      if (m.measurementType === 'node' && m.partition) {
+        partUsed[m.partition] = (partUsed[m.partition] || 0) + (m.value || 0);
+      }
+    }
 
     // Service-level CPU/RAM (per service-instance running on this unit).
     const serviceMap = new Map();
@@ -1070,17 +1077,53 @@ async function handleGetUnitMonitoring(data) {
     collect(node.ram, 'ram');
     const services = Array.from(serviceMap.values());
 
+    // Hardware specs from unit detail. AosCloud returns one entry in `nodes`
+    // per physical node (main + secondaries). We expose the FIRST node since
+    // the monitoring entry we render is also from the first node — keeps the
+    // totals consistent.
+    let hw = null;
+    if (unitDetail && Array.isArray(unitDetail.nodes) && unitDetail.nodes.length > 0) {
+      const detailNode = unitDetail.nodes[0];
+      const cpu0 = (detailNode.cpus || [])[0] || {};
+      const partTotals = {};
+      for (const p of (detailNode.partitions || [])) {
+        if (p && p.totalSize != null) partTotals[p.name || `partition_${Object.keys(partTotals).length}`] = p.totalSize;
+      }
+      hw = {
+        numCpus:        detailNode.num_cpus || cpu0.totalNumCores || 1,
+        numCores:       cpu0.totalNumCores || detailNode.num_cpus || 1,
+        numThreads:     cpu0.totalNumThreads || cpu0.totalNumCores || 1,
+        cpuModel:       (cpu0.modelName || '').trim() || null,
+        ramTotal:       detailNode.total_ram || 0,
+        partitionTotals: partTotals,
+        nodeCount:      unitDetail.nodes.length
+      };
+    }
+
+    // Build per-partition disk view (used + total per partition, not just sum).
+    const diskPartitions = [];
+    const allPartNames = new Set([...Object.keys(partUsed), ...Object.keys(hw?.partitionTotals || {})]);
+    for (const name of allPartNames) {
+      diskPartitions.push({
+        name,
+        used:  partUsed[name] || 0,
+        total: (hw?.partitionTotals || {})[name] || 0
+      });
+    }
+
     return {
       kit_id: instanceId,
       type: 'aos_get_unit_monitoring',
       status: 'success',
       unitUid,
       cpu: cpuM ? cpuM.value : 0,
-      // Totals are not present in the monitoring response; UI falls back to
-      // showing absolute values (in MB) when total === 0.
-      ram:  { used: ramM ? ramM.value : 0, total: 0 },
-      disk: { used: diskUsed, total: 0 },
+      ram:  { used: ramM ? ramM.value : 0, total: hw ? hw.ramTotal : 0 },
+      // Backwards-compatible scalar disk (sum of var + workdirs); new UI
+      // should prefer `diskPartitions` for per-partition rendering.
+      disk: { used: (partUsed.var || 0) + (partUsed.workdirs || 0), total: 0 },
+      diskPartitions,
       services,
+      hw,
       raw: result
     };
   } catch (error) {
