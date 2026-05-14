@@ -103,7 +103,7 @@ export default function Page({ data, config }: PluginProps) {
   // viewBox SVG with currentColor stroke — colour and size controlled by the
   // caller via props or ambient CSS.
   const ICONS: Record<string, string> = {
-    'container':       'M22 7.7c0-.6-.4-1.2-.8-1.5l-6.3-3.9a1.7 1.7 0 0 0-1.8 0l-10.3 6c-.5.2-.8.8-.8 1.4v6.6c0 .5.3 1.2.8 1.5l6.3 3.9a1.7 1.7 0 0 0 1.8 0l10.3-6c.5-.3.8-1 .8-1.5Z|M10 21.9V14L2.1 9.1|M10 14l11.9-6.9|M14 19.5V8.5',
+    'box':             'M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z|m3.3 7 8.7 5 8.7-5|M12 22V12',
     'shield-check':    'M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.79 17 5 19 5a1 1 0 0 1 1 1z|m9 12 2 2 4-4',
     'cloud':           'M17.5 19a4.5 4.5 0 1 0 0-9c0-3.31-2.69-6-6-6a6 6 0 0 0-5.29 8.79c-1.43.95-2.21 2.65-2.21 4.21a4 4 0 0 0 4 4z',
     'server':          'M5 12h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z|M5 4h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z|M6 8h.01|M6 16h.01',
@@ -123,7 +123,8 @@ export default function Page({ data, config }: PluginProps) {
     'chevron-up':      'm18 15-6-6-6 6',
     'maximize':        'M8 3H5a2 2 0 0 0-2 2v3|M21 8V5a2 2 0 0 0-2-2h-3|M3 16v3a2 2 0 0 0 2 2h3|M16 21h3a2 2 0 0 0 2-2v-3'
   }
-  const Icon = ({ name, size = 16, stroke = 2, color = 'currentColor', style }: { name: string; size?: number; stroke?: number; color?: string; style?: any }) => {
+  type IconName = keyof typeof ICONS
+  const Icon = ({ name, size = 16, stroke = 2, color = 'currentColor', style }: { name: IconName; size?: number; stroke?: number; color?: string; style?: any }) => {
     const d = ICONS[name]
     if (!d) return null
     return React.createElement('svg', {
@@ -842,12 +843,43 @@ export default function Page({ data, config }: PluginProps) {
   }
 
   const handleSelectDocker = (instance: DockerInstance) => {
+    if (selectedInstance === instance.instance_id) return  // no-op when re-clicking same row
     setSelectedInstance(instance.instance_id)
     addLog(`[Docker] Selected instance: ${instance.name} (${instance.instance_id})`)
 
     // Update AOS service target
     if (aosServiceRef.current) {
       aosServiceRef.current.setTargetId(instance.instance_id)
+    }
+
+    // Reset per-instance state so we don't show stale data from the previous
+    // instance (services, units, monitoring, alerts, cert status, deployed
+    // apps, logs, open unit-detail overlay). Each broadcaster has its own
+    // cert and therefore its own AosCloud view.
+    setAosServices([])
+    setSelectedServiceUuid('')
+    setServiceUnits([])
+    setServiceVersions([])
+    setServiceName('')
+    setSelectedMonitorUnit('')
+    setSelectedUnitUid('')
+    setSelectedSubjectId('')
+    setUnitMonitoring(null)
+    setAlerts([])
+    setDeployedApps([])
+    setServiceLogs([])
+    setDetailUnitUid(null)
+    setCertStatus(null)
+    setCertError('')
+    setDeploymentStatus(null)
+    setStatusError('')
+    aosCloudLoadedRef.current = false
+
+    // Re-fetch from the new broadcaster (cert status + AosCloud services).
+    // checkCertificate is fast; fetchAosCloudServices kicks off versions/units.
+    if (aosServiceRef.current && aosServiceRef.current.isServiceConnected()) {
+      checkCertificate()
+      fetchAosCloudServices()
     }
   }
 
@@ -1470,7 +1502,15 @@ export default function Page({ data, config }: PluginProps) {
               : unitMonitoring.status === 'error'
                 ? React.createElement('div', { style: { fontSize: '12px', color: '#6b7280', fontStyle: 'italic' as const } },
                     unitMonitoring.message?.includes('forbidden')
-                      ? 'No monitoring data — your service may not be running on this unit'
+                      ? React.createElement('div', null,
+                          React.createElement('div', { style: { fontWeight: 500, color: '#92400e', marginBottom: '4px' } },
+                            'Hardware monitoring not available on this unit.'
+                          ),
+                          React.createElement('div', { style: { color: '#6b7280' } },
+                            'AosCloud restricts CPU/RAM/disk metrics to the unit\u2019s OEM account. ',
+                            'Your services are running fine here (see version above), but device-level monitoring belongs to whoever provisioned the unit.'
+                          )
+                        )
                       : (unitMonitoring.message || 'Unavailable')
                   )
                 : (() => {
@@ -1621,7 +1661,7 @@ export default function Page({ data, config }: PluginProps) {
           // Compact header: title + count + filter toggle + refresh, all on one row
           React.createElement('div', { style: { ...styles.cardHeader, padding: '8px 12px' } },
             React.createElement('div', { style: { ...styles.cardTitle, fontSize: '13px', gap: '6px' } },
-              React.createElement(Icon, { name: 'container', size: 15, color: '#2563eb' }),
+              React.createElement(Icon, { name: 'box', size: 15, color: '#2563eb' }),
               'Docker',
               React.createElement('span', { style: { fontSize: '11px', fontWeight: 400, color: '#6b7280' } },
                 ` · ${onlineCount}/${dockerInstances.length} online`
@@ -1650,31 +1690,44 @@ export default function Page({ data, config }: PluginProps) {
               }, '↻')
             )
           ),
-          // Compact instance list
-          React.createElement('div', { style: { maxHeight: '160px', overflowY: 'auto' as const, padding: '6px' } },
+          // Compact instance dropdown (saves vertical space vs. a list)
+          React.createElement('div', { style: { padding: '8px 12px' } },
             filteredInstances.length === 0
-              ? React.createElement('div', { style: { ...styles.empty, padding: '10px', fontSize: '11px' } },
+              ? React.createElement('div', { style: { ...styles.empty, padding: '6px 0', fontSize: '11px' } },
                   filterOnline ? 'No online devices' : 'No Docker instances found'
                 )
-              : filteredInstances.map((instance) =>
-                  React.createElement('div', {
-                    key: instance.instance_id,
-                    onClick: () => handleSelectDocker(instance),
+              : React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
+                  // Online status dot for the currently-selected instance
+                  React.createElement('span', {
                     style: {
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      padding: '5px 8px', marginBottom: '2px', borderRadius: '4px',
-                      cursor: 'pointer',
-                      backgroundColor: selectedInstance === instance.instance_id ? '#dbeafe' : 'transparent',
-                      borderLeft: `3px solid ${instance.online ? '#16a34a' : '#dc2626'}`
-                    }
+                      width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0,
+                      backgroundColor: (() => {
+                        const sel = filteredInstances.find((i: any) => i.instance_id === selectedInstance)
+                        if (!sel) return '#9ca3af'
+                        return sel.online ? '#16a34a' : '#dc2626'
+                      })()
+                    },
+                    title: (() => {
+                      const sel = filteredInstances.find((i: any) => i.instance_id === selectedInstance)
+                      if (!sel) return 'No instance selected'
+                      return sel.online ? 'Online' : 'Offline'
+                    })()
+                  }),
+                  React.createElement('select', {
+                    value: selectedInstance,
+                    onChange: (e: any) => {
+                      const inst = dockerInstances.find((i: any) => i.instance_id === e.target.value)
+                      if (inst) handleSelectDocker(inst)
+                    },
+                    style: { ...styles.select, flex: 1, minWidth: 0, fontSize: '12px', padding: '4px 6px' }
                   },
-                    React.createElement('div', { style: { minWidth: 0, flex: 1 } },
-                      React.createElement('div', { style: { fontSize: '12px', fontWeight: 500, color: '#1f2937', whiteSpace: 'nowrap' as const, overflow: 'hidden' as const, textOverflow: 'ellipsis' } }, instance.name),
-                      React.createElement('div', { style: { fontSize: '10px', color: '#6b7280', fontFamily: 'monospace', whiteSpace: 'nowrap' as const, overflow: 'hidden' as const, textOverflow: 'ellipsis' } }, instance.instance_id)
-                    ),
-                    React.createElement('span', {
-                      style: { width: '7px', height: '7px', borderRadius: '50%', backgroundColor: instance.online ? '#16a34a' : '#dc2626', flexShrink: 0, marginLeft: '6px' }
-                    })
+                    !selectedInstance && React.createElement('option', { value: '' }, '— Select instance —'),
+                    ...filteredInstances.map((instance: any) =>
+                      React.createElement('option', {
+                        key: instance.instance_id,
+                        value: instance.instance_id
+                      }, `${instance.online ? '●' : '○'} ${instance.name} (${instance.instance_id})`)
+                    )
                   )
                 )
           )
@@ -1809,10 +1862,13 @@ export default function Page({ data, config }: PluginProps) {
               'AosCloud Service'
             ),
             React.createElement('button', {
-              onClick: fetchAosCloudServices,
+              onClick: async () => {
+                await fetchAosCloudServices()
+                if (selectedServiceUuid) await loadServiceDetails(selectedServiceUuid)
+              },
               disabled: isLoadingAosCloud || connectionStatus !== 'connected',
               style: { ...styles.iconButton, ...(isLoadingAosCloud ? { opacity: 0.5 } : {}) },
-              title: 'Load services from AosCloud'
+              title: 'Refresh services, versions, and units from AosCloud'
             }, isLoadingAosCloud ? '⟳' : '↻')
           ),
           React.createElement('div', { style: { padding: '10px 12px' } },
@@ -1873,6 +1929,24 @@ export default function Page({ data, config }: PluginProps) {
                   }
                 }, `v${v.version}`)
               )
+            ),
+            // Auto-increment version checkbox — placed right under the version
+            // pills so it's clear what it operates on (the "next" version after
+            // the latest pill).
+            serviceVersions.length > 0 && React.createElement('label', {
+              style: {
+                display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px',
+                fontSize: '11px', color: '#6b7280', cursor: 'pointer', userSelect: 'none'
+              },
+              title: 'When enabled, after a successful build the C++ #define VERSION and YAML version: are bumped to the next patch (e.g. 1.0.5 → 1.0.6)'
+            },
+              React.createElement('input', {
+                type: 'checkbox',
+                checked: autoIncVersion,
+                onChange: (e: any) => setAutoIncVersion(e.target.checked),
+                style: { cursor: 'pointer', margin: 0 }
+              }),
+              'Auto-increment version after build'
             )
           )
         ),
@@ -2012,21 +2086,6 @@ export default function Page({ data, config }: PluginProps) {
                   React.createElement('span', null, '⚡'),
                   ' Build & Deploy'
                 )
-          ),
-          // Auto-increment version toggle
-          React.createElement('label', {
-            style: {
-              display: 'flex', alignItems: 'center', gap: '6px',
-              fontSize: '12px', color: '#6b7280', cursor: 'pointer', userSelect: 'none'
-            }
-          },
-            React.createElement('input', {
-              type: 'checkbox',
-              checked: autoIncVersion,
-              onChange: (e: any) => setAutoIncVersion(e.target.checked),
-              style: { cursor: 'pointer' }
-            }),
-            'Auto-increment version'
           ),
           // Warning hint when no instance selected
           !selectedInstance && React.createElement('div', {
