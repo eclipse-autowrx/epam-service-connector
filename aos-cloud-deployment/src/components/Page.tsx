@@ -1348,49 +1348,60 @@ export default function Page({ data, config }: PluginProps) {
 
         React.createElement('div', { style: { fontSize: '13px', lineHeight: 1.8, color: '#374151' } },
 
-          React.createElement('h3', { style: { fontSize: '14px', marginTop: 0, marginBottom: '8px' } }, '1. Select a Docker Instance'),
-          React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px' } },
-            'Choose an online Docker instance from the left panel. This is the build server that compiles, signs, and uploads your service to AosCloud.'
+          React.createElement('h3', { style: { fontSize: '14px', marginTop: 0, marginBottom: '8px' } }, '1. Pick a Docker Instance'),
+          React.createElement('p', { style: { color: '#6b7280', marginBottom: '8px' } },
+            'In the left panel, pick an online Docker instance from the dropdown. This is the build server that compiles, signs, and uploads your service to AosCloud. Switching instances clears the cards below and reloads everything from the newly-selected broadcaster.'
+          ),
+          React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px', fontSize: '12px' } },
+            React.createElement('strong', null, 'Tip: '),
+            'Use ', React.createElement('strong', null, 'AET-CLOUD-001'), ' for builds that should be signed with the shared SP cert; use ',
+            React.createElement('strong', null, 'AET-CLOUD-002'), ' if you want to upload your own personal cert without affecting other users.'
           ),
 
-          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '2. Choose a Service'),
+          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '2. Check or upload your Certificate'),
           React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px' } },
-            'Select a service from the AosCloud Service dropdown on the left. This determines which service on AosCloud will receive your new version. ' +
-            'The version auto-increments based on the latest deployed version.'
+            'The Certificate card shows whether the selected instance has a .p12 loaded. Click ',
+            React.createElement('strong', null, 'Manage'), ' to expand it. There you can see the loaded cert\u2019s CN, upload or replace a .p12, or remove the current one. ',
+            'Uploading a cert replaces the active signing identity on that broadcaster.'
           ),
 
-          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '3. Select a Preset or Write Code'),
+          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '3. Choose an AosCloud Service'),
+          React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px' } },
+            'Pick a service from the AosCloud Service dropdown. The chosen service\u2019s UUID is automatically written into ',
+            React.createElement('code', null, 'config.yaml'), ' (toggle ',
+            React.createElement('strong', null, 'Auto-sync service_uid'), ' to disable). ',
+            'The version pills below the dropdown show the latest versions deployed; with ',
+            React.createElement('strong', null, 'Auto-increment version after build'), ' enabled, the editor bumps to the next patch number after each successful build.'
+          ),
+
+          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '4. Edit your code'),
           React.createElement('p', { style: { color: '#6b7280', marginBottom: '4px' } },
-            'Use the preset dropdown (top-right) to load a pre-built application, or write your own C++ code and YAML config:'
+            'The middle column has a tabbed editor. Use the preset dropdown (top-right header) to load a starting point, then edit the two tabs:'
           ),
           React.createElement('ul', { style: { color: '#6b7280', marginBottom: '16px', paddingLeft: '20px' } },
-            React.createElement('li', null, React.createElement('strong', null, 'main.cpp'), ' — your C++ application source code'),
-            React.createElement('li', null, React.createElement('strong', null, 'config.yaml'), ' — service metadata: architecture, version, resource quotas, entry point')
+            React.createElement('li', null, React.createElement('strong', null, 'main.cpp'), ' \u2014 your C++ application source code'),
+            React.createElement('li', null, React.createElement('strong', null, 'config.yaml'), ' \u2014 service metadata: architecture, version, resource quotas, entry point')
           ),
 
-          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '4. Build & Deploy'),
+          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '5. Build & Deploy'),
           React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px' } },
-            'Click the Build & Deploy button. The system compiles your code, signs the package, and uploads it to AosCloud. ' +
-            'The edge unit receives the update via OTA and runs your service automatically. ' +
-            'Watch the Build Logs panel on the right for progress.'
+            'Click ', React.createElement('strong', null, 'Build & Deploy'), '. The selected broadcaster compiles your code, signs the package with its loaded cert, and uploads it to AosCloud. The edge unit picks up the new version via OTA. ',
+            'Watch the right column for live progress: the Build Status banner pulses while running, the Build Logs card streams output, and a thin progress bar across the top of that card animates during long silent steps (uploading, signing). ',
+            'After success, the AosCloud Service card auto-refreshes with the new version pill.'
           ),
 
-          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '5. Monitor'),
-          React.createElement('p', { style: { color: '#6b7280', marginBottom: '4px' } },
-            'After deployment, you can:'
-          ),
-          React.createElement('ul', { style: { color: '#6b7280', marginBottom: '16px', paddingLeft: '20px' } },
-            React.createElement('li', null, 'Check service status in the ', React.createElement('strong', null, 'Units'), ' panel'),
-            React.createElement('li', null, 'View CPU/RAM usage in the ', React.createElement('strong', null, 'Monitoring'), ' panel'),
-            React.createElement('li', null, 'Request service logs via ', React.createElement('strong', null, 'Fetch Logs'), ' button')
+          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '6. Inspect a unit'),
+          React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px' } },
+            'In the Units card, click any unit row to open a detail overlay with that unit\u2019s hardware specs, live CPU/RAM/disk usage, and the latest alerts. ',
+            React.createElement('em', null, 'Note: '), 'AosCloud only shares device-level monitoring with the unit\u2019s OEM account, so units provisioned by someone else will show "Hardware monitoring not available" \u2014 services still deploy and run normally.'
           ),
 
           React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, 'Available Presets'),
           React.createElement('ul', { style: { color: '#6b7280', paddingLeft: '20px', marginBottom: 0 } },
-            React.createElement('li', null, React.createElement('strong', null, 'Hello AOS'), ' — simple hello world service'),
-            React.createElement('li', null, React.createElement('strong', null, 'Signal Writer'), ' — writes vehicle signals to KUKSA Databroker'),
-            React.createElement('li', null, React.createElement('strong', null, 'EV Range Extender'), ' — battery management with power-save mode'),
-            React.createElement('li', null, React.createElement('strong', null, 'Signal Reporter'), ' — relays signals to the live dashboard')
+            React.createElement('li', null, React.createElement('strong', null, 'Hello AOS'), ' \u2014 simple hello world service'),
+            React.createElement('li', null, React.createElement('strong', null, 'Signal Writer'), ' \u2014 writes vehicle signals to KUKSA Databroker'),
+            React.createElement('li', null, React.createElement('strong', null, 'EV Range Extender'), ' \u2014 battery management with power-save mode'),
+            React.createElement('li', null, React.createElement('strong', null, 'Signal Reporter'), ' \u2014 relays signals to the live dashboard')
           )
         )
       )
@@ -1844,21 +1855,21 @@ export default function Page({ data, config }: PluginProps) {
               showAdvanced ? '' : 'Manage'
             )
           ),
+          // Compact always-visible warning. One line, wraps on narrow widths.
+          // Hover reveals the full message via title attribute.
+          React.createElement('div', {
+            title: 'Each .p12 corresponds to one AosCloud account. Uploading switches this broadcaster\u2019s signing identity to that account, replacing whatever cert was loaded before.',
+            style: {
+              fontSize: '10px', color: '#92400e',
+              padding: showAdvanced ? '4px 12px 0' : '4px 0 0',
+              display: 'flex', alignItems: 'flex-start', gap: '4px',
+              lineHeight: 1.35
+            }
+          },
+            React.createElement(Icon, { name: 'triangle-alert', size: 11, color: '#d97706', style: { marginTop: '1px' } }),
+            React.createElement('span', null, 'Upload your own .p12 to deploy under your AosCloud account. Replaces the cert currently loaded here.')
+          ),
           showAdvanced && React.createElement('div', { style: { padding: '0 12px 12px', borderTop: '1px solid #f3f4f6', marginTop: '8px', paddingTop: '10px' } },
-            React.createElement('div', {
-              style: {
-                fontSize: '11px', color: '#92400e', backgroundColor: '#fef3c7',
-                padding: '8px 10px', borderRadius: '4px', border: '1px solid #fde68a',
-                marginBottom: '10px',
-                display: 'flex', alignItems: 'flex-start', gap: '6px'
-              }
-            },
-              React.createElement(Icon, { name: 'triangle-alert', size: 14, color: '#d97706', style: { marginTop: '1px' } }),
-              React.createElement('span', null,
-                'Upload your own .p12 to sign and deploy services under your AosCloud identity. ' +
-                'Replaces any previously uploaded certificate on this broadcaster.'
-              )
-            ),
             certStatus?.loaded && certStatus.identity?.cn && React.createElement('div', {
               style: {
                 fontSize: '11px', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb',
