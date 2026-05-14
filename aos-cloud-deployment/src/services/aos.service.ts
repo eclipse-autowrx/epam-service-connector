@@ -326,6 +326,11 @@ export class AosService {
     return this.sendCommand('aos_check_cert', { certName })
   }
 
+  // Remove the uploaded .p12 (and derived .pem) from the toolchain container
+  async removeCertificate(certName: string = 'aos-user-sp'): Promise<any> {
+    return this.sendCommand('aos_remove_cert', { certName })
+  }
+
   // Restart an AOS application
   async restartApp(appId: string): Promise<any> {
     return this.sendCommand('aos_restart_app', { appId })

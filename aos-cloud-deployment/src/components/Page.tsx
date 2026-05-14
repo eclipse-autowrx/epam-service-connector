@@ -54,8 +54,22 @@ export default function Page({ data, config }: PluginProps) {
   const [statusError, setStatusError] = React.useState<string>('')
 
   // Certificate state
-  const [certStatus, setCertStatus] = React.useState<{ loaded: boolean; source: string; size?: number; message?: string } | null>(null)
+  type CertIdentity = {
+    cn?: string | null
+    issuer?: string | null
+    notBefore?: string | null
+    notAfter?: string | null
+    expiresInDays?: number | null
+  } | null
+  const [certStatus, setCertStatus] = React.useState<{
+    loaded: boolean
+    source: string
+    size?: number
+    message?: string
+    identity?: CertIdentity
+  } | null>(null)
   const [isUploadingCert, setIsUploadingCert] = React.useState<boolean>(false)
+  const [isRemovingCert, setIsRemovingCert] = React.useState<boolean>(false)
   const [certError, setCertError] = React.useState<string>('')
   const [showAdvanced, setShowAdvanced] = React.useState<boolean>(false)
 
@@ -85,6 +99,11 @@ export default function Page({ data, config }: PluginProps) {
     page: {
       width: '100%',
       height: '100%',
+      // Cap to viewport height so plugin mode (where the host may not
+      // constrain height) still gives flex children a finite size. Without
+      // this, dockerColumn's overflowY:auto can't engage and the left
+      // column overflows when the user zooms in or the viewport shrinks.
+      maxHeight: '100vh',
       backgroundColor: '#f5f5f5',
       display: 'flex',
       flexDirection: 'column' as const,
@@ -171,8 +190,11 @@ export default function Page({ data, config }: PluginProps) {
       width: '280px',
       display: 'flex',
       flexDirection: 'column' as const,
-      gap: '16px',
-      flexShrink: 0
+      gap: '8px',
+      flexShrink: 0,
+      minHeight: 0,
+      overflowY: 'auto' as const,
+      paddingRight: '4px'
     },
     statusColumn: {
       width: '320px',
@@ -828,7 +850,13 @@ export default function Page({ data, config }: PluginProps) {
     if (!aosServiceRef.current) return
     try {
       const result = await aosServiceRef.current.checkCertificate()
-      setCertStatus({ loaded: result.certLoaded, source: result.source || 'none', size: result.certSize, message: result.message })
+      setCertStatus({
+        loaded: result.certLoaded,
+        source: result.source || 'none',
+        size: result.certSize,
+        message: result.message,
+        identity: result.identity ?? null
+      })
       setCertError('')
     } catch (err: any) {
       setCertError(err.message || 'Failed to check certificate')
@@ -998,7 +1026,16 @@ export default function Page({ data, config }: PluginProps) {
 
       if (result.status === 'success') {
         addLog(`[Cert] Certificate uploaded: ${result.message}`)
-        setCertStatus({ loaded: true, source: 'manual', size: file.size, message: result.message })
+        setCertStatus({
+          loaded: true,
+          source: 'manual',
+          size: file.size,
+          message: result.message,
+          identity: result.identity ?? null
+        })
+        if (result.identity?.cn) {
+          addLog(`[Cert] Identity: CN=${result.identity.cn}, expires ${result.identity.notAfter || '?'}`)
+        }
         addLog(`[AosCloud] Refreshing services...`)
         fetchAosCloudServices()
       } else {
@@ -1010,6 +1047,29 @@ export default function Page({ data, config }: PluginProps) {
     } finally {
       setIsUploadingCert(false)
       e.target.value = ''
+    }
+  }
+
+  const handleCertRemove = async () => {
+    if (!aosServiceRef.current) return
+    if (typeof window !== 'undefined' && !window.confirm('Remove the uploaded certificate from this broadcaster? Builds will fail until a new certificate is uploaded.')) {
+      return
+    }
+    setIsRemovingCert(true)
+    setCertError('')
+    try {
+      const result = await aosServiceRef.current.removeCertificate()
+      if (result.status === 'success') {
+        addLog(`[Cert] ${result.message}`)
+        setCertStatus({ loaded: false, source: 'none', message: result.message, identity: null })
+      } else {
+        setCertError(result.message || 'Remove failed')
+      }
+    } catch (err: any) {
+      setCertError(err.message || 'Remove failed')
+      addLog(`[Cert] Remove failed: ${err.message}`)
+    } finally {
+      setIsRemovingCert(false)
     }
   }
 
@@ -1293,45 +1353,42 @@ export default function Page({ data, config }: PluginProps) {
       // Left Column - Docker Instances
       showDockerPanel && React.createElement('div', { style: styles.dockerColumn },
         React.createElement('div', { style: styles.card },
-          React.createElement('div', { style: styles.cardHeader },
-            React.createElement('div', { style: styles.cardTitle },
-              React.createElement('span', { style: styles.cardIcon }, '🐳'),
-              'Docker Instances'
-            ),
-            React.createElement('button', {
-              onClick: () => fetchDockerInstances(),
-              style: styles.iconButton,
-              title: 'Refresh'
-            }, '↻')
-          ),
-          // Summary
-          React.createElement('div', { style: styles.summaryCard },
-            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '16px' } },
-              React.createElement('div', null,
-                React.createElement('div', { style: styles.summaryText }, 'Online'),
-                React.createElement('div', { style: styles.summaryNumber }, onlineCount)
-              ),
-              React.createElement('div', null,
-                React.createElement('div', { style: styles.summaryText }, 'Total'),
-                React.createElement('div', { style: styles.summaryNumber }, dockerInstances.length)
+          // Compact header: title + count + filter toggle + refresh, all on one row
+          React.createElement('div', { style: { ...styles.cardHeader, padding: '8px 12px' } },
+            React.createElement('div', { style: { ...styles.cardTitle, fontSize: '13px', gap: '6px' } },
+              React.createElement('span', { style: { fontSize: '14px' } }, '🐳'),
+              'Docker',
+              React.createElement('span', { style: { fontSize: '11px', fontWeight: 400, color: '#6b7280' } },
+                ` · ${onlineCount}/${dockerInstances.length} online`
               )
+            ),
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+              React.createElement('label', {
+                style: {
+                  display: 'flex', alignItems: 'center', gap: '4px',
+                  fontSize: '11px', color: '#6b7280', cursor: 'pointer', userSelect: 'none'
+                },
+                title: 'Show only online instances'
+              },
+                React.createElement('input', {
+                  type: 'checkbox',
+                  checked: filterOnline,
+                  onChange: (e: any) => setFilterOnline(e.target.checked),
+                  style: { cursor: 'pointer', margin: 0 }
+                }),
+                'Online'
+              ),
+              React.createElement('button', {
+                onClick: () => fetchDockerInstances(),
+                style: { ...styles.iconButton, width: '22px', height: '22px', fontSize: '12px' },
+                title: 'Refresh'
+              }, '↻')
             )
           ),
-          // Filter Tabs
-          React.createElement('div', { style: styles.dockerTabs },
-            React.createElement('button', {
-              onClick: () => setFilterOnline(false),
-              style: { ...styles.tab, ...(!filterOnline ? styles.tabActive : {}) }
-            }, 'All Devices'),
-            React.createElement('button', {
-              onClick: () => setFilterOnline(true),
-              style: { ...styles.tab, ...(filterOnline ? styles.tabActive : {}) }
-            }, 'Online Only')
-          ),
-          // Instance List
-          React.createElement('div', { style: styles.dockerList },
+          // Compact instance list
+          React.createElement('div', { style: { maxHeight: '160px', overflowY: 'auto' as const, padding: '6px' } },
             filteredInstances.length === 0
-              ? React.createElement('div', { style: styles.empty },
+              ? React.createElement('div', { style: { ...styles.empty, padding: '10px', fontSize: '11px' } },
                   filterOnline ? 'No online devices' : 'No Docker instances found'
                 )
               : filteredInstances.map((instance) =>
@@ -1339,30 +1396,27 @@ export default function Page({ data, config }: PluginProps) {
                     key: instance.instance_id,
                     onClick: () => handleSelectDocker(instance),
                     style: {
-                      ...styles.dockerItem,
-                      ...(selectedInstance === instance.instance_id ? styles.dockerItemSelected : {}),
-                      ...(instance.online ? styles.dockerItemOnline : styles.dockerItemOffline)
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '5px 8px', marginBottom: '2px', borderRadius: '4px',
+                      cursor: 'pointer',
+                      backgroundColor: selectedInstance === instance.instance_id ? '#dbeafe' : 'transparent',
+                      borderLeft: `3px solid ${instance.online ? '#16a34a' : '#dc2626'}`
                     }
                   },
-                    React.createElement('div', { style: styles.dockerItemInfo },
-                      React.createElement('div', { style: styles.dockerItemName }, instance.name),
-                      React.createElement('div', { style: styles.dockerItemId }, instance.instance_id)
+                    React.createElement('div', { style: { minWidth: 0, flex: 1 } },
+                      React.createElement('div', { style: { fontSize: '12px', fontWeight: 500, color: '#1f2937', whiteSpace: 'nowrap' as const, overflow: 'hidden' as const, textOverflow: 'ellipsis' } }, instance.name),
+                      React.createElement('div', { style: { fontSize: '10px', color: '#6b7280', fontFamily: 'monospace', whiteSpace: 'nowrap' as const, overflow: 'hidden' as const, textOverflow: 'ellipsis' } }, instance.instance_id)
                     ),
-                    React.createElement('div', { style: styles.onlineIndicator },
-                      React.createElement('span', {
-                        style: instance.online ? styles.onlineDot : styles.offlineDot
-                      }),
-                      React.createElement('span', {
-                        style: instance.online ? styles.onlineText : styles.offlineText
-                      }, instance.online ? 'Online' : 'Offline')
-                    )
+                    React.createElement('span', {
+                      style: { width: '7px', height: '7px', borderRadius: '50%', backgroundColor: instance.online ? '#16a34a' : '#dc2626', flexShrink: 0, marginLeft: '6px' }
+                    })
                   )
                 )
           )
         ),
 
         // Certificate Panel (collapsible)
-        React.createElement('div', { style: { ...styles.card, marginTop: '8px', padding: showAdvanced ? 0 : '8px 12px' } },
+        React.createElement('div', { style: { ...styles.card, padding: showAdvanced ? 0 : '8px 12px' } },
           React.createElement('div', {
             onClick: () => setShowAdvanced(!showAdvanced),
             style: {
@@ -1383,41 +1437,70 @@ export default function Page({ data, config }: PluginProps) {
                 certStatus === null ? 'Checking...' : certStatus.loaded ? 'Loaded' : 'Missing'
               )
             ),
-            React.createElement('span', { style: { fontSize: '10px', color: '#9ca3af' } }, showAdvanced ? '▲ Hide' : '▼ Upload')
+            React.createElement('span', { style: { fontSize: '10px', color: '#9ca3af' } }, showAdvanced ? '▲ Hide' : '▼ Upload / replace .p12')
           ),
           showAdvanced && React.createElement('div', { style: { padding: '0 12px 12px', borderTop: '1px solid #f3f4f6', marginTop: '8px', paddingTop: '10px' } },
-            // Warning banner
             React.createElement('div', {
               style: {
-                fontSize: '11px', color: '#92400e', backgroundColor: '#fef3c7', padding: '8px 10px',
-                borderRadius: '4px', marginBottom: '10px', border: '1px solid #fde68a',
-                display: 'flex', alignItems: 'center', gap: '6px'
+                fontSize: '11px', color: '#92400e', backgroundColor: '#fef3c7',
+                padding: '8px 10px', borderRadius: '4px', border: '1px solid #fde68a',
+                marginBottom: '10px',
+                display: 'flex', alignItems: 'flex-start', gap: '6px'
               }
             },
-              React.createElement('span', null, '⚠️'),
-              'Only upload Service Provider certificates. Never commit personal certificates to the repository.'
+              React.createElement('span', { style: { flexShrink: 0 } }, '⚠️'),
+              React.createElement('span', null,
+                'Upload your own .p12 to sign and deploy services under your AosCloud identity. ' +
+                'Replaces any previously uploaded certificate on this broadcaster.'
+              )
             ),
-            certError && React.createElement('div', { style: { fontSize: '12px', color: '#dc2626', marginBottom: '8px' } }, certError),
-            React.createElement('label', {
+            certStatus?.loaded && certStatus.identity?.cn && React.createElement('div', {
               style: {
-                ...styles.button, ...styles.buttonSm,
-                ...(connectionStatus !== 'connected' || isUploadingCert ? styles.buttonDisabled : {}),
-                textAlign: 'center', cursor: connectionStatus === 'connected' && !isUploadingCert ? 'pointer' : 'not-allowed',
-                display: 'block'
+                fontSize: '11px', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb',
+                borderRadius: '4px', padding: '6px 10px', marginBottom: '10px',
+                fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
+                display: 'flex', gap: '6px', alignItems: 'baseline'
               }
             },
-              React.createElement('input', {
-                type: 'file', accept: '.p12,.pfx', onChange: handleCertUpload,
-                disabled: connectionStatus !== 'connected' || isUploadingCert,
-                style: { display: 'none' }
-              }),
-              isUploadingCert ? 'Uploading...' : '📁 Upload Service Provider certificate .p12 file'
+              React.createElement('span', { style: { color: '#6b7280', flexShrink: 0 } }, 'CN:'),
+              React.createElement('span', { style: { color: '#111827', overflowWrap: 'anywhere' as const, wordBreak: 'break-word' as const } }, certStatus.identity.cn)
+            ),
+            certStatus?.loaded && certStatus.identity === null && React.createElement('div', {
+              style: { fontSize: '11px', color: '#6b7280', marginBottom: '10px', fontStyle: 'italic' }
+            }, 'Identity unavailable (cert may be password-protected)'),
+            certError && React.createElement('div', { style: { fontSize: '12px', color: '#dc2626', marginBottom: '8px' } }, certError),
+            React.createElement('div', { style: { display: 'flex', gap: '6px' } },
+              React.createElement('label', {
+                style: {
+                  ...styles.button, ...styles.buttonSm,
+                  ...(connectionStatus !== 'connected' || isUploadingCert || isRemovingCert ? styles.buttonDisabled : {}),
+                  flex: 1, textAlign: 'center',
+                  cursor: connectionStatus === 'connected' && !isUploadingCert && !isRemovingCert ? 'pointer' : 'not-allowed'
+                }
+              },
+                React.createElement('input', {
+                  type: 'file', accept: '.p12,.pfx', onChange: handleCertUpload,
+                  disabled: connectionStatus !== 'connected' || isUploadingCert || isRemovingCert,
+                  style: { display: 'none' }
+                }),
+                isUploadingCert ? 'Uploading...' : (certStatus?.loaded ? '📁 Replace .p12' : '📁 Upload .p12')
+              ),
+              certStatus?.loaded && React.createElement('button', {
+                onClick: handleCertRemove,
+                disabled: connectionStatus !== 'connected' || isUploadingCert || isRemovingCert,
+                style: {
+                  ...styles.button, ...styles.buttonSm,
+                  ...(connectionStatus !== 'connected' || isUploadingCert || isRemovingCert ? styles.buttonDisabled : {}),
+                  backgroundColor: 'transparent', color: '#dc2626', border: '1px solid #fca5a5'
+                },
+                title: 'Delete the uploaded certificate from the broadcaster'
+              }, isRemovingCert ? 'Removing...' : '✕ Remove')
             )
           )
         ),
 
         // AosCloud Service Card
-        React.createElement('div', { style: { ...styles.card, marginTop: '12px' } },
+        React.createElement('div', { style: styles.card },
           React.createElement('div', { style: styles.cardHeader },
             React.createElement('div', { style: styles.cardTitle },
               React.createElement('span', { style: styles.cardIcon }, '☁️'),
@@ -1486,7 +1569,7 @@ export default function Page({ data, config }: PluginProps) {
         ),
 
         // Units running this service
-        serviceUnits.length > 0 && React.createElement('div', { style: { ...styles.card, marginTop: '8px' } },
+        serviceUnits.length > 0 && React.createElement('div', { style: styles.card },
           React.createElement('div', { style: styles.cardHeader },
             React.createElement('div', { style: styles.cardTitle },
               React.createElement('span', { style: styles.cardIcon }, '🖥️'),
@@ -1534,7 +1617,7 @@ export default function Page({ data, config }: PluginProps) {
         ),
 
         // Unit Monitoring (hide when error/forbidden)
-        unitMonitoring && unitMonitoring.status !== 'error' && React.createElement('div', { style: { ...styles.card, marginTop: '8px' } },
+        unitMonitoring && unitMonitoring.status !== 'error' && React.createElement('div', { style: styles.card },
           React.createElement('div', { style: styles.cardHeader },
             React.createElement('div', { style: styles.cardTitle },
               React.createElement('span', { style: styles.cardIcon }, '📈'),
@@ -1596,7 +1679,7 @@ export default function Page({ data, config }: PluginProps) {
         ),
 
         // Alerts
-        alerts.length > 0 && React.createElement('div', { style: { ...styles.card, marginTop: '8px' } },
+        alerts.length > 0 && React.createElement('div', { style: styles.card },
           React.createElement('div', { style: styles.cardHeader },
             React.createElement('div', { style: styles.cardTitle },
               React.createElement('span', { style: styles.cardIcon }, '⚠️'),

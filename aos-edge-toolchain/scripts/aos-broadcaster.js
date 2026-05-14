@@ -235,6 +235,9 @@ async function main() {
         case 'aos_check_cert':
           response = await handleCheckCert(data);
           break;
+        case 'aos_remove_cert':
+          response = await handleRemoveCert(data);
+          break;
         case 'aos_list_services':
           response = await handleListAosCloud(data, 'services');
           break;
@@ -777,6 +780,42 @@ async function handleGetDeploymentStatus(data) {
   }
 }
 
+// Probe a .p12 to extract subject CN, issuer CN, and validity dates.
+// Returns null on any failure (encrypted cert, missing openssl, malformed file).
+// Best-effort: never throws.
+async function extractCertIdentity(p12Path) {
+  try {
+    const pemPath = `${p12Path}.identity.pem`;
+    await execAsync(`openssl pkcs12 -in ${p12Path} -nokeys -nodes -passin pass: -out ${pemPath}`, { timeout: 10000 });
+    const { stdout } = await execAsync(`openssl x509 -in ${pemPath} -noout -subject -issuer -dates`, { timeout: 5000 });
+    await fs.unlink(pemPath).catch(() => {});
+
+    const pickCN = (line) => {
+      const m = line.match(/CN\s*=\s*([^,/]+)/i);
+      return m ? m[1].trim() : null;
+    };
+    const subjectLine = (stdout.match(/^subject=.*$/m) || [''])[0];
+    const issuerLine  = (stdout.match(/^issuer=.*$/m)  || [''])[0];
+    const notBefore   = (stdout.match(/^notBefore=(.+)$/m) || [, null])[1];
+    const notAfter    = (stdout.match(/^notAfter=(.+)$/m)  || [, null])[1];
+
+    const expiresInDays = notAfter
+      ? Math.floor((new Date(notAfter).getTime() - Date.now()) / 86400000)
+      : null;
+
+    return {
+      cn: pickCN(subjectLine),
+      issuer: pickCN(issuerLine),
+      notBefore,
+      notAfter,
+      expiresInDays
+    };
+  } catch (err) {
+    console.warn('[Cert] Identity extraction failed:', err.message);
+    return null;
+  }
+}
+
 async function handleUploadCert(data) {
   const certDir = '/root/.aos/security';
   const certName = data.certName || 'aos-user-sp';
@@ -806,12 +845,15 @@ async function handleUploadCert(data) {
       console.warn('[Cert] PEM generation failed (cert may require a password):', pemErr.message);
     }
 
+    const identity = await extractCertIdentity(certPath);
+
     return {
       kit_id: instanceId,
       type: 'aos_upload_cert',
       status: 'success',
       message: `Certificate saved (${certBytes.length} bytes)`,
-      certPath
+      certPath,
+      identity
     };
   } catch (error) {
     console.error('[Cert] Upload error:', error.message);
@@ -844,6 +886,7 @@ async function handleCheckCert(data) {
 
     // Check if Key Vault env is set
     const vaultName = process.env.AZURE_KEY_VAULT_NAME || '';
+    const identity = await extractCertIdentity(p12Path);
 
     return {
       kit_id: instanceId,
@@ -854,12 +897,41 @@ async function handleCheckCert(data) {
       certPath: p12Path,
       source: vaultName ? 'keyvault' : 'manual',
       vaultName: vaultName || null,
+      identity,
       message: `Certificate loaded (${stats.size} bytes)`
     };
   } catch (error) {
     return {
       kit_id: instanceId,
       type: 'aos_check_cert',
+      status: 'error',
+      message: error.message
+    };
+  }
+}
+
+async function handleRemoveCert(data) {
+  const certDir = '/root/.aos/security';
+  const certName = data.certName || 'aos-user-sp';
+  const p12Path = path.join(certDir, `${certName}.p12`);
+  const pemPath = path.join(certDir, `${certName}.pem`);
+
+  try {
+    let removed = 0;
+    for (const p of [p12Path, pemPath]) {
+      try { await fs.unlink(p); removed++; console.log(`[Cert] Removed: ${p}`); } catch (e) { /* not present */ }
+    }
+    return {
+      kit_id: instanceId,
+      type: 'aos_remove_cert',
+      status: 'success',
+      message: removed > 0 ? `Removed ${removed} file(s)` : 'No certificate to remove'
+    };
+  } catch (error) {
+    console.error('[Cert] Remove error:', error.message);
+    return {
+      kit_id: instanceId,
+      type: 'aos_remove_cert',
       status: 'error',
       message: error.message
     };
