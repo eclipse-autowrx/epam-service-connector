@@ -35,6 +35,7 @@ export default function Page({ data, config }: PluginProps) {
   const [connectionStatus, setConnectionStatus] = React.useState<'disconnected' | 'connecting' | 'connected'>('disconnected')
   const [selectedPreset, setSelectedPreset] = React.useState('custom')
   const [autoIncVersion, setAutoIncVersion] = React.useState(true)
+  const [autoSyncServiceUid, setAutoSyncServiceUid] = React.useState(true)
   const [activeEditorTab, setActiveEditorTab] = React.useState<'cpp' | 'yaml'>('cpp')
   const cppCodeRef = React.useRef(cppCode)
   const yamlConfigRef = React.useRef(yamlConfig)
@@ -922,6 +923,20 @@ export default function Page({ data, config }: PluginProps) {
     setServiceUnits([])
     setServiceVersions([])
     setUnitMonitoring(null)
+
+    // Auto-sync service_uid to config.yaml if enabled
+    if (uuid && autoSyncServiceUid) {
+      setYamlConfig(prev => {
+        const next = prev.replace(/service_uid:\s*["']?[a-f0-9-]+["']?/i, `service_uid: ${uuid}`)
+        if (next === prev) {
+          addLog(`[Config] service_uid line not found in config.yaml — not synced`)
+        } else {
+          addLog(`[Config] Auto-synced service_uid: ${uuid}`)
+        }
+        return next
+      })
+    }
+
     if (uuid) loadServiceDetails(uuid)
   }
 
@@ -1371,6 +1386,17 @@ export default function Page({ data, config }: PluginProps) {
             React.createElement('span', { style: { fontSize: '10px', color: '#9ca3af' } }, showAdvanced ? '▲ Hide' : '▼ Upload')
           ),
           showAdvanced && React.createElement('div', { style: { padding: '0 12px 12px', borderTop: '1px solid #f3f4f6', marginTop: '8px', paddingTop: '10px' } },
+            // Warning banner
+            React.createElement('div', {
+              style: {
+                fontSize: '11px', color: '#92400e', backgroundColor: '#fef3c7', padding: '8px 10px',
+                borderRadius: '4px', marginBottom: '10px', border: '1px solid #fde68a',
+                display: 'flex', alignItems: 'center', gap: '6px'
+              }
+            },
+              React.createElement('span', null, '⚠️'),
+              'Only upload Service Provider certificates. Never commit personal certificates to the repository.'
+            ),
             certError && React.createElement('div', { style: { fontSize: '12px', color: '#dc2626', marginBottom: '8px' } }, certError),
             React.createElement('label', {
               style: {
@@ -1385,7 +1411,7 @@ export default function Page({ data, config }: PluginProps) {
                 disabled: connectionStatus !== 'connected' || isUploadingCert,
                 style: { display: 'none' }
               }),
-              isUploadingCert ? 'Uploading...' : '📁 Upload .p12 file'
+              isUploadingCert ? 'Uploading...' : '📁 Upload Service Provider certificate .p12 file'
             )
           )
         ),
@@ -1414,6 +1440,21 @@ export default function Page({ data, config }: PluginProps) {
               ...aosServices.map((s: any) =>
                 React.createElement('option', { key: s.uuid, value: s.uuid }, s.title || s.uuid)
               )
+            ),
+            // Auto-sync service_uid checkbox
+            React.createElement('label', {
+              style: {
+                display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px',
+                fontSize: '11px', color: '#6b7280', cursor: 'pointer', userSelect: 'none'
+              }
+            },
+              React.createElement('input', {
+                type: 'checkbox',
+                checked: autoSyncServiceUid,
+                onChange: (e: any) => setAutoSyncServiceUid(e.target.checked),
+                style: { cursor: 'pointer' }
+              }),
+              'Auto-sync service_uid to config.yaml'
             ),
             serviceName && React.createElement('div', {
               style: { display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px' }
@@ -1560,7 +1601,12 @@ export default function Page({ data, config }: PluginProps) {
             React.createElement('div', { style: styles.cardTitle },
               React.createElement('span', { style: styles.cardIcon }, '⚠️'),
               `Alerts (${alerts.length})`
-            )
+            ),
+            React.createElement('button', {
+              onClick: () => setAlerts([]),
+              style: styles.iconButton,
+              title: 'Clear alerts'
+            }, '✕')
           ),
           React.createElement('div', { style: { maxHeight: '120px', overflowY: 'auto' } },
             ...alerts.slice(0, 8).map((a: any, i: number) =>
