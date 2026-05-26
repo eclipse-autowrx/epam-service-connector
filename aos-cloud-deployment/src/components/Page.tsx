@@ -1401,6 +1401,7 @@ export default function Page({ data, config }: PluginProps) {
             React.createElement('li', null, React.createElement('strong', null, 'Hello AOS'), ' \u2014 simple hello world service'),
             React.createElement('li', null, React.createElement('strong', null, 'Signal Writer'), ' \u2014 writes vehicle signals to KUKSA Databroker'),
             React.createElement('li', null, React.createElement('strong', null, 'EV Range Extender'), ' \u2014 battery management with power-save mode'),
+            React.createElement('li', null, React.createElement('strong', null, 'Battery Energy Saver'), ' \u2014 forces HVAC/seat off below SoC thresholds, blocks re-activation'),
             React.createElement('li', null, React.createElement('strong', null, 'Signal Reporter'), ' \u2014 relays signals to the live dashboard')
           )
         )
@@ -1708,6 +1709,7 @@ export default function Page({ data, config }: PluginProps) {
             React.createElement('option', { value: 'kuksaWriter' }, 'Signal Writer — write vehicle signals'),
             React.createElement('option', { value: 'kuksaReader' }, 'KUKSA Reader — read vehicle signals'),
             React.createElement('option', { value: 'evRangeExtender' }, 'EV Range Extender — battery management'),
+            React.createElement('option', { value: 'batteryEnergySaver' }, 'Battery Energy Saver — HVAC/seat cutoff'),
             React.createElement('option', { value: 'signalReporter' }, 'Signal Reporter — relay to dashboard')
           )
         ),
@@ -1846,14 +1848,15 @@ export default function Page({ data, config }: PluginProps) {
           React.createElement('div', {
             title: 'Each .p12 corresponds to one AosCloud account. Uploading switches this broadcaster\u2019s signing identity to that account, replacing whatever cert was loaded before.',
             style: {
-              fontSize: '10px', color: '#92400e',
-              padding: showAdvanced ? '4px 12px 0' : '4px 0 0',
-              display: 'flex', alignItems: 'flex-start', gap: '4px',
-              lineHeight: 1.35
+              fontSize: '11px', color: '#92400e',
+              padding: showAdvanced ? '6px 12px 0 12px' : '6px 0 0 0',
+              paddingLeft: showAdvanced ? '32px' : '20px',
+              textIndent: '-16px',
+              lineHeight: 1.45
             }
           },
-            React.createElement(Icon, { name: 'triangle-alert', size: 11, color: '#d97706', style: { marginTop: '1px' } }),
-            React.createElement('span', null, 'Upload your own .p12 to deploy under your AosCloud account. Replaces the cert currently loaded here.')
+            React.createElement(Icon, { name: 'triangle-alert', size: 12, color: '#d97706', style: { verticalAlign: '-1px', marginRight: '4px' } }),
+            'Upload your own .p12 to deploy under your AosCloud account. Replaces the cert currently loaded here.'
           ),
           showAdvanced && React.createElement('div', { style: { padding: '0 12px 12px', borderTop: '1px solid #f3f4f6', marginTop: '8px', paddingTop: '10px' } },
             certStatus?.loaded && certStatus.identity?.cn && React.createElement('div', {
