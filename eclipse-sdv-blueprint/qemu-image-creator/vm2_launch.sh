@@ -29,6 +29,8 @@ else
     CPU_FLAG="-cpu qemu64"
 fi
 
+echo "Starting VM2 silently in the background..."
+
 qemu-system-x86_64 \
     $KVM_FLAG \
     $CPU_FLAG \
@@ -40,4 +42,5 @@ qemu-system-x86_64 \
     -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:52 \
     -netdev user,id=net1 \
     -device virtio-net-pci,netdev=net1,mac=52:54:00:12:34:62 \
-    -nographic
+    -display none \
+    -daemonize

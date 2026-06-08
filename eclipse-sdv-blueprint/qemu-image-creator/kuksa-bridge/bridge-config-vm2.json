@@ -1,0 +1,54 @@
+{
+  "_comment": [
+    "kuksa-bridge config for VM2 (Zonal) in relay-only mode.",
+    "Scope: the bridge acts as a stateless Zenoh relay between local ECUs",
+    "and the VM1 bridge. It forwards cabin signals without connecting to",
+    "any local Kuksa (which does not exist on VM2).",
+    "Direction:",
+    "  - all 3 cabin signals are BIDIRECTIONAL so the dashboard-driven",
+    "    values sourced by hvac_ecu.py / seat_ecu.py on VM2 still reach",
+    "    VM1, AND the EV Range Extender app on VM1 can push HVAC / Seat",
+    "    setpoint changes back to VM2's bridge. The HVAC / Seat ECUs",
+    "    subscribe to the bridge for those signals and (a) emit",
+    "    an 'ACT' log line and (b) forward a key/value status pair to",
+    "    the host dashboard for the on-screen indicator.",
+    "VM2 listens on tcp/0.0.0.0:7448 (local Zenoh peer for ECUs).",
+    "VM2 dials VM1 on tcp/192.168.100.10:7448 (VM1 bridge listener)."
+  ],
+  "relay_only": true,
+  "diagnostic_log": true,
+  "kuksa": {
+    "host": "127.0.0.1",
+    "port": 55555
+  },
+  "zenoh": {
+    "mode": "peer",
+    "listen": ["tcp/0.0.0.0:7448"],
+    "connect": ["tcp/192.168.100.10:7448"]
+  },
+  "key_prefix": "kuksa-bridge",
+  "source_label": "vm2",
+  "signals": [
+    {
+      "_role": "VM2 relay: cabin (bidirectional - dashboard and EV-app writes flow both ways)",
+      "path": "Vehicle.Cabin.HVAC.AmbientAirTemperature",
+      "type": "float",
+      "unit": "percent",
+      "direction": "bidirectional"
+    },
+    {
+      "_role": "VM2 relay: cabin (bidirectional - dashboard and EV-app writes flow both ways)",
+      "path": "Vehicle.Cabin.Seat.Row1.DriverSide.Heating",
+      "type": "int",
+      "unit": "percent",
+      "direction": "bidirectional"
+    },
+    {
+      "_role": "VM2 relay: cabin (bidirectional - dashboard and EV-app writes flow both ways)",
+      "path": "Vehicle.Cabin.Seat.Row1.DriverSide.HeatingCooling",
+      "type": "int",
+      "unit": "percent",
+      "direction": "bidirectional"
+    }
+  ]
+}

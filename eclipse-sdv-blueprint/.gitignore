@@ -1,0 +1,135 @@
+# =====================================================================
+# Eclipse SDV Blueprint - root .gitignore
+#
+# Covers the whole repo:
+#   - hardware-sim/        (PyTk host dashboard)
+#   - qemu-image-creator/  (cloud-init + QEMU VM build pipeline)
+#   - images/              (committed SVG diagrams - kept as-is)
+#
+# Anything large / generated / machine-local belongs here. Source,
+# README, requirements.txt, *.sh launchers and the architecture SVGs
+# stay tracked.
+# =====================================================================
+
+# ---------------------------------------------------------------------
+# VM / lab build artefacts
+# ---------------------------------------------------------------------
+# Everything qemu-image-creator/setup.{py,sh} writes lands in output/.
+# Keep the directory itself (via .gitkeep) but ignore its contents.
+qemu-image-creator/output/*
+!qemu-image-creator/output/.gitkeep
+
+# Disk / cloud-init image artefacts (also caught above, but guard
+# against anyone running qemu-img / cloud-localds outside output/).
+*.qcow2
+*.img
+*.iso
+*.raw
+*.composed
+
+# Generated cloud-init seed leftovers (seed1.img, seed2.img, ...).
+seed*.img
+
+# ECU log files normally written under /tmp inside the VMs - guard
+# against an accidental pull onto the host.
+ev-range-*.log
+
+# ---------------------------------------------------------------------
+# Logs / runtime / temp files
+# ---------------------------------------------------------------------
+*.log
+*.tmp
+*.cache
+*.pid
+*.lock
+
+# ---------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments - matched at ANY depth in the repo. A gitignore
+# pattern without a leading slash already matches in every directory,
+# but the `**/` mirrors are kept for readability so it is obvious that
+# a venv created in ANY sub-folder (hardware-sim/.venv,
+# qemu-image-creator/.venv, foo/bar/baz/venv, ...) will be ignored.
+.venv/
+venv/
+env/
+ENV/
+.virtualenv/
+virtualenv/
+pyvenv/
+**/.venv/
+**/venv/
+**/env/
+**/ENV/
+**/.virtualenv/
+**/virtualenv/
+**/pyvenv/
+# The trailing-slash patterns above match real venv directories; the
+# patterns below (no trailing slash) also catch a symlink named .venv
+# that points at a sibling venv (e.g. hardware-sim/.venv ->
+# ../qemu-image-creator/.venv, used so both folders share one venv).
+.venv
+**/.venv
+# Marker file written at the root of every PEP 405 venv.
+pyvenv.cfg
+.python-version
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Build / packaging
+build/
+dist/
+*.egg
+*.egg-info/
+pip-wheel-metadata/
+
+# ---------------------------------------------------------------------
+# SSH / keys / secrets
+# ---------------------------------------------------------------------
+known_hosts
+*.pem
+*.key
+*.crt
+.env
+.env.*
+
+# Public keys are commonly committed; uncomment if you want them
+# blocked repo-wide.
+# *.pub
+
+# ---------------------------------------------------------------------
+# Editor / IDE
+# ---------------------------------------------------------------------
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+*~
+
+# ---------------------------------------------------------------------
+# OS / system
+# ---------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------------------------------------------------------------------
+# Misc backups
+# ---------------------------------------------------------------------
+*.bak
+*.old
+*.orig

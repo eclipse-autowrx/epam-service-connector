@@ -1,36 +1,97 @@
-# Output (Generated Files & Dirs)
+# ---------------------------------------------------------------------
+# Lab outputs (qcow2 disks, seed images, composed cloud-init, etc.)
+# Everything `setup.py` / `setup.sh` writes lives here.
+# ---------------------------------------------------------------------
 output/*
 !output/.gitkeep
+
+# Disk / image artefacts (also dropped under output/, but caught here in
+# case anyone runs cloud-localds / qemu-img outside the project layout)
 *.qcow2
 *.img
 *.iso
+*.raw
+*.composed
 
-# Logs & Temporary Files
+# Generated cloud-init seed leftovers
+seed*.img
+
+# ---------------------------------------------------------------------
+# Logs / runtime / temp files
+# ---------------------------------------------------------------------
 *.log
 *.tmp
 *.cache
 *.pid
+*.lock
 
-# SSH / Keys (Security)
+# ECU log files written under /tmp on the VMs - never on the host, but
+# guard against an accidental pull
+ev-range-*.log
+
+# ---------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------
+# Bytecode / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# Tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Build / packaging
+build/
+dist/
+*.egg
+*.egg-info/
+pip-wheel-metadata/
+
+# ---------------------------------------------------------------------
+# SSH / keys / secrets
+# ---------------------------------------------------------------------
 known_hosts
 *.pem
 *.key
 *.pub
+*.crt
+.env
+.env.*
 
-# System Files
-.DS_Store
-Thumbs.db
-
-# Editor / IDE Files
+# ---------------------------------------------------------------------
+# Editor / IDE
+# ---------------------------------------------------------------------
 .vscode/
 .idea/
+.cursor/
 *.swp
 *.swo
+*~
 
-# Python
-__pycache__/
-*.pyc
+# ---------------------------------------------------------------------
+# OS / system
+# ---------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
 
+# ---------------------------------------------------------------------
 # Misc
+# ---------------------------------------------------------------------
 *.bak
 *.old
+*.orig

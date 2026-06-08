@@ -1,3 +1,5 @@
+**Note:** for eclipse sdv blueprint please refer to the README inside folder eclipse-sdv-blueprint
+
 # Introduction
 
 This guidance aim to setup a serivce on EPAM unit to receive python code from playground.digital.auto and execute code.

@@ -1,0 +1,55 @@
+{
+  "_comment": [
+    "kuksa-bridge config for VM1 (HPC).",
+    "Scope: the bridge carries ONLY the 3 cabin signals between VM1 and",
+    "VM2; battery and range are NOT bridged (the EV Range Extender app",
+    "on VM1 owns them locally and nothing on VM2 consumes them).",
+    "Direction:",
+    "  - all 3 cabin signals are BIDIRECTIONAL so the EV Range Extender",
+    "    app on VM1 can write to VM1's Kuksa and have those values",
+    "    mirrored to VM2 where the HVAC / Seat ECUs react, AND the",
+    "    dashboard-driven values from VM2 still reach VM1.",
+    "    The bridge's source-label filter (see kuksa_bridge.py) breaks",
+    "    the otherwise-symmetric ping-pong; the receiver-side dedup",
+    "    inside _inbound_consumer suppresses the single-round echo.",
+    "VM1 listens on tcp/0.0.0.0:7448 for the Zenoh peer connection from",
+    "VM2 (kept off the legacy 7447 port so zenoh_client.py keeps working",
+    "side-by-side during the cutover). The same single Zenoh connection",
+    "carries traffic in both directions."
+  ],
+  "kuksa": {
+    "host": "127.0.0.1",
+    "port": 55555
+  },
+  "zenoh": {
+    "mode": "peer",
+    "listen": ["tcp/0.0.0.0:7448"],
+    "connect": []
+  },
+  "key_prefix": "kuksa-bridge",
+  "source_label": "vm1",
+  "suppress_initial_outbound": true,
+  "signals": [
+    {
+      "_role": "VM1 <-> VM2: cabin (bidirectional - EV-app writes flow VM1 -> VM2)",
+      "path": "Vehicle.Cabin.HVAC.AmbientAirTemperature",
+      "type": "float",
+      "unit": "percent",
+      "direction": "bidirectional"
+    },
+    {
+      "_role": "VM1 <-> VM2: cabin (bidirectional - EV-app writes flow VM1 -> VM2)",
+      "path": "Vehicle.Cabin.Seat.Row1.DriverSide.Heating",
+      "type": "int",
+      "unit": "percent",
+      "direction": "bidirectional"
+    },
+    {
+      "_role": "VM1 <-> VM2: cabin (bidirectional - EV-app writes flow VM1 -> VM2)",
+      "path": "Vehicle.Cabin.Seat.Row1.DriverSide.HeatingCooling",
+      "type": "int",
+      "unit": "percent",
+      "direction": "bidirectional"
+    }
+  ]
+}

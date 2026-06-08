@@ -5,13 +5,19 @@ users:
   - name: ubuntu
     sudo: ALL=(ALL) NOPASSWD:ALL
     groups: users, admin, docker
+    groups: users, admin, docker
     home: /home/ubuntu
     shell: /bin/bash
+    lock_passwd: false
     lock_passwd: false
 
 ssh_pwauth: true
 chpasswd:
   expire: false
+  users:
+    - name: ubuntu
+      password: ubuntu
+      type: text
   users:
     - name: ubuntu
       password: ubuntu
@@ -26,11 +32,17 @@ packages:
   - net-tools
   - iproute2
   - curl
+  - python3
+  - python3-pip
+  - python3-full
+  - net-tools
+  - iproute2
+  - curl
 
 write_files:
   # Force password SSH login on. Highest-numbered drop-in wins over
   # any default cloud-image overrides (e.g. 60-cloudimg-settings.conf).
-  - path: /etc/ssh/sshd_config.d/99-xmel-pwauth.conf
+  - path: /etc/ssh/sshd_config.d/99-evrange-pwauth.conf
     permissions: '0644'
     owner: root:root
     content: |
@@ -39,18 +51,19 @@ write_files:
       PermitRootLogin no
 
   # Robust SDV Runtime startup script with retries, health checks and dedicated log file.
-  # Re-runnable manually: sudo /usr/local/bin/xmel-start-runtime
-  - path: /usr/local/bin/xmel-start-runtime
+  # Re-runnable manually: sudo /usr/local/bin/evrange-start-runtime
+  - path: /usr/local/bin/evrange-start-runtime
     permissions: '0755'
+    owner: root:root
     owner: root:root
     content: |
       #!/usr/bin/env bash
-      # XMEL SDV Runtime startup helper.
+      # EV Range Extender SDV Runtime startup helper.
       # Pulls and starts the digital.auto SDV Runtime (Kuksa Databroker + cloud sync)
       # with retries and a health check on the gRPC port.
       set -uo pipefail
 
-      LOG_FILE="/tmp/xmel-runtime.log"
+      LOG_FILE="/tmp/evrange-runtime.log"
       CONTAINER="sdv-runtime"
       IMAGE="ghcr.io/eclipse-autowrx/sdv-runtime:latest"
       RUNTIME_NAME="${RUNTIME_NAME:-ev-range}"
@@ -158,14 +171,14 @@ write_files:
       main() {
           : > "$LOG_FILE" 2>/dev/null || true
           log "============================================================"
-          log "             XMEL SDV Runtime Startup (VM1)"
+          log "        EV Range Extender SDV Runtime Startup (VM1)"
           log "============================================================"
           log "Image          : $IMAGE"
           log "Container name : $CONTAINER"
           log "Runtime name   : $RUNTIME_NAME"
           log "Databroker port: $DATABROKER_PORT"
           log "Log file       : $LOG_FILE"
-          log "Re-run         : sudo /usr/local/bin/xmel-start-runtime"
+          log "Re-run         : sudo /usr/local/bin/evrange-start-runtime"
           log "============================================================"
 
           ensure_docker
@@ -182,7 +195,7 @@ write_files:
           fi
           if ! wait_for_databroker; then
               log "Health check failed - container is up but databroker is not responding"
-              log "Try: sudo /usr/local/bin/xmel-start-runtime  (will recreate the container)"
+              log "Try: sudo /usr/local/bin/evrange-start-runtime  (will recreate the container)"
               exit 4
           fi
 
@@ -196,22 +209,5 @@ write_files:
       main "$@"
 
 runcmd:
-  - usermod -aG docker ubuntu
-
-  # Make sure sshd picks up the password-auth drop-in written above.
-  - systemctl restart ssh
-
-  # Install Python packages required by xmel-client and Python apps.
-  - |
-    pip3 install --break-system-packages --ignore-installed kuksa-client grpcio grpcio-tools \
-      eclipse-zenoh pyyaml jsonschema requests packaging \
-      >> /tmp/xmel-pip.log 2>&1 || \
-      echo "WARNING: pip install reported errors, see /tmp/xmel-pip.log" >> /tmp/xmel-pip.log
-
-  # Start the SDV Runtime via the helper script. Background with & so cloud-init
-  # does not block forever if the network is slow or ghcr.io is throttled.
-  - /usr/local/bin/xmel-start-runtime &
-
-  # Create apps directory for xmel-client deployments.
-  - mkdir -p /home/ubuntu/apps
-  - chown -R ubuntu:ubuntu /home/ubuntu/apps
+  # Run as root so we don't hit permission boundaries
+  - bash /home/ubuntu/setup_runtime.sh > /home/ubuntu/automated_setup.log 2>&1
