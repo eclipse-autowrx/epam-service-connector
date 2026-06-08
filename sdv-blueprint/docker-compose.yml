@@ -1,0 +1,101 @@
+# Eclipse SDV Blueprint — Docker Compose
+# Brings up the full demo stack in one command.
+#
+# Prerequisites:
+#   1. Build the aos-edge-toolchain image:
+#        cd aos-edge-toolchain && docker build -t aos-edge-toolchain:latest .
+#   2. Place your SP certificate at ~/.aos/security/aos-user-sp.p12
+#
+# Usage:
+#   cd sdv-blueprint
+#   docker compose up            # foreground (see all logs interleaved)
+#   docker compose up -d         # background
+#   docker compose logs -f       # tail logs
+#   docker compose down          # stop everything
+
+services:
+
+  # ── KUKSA Databrokers ──────────────────────────────────────────────
+
+  kuksa-hpc:
+    image: ghcr.io/eclipse-kuksa/kuksa-databroker:latest
+    container_name: kuksa-hpc
+    network_mode: host
+    command: ["--insecure", "--port", "55555", "--metadata", "/vss.json"]
+    volumes:
+      - ./vss-merged.json:/vss.json:ro
+    restart: unless-stopped
+
+  kuksa-zonal:
+    image: ghcr.io/eclipse-kuksa/kuksa-databroker:latest
+    container_name: kuksa-zonal
+    network_mode: host
+    command: ["--insecure", "--port", "55556", "--metadata", "/vss.json"]
+    volumes:
+      - ./vss-merged.json:/vss.json:ro
+    restart: unless-stopped
+
+  # ── Python services ────────────────────────────────────────────────
+
+  kuksa-bridge:
+    image: sdv-blueprint-python:latest
+    container_name: kuksa-bridge
+    network_mode: host
+    environment:
+      - ZONAL_KUKSA_ADDR=localhost:55556
+      - HPC_KUKSA_ADDR=localhost:55555
+    command: ["python3", "/app/kuksa-sync/kuksa-bridge.py"]
+    depends_on:
+      kuksa-hpc:
+        condition: service_started
+      kuksa-zonal:
+        condition: service_started
+    restart: unless-stopped
+
+  end-simulator:
+    image: sdv-blueprint-python:latest
+    container_name: end-simulator
+    network_mode: host
+    environment:
+      - KUKSA_ADDR=localhost:55556
+      - PUBLISH_INTERVAL=2
+    command: ["python3", "/app/end-simulator/simulator.py"]
+    depends_on:
+      kuksa-zonal:
+        condition: service_started
+    restart: unless-stopped
+
+  signal-reporter:
+    image: sdv-blueprint-python:latest
+    container_name: signal-reporter
+    network_mode: host
+    environment:
+      - HPC_KUKSA_ADDR=localhost:55555
+      - RELAY_HOST=localhost
+      - RELAY_PORT=9100
+    command: ["python3", "/app/signal-reporter/reporter.py"]
+    depends_on:
+      kuksa-hpc:
+        condition: service_started
+    restart: unless-stopped
+
+  # ── Broadcaster with signal relay ──────────────────────────────────
+  # Requires the aos-edge-toolchain image to be pre-built.
+  # Uncomment and configure the section below when ready.
+  #
+  # broadcaster:
+  #   image: aos-edge-toolchain:latest
+  #   container_name: aos-broadcaster
+  #   network_mode: host
+  #   entrypoint: ["sh", "-c", "python3 /usr/local/bin/init-certs.py && exec node /usr/local/bin/aos-broadcaster.js"]
+  #   volumes:
+  #     - ${AOS_CERT_PATH:-~/.aos/security/aos-user-sp.p12}:/certs/aos-user-sp.p12:ro
+  #   environment:
+  #     - INSTANCE_ID=${INSTANCE_ID:-AET-TOOLCHAIN-001}
+  #     - INSTANCE_NAME=AOS Edge Toolchain
+  #     - KIT_MANAGER_URL=https://kit.digitalauto.tech
+  #     - CERT_FILE=/certs/aos-user-sp.p12
+  #     - AOSCLOUD_URL=https://aoscloud.io:10000
+  #     - SIGNAL_RELAY_PORT=9100
+  #     - NODE_TLS_REJECT_UNAUTHORIZED=0
+  #   restart: unless-stopped

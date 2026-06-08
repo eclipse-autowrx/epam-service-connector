@@ -1,0 +1,36 @@
+publisher:
+    author: "developer@example.com"
+    company: "Example Corp"
+
+build:
+    os: linux
+    arch: aarch64
+    sign_pkcs12: aos-user-sp.p12
+    symlinks: copy
+
+publish:
+    url: aoscloud.io
+    service_uid: c0528145-b393-44c6-aeaa-b26bc560acee
+    tls_pkcs12: aos-user-sp.p12
+    version: "1.0.0"
+
+configuration:
+    cmd: /hello-aos
+    workingDir: '/'
+    state:
+        filename: default_state.dat
+        required: true
+    instances:
+        minInstances: 1
+        priority: 0
+    isResourceLimits: true
+    requestedResources:
+        cpu: 1000
+        ram: 10MB
+        storage: 5MB
+        state: 512KB
+    quotas:
+        cpu: 1000
+        mem: 10MB
+        state: 512KB
+        storage: 5MB

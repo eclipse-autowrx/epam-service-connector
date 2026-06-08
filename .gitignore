@@ -1,0 +1,7 @@
+node_modules/
+*.js.map
+.env
+*.p12
+*.pfx
+*.pem
+!service/src/etc/kuksa-val/CA.pem

@@ -1,0 +1,89 @@
+/********************************************************************************
+ * Copyright (c) 2022 Contributors to the Eclipse Foundation
+ *
+ * See the NOTICE file(s) distributed with this work for additional
+ * information regarding copyright ownership.
+ *
+ * This program and the accompanying materials are made available under the
+ * terms of the Apache License 2.0 which is available at
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ ********************************************************************************/
+
+syntax = "proto3";
+
+package kuksa.val.v1;
+
+option go_package = "kuksa/val/v1";
+
+import "kuksa/val/v1/types.proto";
+
+service VAL {
+ rpc Get(GetRequest) returns (GetResponse);
+ rpc Set(SetRequest) returns (SetResponse);
+ rpc StreamedUpdate(stream StreamedUpdateRequest) returns (stream StreamedUpdateResponse);
+ rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
+ rpc GetServerInfo(GetServerInfoRequest) returns (GetServerInfoResponse);
+}
+
+message EntryRequest {
+ string path = 1;
+ View view = 2;
+ repeated Field fields = 3;
+}
+
+message GetRequest {
+ repeated EntryRequest entries = 1;
+}
+
+message GetResponse {
+ repeated DataEntry entries = 1;
+ repeated DataEntryError errors = 2;
+ Error error = 3;
+}
+
+message EntryUpdate {
+ DataEntry entry = 1;
+ repeated Field fields = 2;
+}
+
+message SetRequest {
+ repeated EntryUpdate updates = 1;
+}
+
+message SetResponse {
+ Error error = 1;
+ repeated DataEntryError errors = 2;
+}
+
+message StreamedUpdateRequest {
+ repeated EntryUpdate updates = 1;
+}
+
+message StreamedUpdateResponse {
+ Error error = 1;
+ repeated DataEntryError errors = 2;
+}
+
+message SubscribeEntry {
+ string path = 1;
+ View view = 2;
+ repeated Field fields = 3;
+}
+
+message SubscribeRequest {
+ repeated SubscribeEntry entries = 1;
+}
+
+message SubscribeResponse {
+ repeated EntryUpdate updates = 1;
+}
+
+message GetServerInfoRequest {
+}
+
+message GetServerInfoResponse {
+ string name = 1;
+ string version = 2;
+}

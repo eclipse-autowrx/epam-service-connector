@@ -1,0 +1,75 @@
+{
+  "Vehicle": {
+    "type": "branch",
+    "description": "Vehicle",
+    "children": {
+      "Cabin": {
+        "type": "branch",
+        "description": "Cabin",
+        "children": {
+          "HVAC": {
+            "type": "branch",
+            "description": "HVAC",
+            "children": {
+              "TargetTemperature": {
+                "type": "sensor",
+                "datatype": "float",
+                "description": "Target cabin temperature"
+              }
+            }
+          },
+          "Seat": {
+            "type": "branch",
+            "description": "Seat",
+            "children": {
+              "VentilationLevel": {
+                "type": "sensor",
+                "datatype": "float",
+                "description": "Seat ventilation level 0-3"
+              },
+              "Heating": {
+                "type": "actuator",
+                "datatype": "float",
+                "description": "Seat heating 0=off 1=on"
+              }
+            }
+          },
+          "Lights": {
+            "type": "branch",
+            "description": "Lights",
+            "children": {
+              "AmbientLight": {
+                "type": "branch",
+                "description": "AmbientLight",
+                "children": {
+                  "Intensity": {
+                    "type": "actuator",
+                    "datatype": "float",
+                    "description": "Ambient light intensity 0-100"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Infotainment": {
+        "type": "branch",
+        "description": "Infotainment",
+        "children": {
+          "Display": {
+            "type": "branch",
+            "description": "Display",
+            "children": {
+              "Brightness": {
+                "type": "sensor",
+                "datatype": "float",
+                "description": "Display brightness 0-100"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

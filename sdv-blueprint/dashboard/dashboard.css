@@ -1,0 +1,193 @@
+/* Copyright (c) 2026 Eclipse Foundation. SPDX-License-Identifier: MIT */
+
+:root {
+  --bg:        #0f1117;
+  --surface:   #1a1d27;
+  --card:      #222632;
+  --border:    #2e3347;
+  --text:      #e1e4ed;
+  --muted:     #8b90a5;
+  --accent:    #4f8ff7;
+  --green:     #34d399;
+  --red:       #f87171;
+  --yellow:    #fbbf24;
+  --orange:    #fb923c;
+  --radius:    8px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+header h1 { font-size: 16px; font-weight: 600; }
+header .subtitle { color: var(--muted); font-size: 12px; margin-left: 8px; }
+
+.conn-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.conn-bar input {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  width: 260px;
+}
+.conn-bar button {
+  padding: 4px 14px;
+  border-radius: var(--radius);
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+.conn-bar button:hover { opacity: .85; }
+
+.dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.dot.on  { background: var(--green); }
+.dot.off { background: var(--red); }
+
+main {
+  display: grid;
+  grid-template-columns: 340px 1fr 300px;
+  gap: 12px;
+  padding: 12px 20px;
+  height: calc(100vh - 96px);
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.card-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  color: var(--muted);
+  padding: 10px 14px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.card-body { padding: 10px 14px; }
+
+/* Architecture panel */
+.arch-node {
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  font-size: 13px;
+}
+.arch-node .node-label { font-weight: 600; }
+.arch-node .node-detail { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.arch-node.hpc  { border-left: 3px solid var(--accent); }
+.arch-node.zon  { border-left: 3px solid var(--green); }
+.arch-node.end  { border-left: 3px solid var(--orange); }
+.arch-arrow {
+  text-align: center;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 2px 0;
+}
+
+/* Signal gauges */
+.signals-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.gauge {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  text-align: center;
+}
+.gauge .label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+.gauge .value { font-size: 22px; font-weight: 700; }
+.gauge .unit  { font-size: 11px; color: var(--muted); }
+.gauge .bar {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+.gauge .bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width .4s ease;
+}
+
+/* Mode indicator */
+.mode-box {
+  text-align: center;
+  padding: 14px;
+  border-radius: var(--radius);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  margin-bottom: 10px;
+}
+.mode-NORMAL     { background: #163a2a; color: var(--green); }
+.mode-POWER_SAVE { background: #3d1e1e; color: var(--red); }
+
+.restrictions { font-size: 12px; }
+.restrictions div {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+}
+.restrictions .val { font-weight: 600; }
+
+/* Logs */
+.log-area {
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 11px;
+  overflow-y: auto;
+  max-height: 260px;
+  padding: 6px 10px;
+  background: var(--bg);
+  border-radius: var(--radius);
+}
+.log-area div {
+  padding: 1px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.log-area .ts { color: var(--muted); margin-right: 6px; }
+
+/* Column layout */
+.col { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }

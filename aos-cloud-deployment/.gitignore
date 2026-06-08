@@ -1,0 +1,8 @@
+node_modules/
+index.js
+index.js.map
+standalone.js
+standalone.js.map
+.env
+*.p12
+*.pfx

@@ -1,0 +1,10 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY end-simulator/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+COPY kuksa-sync/ /app/kuksa-sync/
+COPY end-simulator/ /app/end-simulator/
+COPY signal-reporter/ /app/signal-reporter/

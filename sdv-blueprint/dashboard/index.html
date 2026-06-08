@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<!-- Copyright (c) 2026 Eclipse Foundation. SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eclipse SDV Blueprint — Dashboard</title>
+  <link rel="stylesheet" href="dashboard.css">
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body>
+
+<header>
+  <div style="display:flex;align-items:center">
+    <h1>Eclipse SDV Blueprint</h1>
+    <span class="subtitle">EV Range Extender Demo</span>
+  </div>
+  <div style="font-size:12px;color:var(--muted)">
+    HPC &middot; Zonal &middot; End &rarr; Live Signals
+  </div>
+</header>
+
+<div class="conn-bar">
+  <label for="instance-id">Broadcaster ID:</label>
+  <input id="instance-id" type="text" value="AET-TOOLCHAIN-001" placeholder="e.g. AET-TOOLCHAIN-001">
+  <button onclick="dashConnect()">Connect</button>
+  <span id="conn-dot" class="dot off"></span>
+  <span id="conn-text" style="color:var(--muted);font-size:12px">Disconnected</span>
+</div>
+
+<main>
+  <!-- LEFT: Architecture + Logs -->
+  <div class="col">
+    <div class="card">
+      <div class="card-title">Architecture</div>
+      <div class="card-body">
+        <div class="arch-node hpc">
+          <div class="node-label">HPC Node (VM1)</div>
+          <div class="node-detail">KUKSA Databroker :55555 &middot; AosCore</div>
+          <div class="node-detail">Services: EV Range Extender, Signal Reporter</div>
+        </div>
+        <div class="arch-arrow">&darr; gRPC sync (kuksa-bridge) &darr;</div>
+        <div class="arch-node zon">
+          <div class="node-label">Zonal Node (VM2)</div>
+          <div class="node-detail">KUKSA Databroker :55556 &middot; AosCore</div>
+          <div class="node-detail">Services: Signal Writer (Speed, SoC, Temp)</div>
+        </div>
+        <div class="arch-arrow">&darr; gRPC &darr;</div>
+        <div class="arch-node end">
+          <div class="node-label">End Node (Simulated)</div>
+          <div class="node-detail">Python simulator</div>
+          <div class="node-detail">Sensors: HVAC Target, Display, Seat Vent</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Signal Flow</div>
+      <div class="card-body" style="font-size:12px;color:var(--muted);line-height:1.8">
+        <div><strong style="color:var(--orange)">End</strong> &rarr; HVAC.TargetTemp, Display.Brightness, Seat.Vent</div>
+        <div style="padding-left:16px">&darr; gRPC &rarr; Zonal KUKSA</div>
+        <div><strong style="color:var(--green)">Zonal</strong> &rarr; Speed, SoC, AmbientTemp</div>
+        <div style="padding-left:16px">&darr; kuksa-bridge &rarr; HPC KUKSA</div>
+        <div><strong style="color:var(--accent)">HPC</strong> &rarr; EV Range Extender reads all signals</div>
+        <div style="padding-left:16px">&darr; computes Range, actuates Lights/SeatHeat</div>
+        <div><strong style="color:#a78bfa">Reporter</strong> &rarr; pushes all signals to this dashboard</div>
+      </div>
+    </div>
+
+    <div class="card" style="flex:1;min-height:0">
+      <div class="card-title">Event Log</div>
+      <div id="log-area" class="log-area"></div>
+    </div>
+  </div>
+
+  <!-- CENTER: Live Signals -->
+  <div class="col">
+    <div class="card" style="flex:1;min-height:0">
+      <div class="card-title">Live Vehicle Signals</div>
+      <div class="card-body">
+        <div id="signals-grid" class="signals-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: EV Range Extender Status -->
+  <div class="col">
+    <div class="card">
+      <div class="card-title">EV Range Extender</div>
+      <div class="card-body">
+        <div id="mode-box" class="mode-box mode-NORMAL">NORMAL</div>
+        <div id="restrictions" class="restrictions">
+          <div><span>Mode</span><span class="val">--</span></div>
+          <div><span>Range</span><span class="val">--</span></div>
+          <div><span>SoC</span><span class="val">--</span></div>
+          <div><span>Lights</span><span class="val">--</span></div>
+          <div><span>Seat Heating</span><span class="val">--</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Use Case</div>
+      <div class="card-body" style="font-size:12px;color:var(--muted);line-height:1.6">
+        <p>When battery SoC drops below <strong style="color:var(--red)">20%</strong>,
+        the EV Range Extender activates <strong style="color:var(--red)">POWER SAVE</strong>
+        mode:</p>
+        <ul style="margin:8px 0 0 16px;list-style:disc">
+          <li>Ambient lights dimmed to 30%</li>
+          <li>Seat heating disabled</li>
+          <li>Range computed at degraded efficiency</li>
+        </ul>
+        <p style="margin-top:8px">Above 20% SoC, all systems return to
+        <strong style="color:var(--green)">NORMAL</strong>.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Signal Legend</div>
+      <div class="card-body" style="font-size:11px;">
+        <table style="width:100%;border-collapse:collapse">
+          <tr><td style="color:var(--green);padding:2px 0">Zonal</td><td>Speed, SoC, Ambient Temp</td></tr>
+          <tr><td style="color:var(--orange);padding:2px 0">End</td><td>Target Temp, Display, Seat Vent</td></tr>
+          <tr><td style="color:var(--accent);padding:2px 0">HPC</td><td>Range (computed)</td></tr>
+          <tr><td style="color:var(--red);padding:2px 0">HPC</td><td>Lights, Seat Heat (actuated)</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="dashboard.js"></script>
+</body>
+</html>

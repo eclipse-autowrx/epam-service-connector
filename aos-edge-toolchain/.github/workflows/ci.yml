@@ -1,0 +1,72 @@
+name: CI
+
+# Test on push and pull requests
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-build:
+    name: Test Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build test image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: aos-edge-toolchain:test
+
+      - name: Create test source
+        run: |
+          mkdir -p test-src
+          cat > test-src/main.cpp << 'EOF'
+          #include <iostream>
+          int main() {
+              std::cout << "Test build successful!" << std::endl;
+              return 0;
+          }
+          EOF
+
+      - name: Test cross-compilation
+        run: |
+          docker run --rm \
+            -v $(pwd)/test-src:/workspace/src:ro \
+            -v $(pwd)/test-output:/workspace/output \
+            aos-edge-toolchain:test /workspace/src/main.cpp /workspace/output/test
+
+      - name: Verify binary
+        run: |
+          file test-output/test | grep "ELF 64-bit LSB executable"
+          ./test-output/test | grep "Test build successful"
+
+  validate-certs:
+    name: Validate Certificates
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: aos-edge-toolchain:validate
+
+      - name: Check certificates exist
+        run: |
+          docker run --rm aos-edge-toolchain:validate ls -la /root/.aos/security/

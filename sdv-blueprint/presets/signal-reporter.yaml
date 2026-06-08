@@ -1,0 +1,39 @@
+publisher:
+    author: "developer@example.com"
+    company: "Example Corp"
+
+build:
+    os: linux
+    arch: x86_64
+    sign_pkcs12: aos-user-sp.p12
+    symlinks: copy
+
+publish:
+    url: aoscloud.io
+    service_uid: 242dd4d4-7236-432d-88b9-ba9bbb3288f8
+    tls_pkcs12: aos-user-sp.p12
+    version: "1.0.15"
+
+configuration:
+    cmd: /signal-reporter
+    workingDir: '/'
+    env:
+        - "KUKSA_DATABROKER_ADDR=172.17.0.1:55555"
+        - "SIGNAL_RELAY_URL=10.0.0.1:9100"
+    state:
+        filename: default_state.dat
+        required: true
+    instances:
+        minInstances: 1
+        priority: 0
+    isResourceLimits: true
+    requestedResources:
+        cpu: 1000
+        ram: 10MB
+        storage: 5MB
+        state: 512KB
+    quotas:
+        cpu: 1000
+        mem: 10MB
+        state: 512KB
+        storage: 5MB
