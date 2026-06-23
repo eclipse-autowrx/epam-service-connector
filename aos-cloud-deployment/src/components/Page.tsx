@@ -1710,6 +1710,7 @@ export default function Page({ data, config }: PluginProps) {
             React.createElement('option', { value: 'kuksaReader' }, 'KUKSA Reader — read vehicle signals'),
             React.createElement('option', { value: 'evRangeExtender' }, 'EV Range Extender — battery management'),
             React.createElement('option', { value: 'batteryEnergySaver' }, 'Battery Energy Saver — HVAC/seat cutoff'),
+            React.createElement('option', { value: 'batteryEnergySaverSdvRuntime' }, 'Battery Energy Saver — sdv-runtime / VSS 4.0'),
             React.createElement('option', { value: 'signalReporter' }, 'Signal Reporter — relay to dashboard')
           )
         ),
