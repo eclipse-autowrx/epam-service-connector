@@ -190,16 +190,21 @@ export class AosService {
 
   // Build and deploy AOS application
   async buildAndDeploy(request: BuildRequest): Promise<BuildResponse> {
-    const data = {
+    const lang = request.language || 'cpp'
+    const data: any = {
       name: request.name,
       displayName: request.displayName || request.name,
-      cppCode: request.cppCode,
       yamlConfig: request.yamlConfig,
-      language: 'cpp',
+      language: lang,
       vehicleId: 'default-vehicle'
     }
+    if (lang === 'python') {
+      data.pythonCode = request.pythonCode || ''
+    } else {
+      data.cppCode = request.cppCode || ''
+    }
 
-    console.log('[AosService] Building app with code length:', request.cppCode?.length)
+    console.log('[AosService] Building app with language:', lang, 'code length:', (request.cppCode || request.pythonCode || '').length)
     const response = await this.sendCommand('aos_build_deploy', data)
 
     if (response.status === 'started' || response.result === 'success' || response.status === 'building' || response.status === 'success') {

@@ -547,6 +547,85 @@ ${identityLine}
 `;
 }
 
+function generatePythonConfig(appName, oldYamlConfig) {
+  // Parse values from YAML config (supports both 1.x and 2.x formats)
+  const extractValue = (pattern) => {
+    const match = oldYamlConfig.match(pattern);
+    return match ? match[1].trim() : null;
+  };
+
+  const publisher = extractValue(/author:\s*["']?([^"'\n]+)["']?/) || 'developer@example.com';
+  const company = extractValue(/company:\s*["']?([^"'\n]+)["']?/) || 'Example Corp';
+  const version = extractValue(/version:\s*["']?([^"'\n]+)["']?/) || '1.0.0';
+  const workingDir = extractValue(/workingDir:\s*["']?([^"'\n]+)["']?/) || '/';
+
+  // Extract identity fields
+  const serviceId = extractValue(/id:\s*([a-f0-9-]+)/i);
+  const codename = extractValue(/codename:\s*["']?([^"'\n]+)["']?/);
+  const title = extractValue(/title:\s*["']([^"']+)["']/) || extractValue(/title:\s*(\S+)/) || `${appName} Service`;
+  const description = extractValue(/description:\s*["']([^"']+)["']/) || `Auto-generated Python service from AOS Edge Toolchain`;
+
+  // Quotas
+  const cpuLimit = extractValue(/cpu:\s*(\d+)/) || extractValue(/cpuLimit:\s*(\d+)/) || '5000';
+  const ramLimit = extractValue(/ram:\s*["']?(\d+[A-Z]+)/) || extractValue(/ramLimit:\s*["']?(\d+[A-Z]+)/) || extractValue(/mem:\s*["']?(\d+[A-Z]+)/) || '512MiB';
+  const storageLimit = extractValue(/storage:\s*["']?(\d+[A-Z]+)/) || extractValue(/storageLimit:\s*["']?(\d+[A-Z]+)/) || '32MiB';
+  const stateLimit = extractValue(/state:\s*["']?(\d+[A-Z]+)/) || extractValue(/stateLimit:\s*["']?(\d+[A-Z]+)/) || '1MiB';
+
+  const identityLine = serviceId
+    ? `      id: ${serviceId}`
+    : `      codename: "${codename || appName}"`;
+
+  // Python uses src_any (arch-independent) and a shell wrapper as cmd
+  const cmd = `/${appName}/run.sh`;
+
+  return `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
+# Python service — architecture-independent
+schemaVersion: 2
+
+publisher:
+  author: "${publisher}"
+  company: "${company}"
+
+publish:
+  tlsKey: "aos-user-sp.p12"
+
+items:
+  - identity:
+      type: service
+${identityLine}
+      title: "${title}"
+      description: "${description}"
+    version: "${version}"
+    sourceFolder: "${appName}"
+
+    images:
+      - sourceFolder: "src_any"
+        archInfo:
+          architecture: "any"
+        workingDir: "${workingDir}"
+        cmd: "${cmd}"
+
+    configuration:
+      workingDir: "${workingDir}"
+      cmd: "${cmd}"
+      instances:
+        minInstances: 1
+        priority: 10
+      quotas:
+        cpuLimit: ${parseInt(cpuLimit) || 5000}
+        ramLimit: ${ramLimit}
+        storageLimit: ${storageLimit}
+        stateLimit: ${stateLimit}
+        tmpLimit: 256MiB
+        uploadSpeedLimit: 10K
+        downloadSpeedLimit: 10K
+        uploadLimit: 10GiB
+        downloadLimit: 10GiB
+        noFileLimit: 1024
+        pidsLimit: 256
+`;
+}
+
 function emitProgress(buildId, stage, message, progress) {
   const entry = { stage, message, progress, ts: Date.now() };
   const build = buildHistory.get(buildId);
@@ -575,7 +654,9 @@ function getBuildStatus(buildId) {
 
 async function handleBuildDeploy(data, buildId) {
   const appName = data.name || 'hello-aos';
+  const language = data.language || 'cpp';
   const cppCode = data.cppCode || '';
+  const pythonCode = data.pythonCode || '';
   const yamlConfig = data.yamlConfig || '';
 
   if (!buildId) buildId = crypto.randomBytes(6).toString('hex');
@@ -590,7 +671,7 @@ async function handleBuildDeploy(data, buildId) {
     buildHistory.delete(oldest);
   }
 
-  emitProgress(buildId, 'init', `Starting build for ${appName} (build: ${buildId})`, 0);
+  emitProgress(buildId, 'init', `Starting build for ${appName} (build: ${buildId}, language: ${language})`, 0);
 
   try {
     // New aos-signer 2.x format: config.yaml at root, service folder with src_<arch> structure
@@ -598,10 +679,72 @@ async function handleBuildDeploy(data, buildId) {
     const srcFolder = path.join(serviceFolder, 'src_temp');
     await fs.mkdir(srcFolder, { recursive: true });
 
-    await fs.writeFile(path.join(srcFolder, 'main.cpp'), cppCode);
-
     const certSrc = '/root/.aos/security/aos-user-sp.p12';
     try { await fs.copyFile(certSrc, path.join(buildDir, 'aos-user-sp.p12')); } catch (e) { /* ok */ }
+
+    // ── Python Deployment Path ──
+    if (language === 'python') {
+      emitProgress(buildId, 'config', 'Python deployment — skipping compilation', 10);
+
+      // Write Python source file
+      const pyFileName = 'main.py';
+      await fs.writeFile(path.join(srcFolder, pyFileName), pythonCode);
+
+      // Python is arch-independent — use src_any
+      const srcAnyFolder = path.join(serviceFolder, 'src_any');
+      await fs.mkdir(srcAnyFolder, { recursive: true });
+      await fs.copyFile(path.join(srcFolder, pyFileName), path.join(srcAnyFolder, pyFileName));
+
+      // Create a shell wrapper script that invokes python3
+      const wrapperScript = `#!/bin/sh\nexec /usr/bin/python3 -u /${appName}/${pyFileName} "$@"\n`;
+      await fs.writeFile(path.join(srcAnyFolder, 'run.sh'), wrapperScript);
+      await execAsync(`chmod +x ${path.join(srcAnyFolder, 'run.sh')}`);
+
+      // Clean up temp src folder
+      await fs.rm(srcFolder, { recursive: true, force: true });
+
+      // Generate config.yaml with Python-specific cmd
+      const pythonConfig = generatePythonConfig(appName, yamlConfig);
+      await fs.writeFile(path.join(buildDir, 'config.yaml'), pythonConfig);
+      emitProgress(buildId, 'config', 'Generated config.yaml (schemaVersion: 2, Python)', 65);
+
+      emitProgress(buildId, 'sign', 'Signing deployment bundle...', 70);
+      await execAsync('aos-signer sign', { cwd: buildDir, env: { ...process.env } });
+
+      const pkgStats = await fs.stat(path.join(buildDir, 'batch.tar.gz')).catch(() => null);
+      if (!pkgStats) throw new Error('Deployment bundle not created after signing');
+      const sizeMB = (pkgStats.size / (1024 * 1024)).toFixed(1);
+      emitProgress(buildId, 'sign', `Deployment bundle signed: ${sizeMB} MB`, 75);
+
+      emitProgress(buildId, 'upload', 'Uploading to AosCloud...', 80);
+      try {
+        const { stdout: uploadOut, stderr: uploadStderr } = await execAsync('aos-signer upload', { cwd: buildDir, env: { ...process.env } });
+        const fullOutput = (uploadOut + ' ' + (uploadStderr || '')).trim();
+        if (fullOutput.toLowerCase().includes('error') || fullOutput.toLowerCase().includes('failed')) {
+          emitProgress(buildId, 'upload', `Upload rejected: ${fullOutput.slice(-200)}`, -1);
+          const build = buildHistory.get(buildId);
+          if (build) { build.status = 'error'; build.finishedAt = Date.now(); }
+          const logSummary = (build?.logs || []).map(e => `[${e.stage}] ${e.message}`).join('\n');
+          return { kit_id: instanceId, type: 'aos_build_deploy', status: 'error', buildId, appId: appName, message: logSummary };
+        }
+        emitProgress(buildId, 'upload', 'Upload complete — deployment bundle published to AosCloud', 100);
+      } catch (uploadErr) {
+        const errMsg = uploadErr.stderr || uploadErr.stdout || uploadErr.message || 'Unknown upload error';
+        emitProgress(buildId, 'upload', `Upload failed: ${errMsg.slice(-200)}`, -1);
+        const build = buildHistory.get(buildId);
+        if (build) { build.status = 'error'; build.finishedAt = Date.now(); }
+        const logSummary = (build?.logs || []).map(e => `[${e.stage}] ${e.message}`).join('\n');
+        return { kit_id: instanceId, type: 'aos_build_deploy', status: 'error', buildId, appId: appName, message: logSummary };
+      }
+
+      const build = buildHistory.get(buildId);
+      if (build) { build.status = 'success'; build.finishedAt = Date.now(); }
+      const logSummary = (build?.logs || []).map(e => `[${e.stage}] ${e.message}`).join('\n');
+      return { kit_id: instanceId, type: 'aos_build_deploy', status: 'success', buildId, appId: appName, message: logSummary };
+    }
+
+    // ── C++ Deployment Path (original) ──
+    await fs.writeFile(path.join(srcFolder, 'main.cpp'), cppCode);
 
     const targetArch = detectArch(yamlConfig);
     const cxx = compilerForArch(targetArch);

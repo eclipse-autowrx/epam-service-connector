@@ -21729,7 +21729,7 @@
   var React = __toESM(require_react(), 1);
   globalThis.React = React;
 
-  // src/standalone.ts
+  // src/standalone-python.ts
   var React3 = __toESM(require_react(), 1);
   var ReactDOM = __toESM(require_client(), 1);
 
@@ -29728,13 +29728,13 @@ items:
     );
   }
 
-  // src/standalone.ts
+  // src/standalone-python.ts
   var container = document.getElementById("root");
   var root = ReactDOM.createRoot(container);
   root.render(
     React3.createElement(Page, {
-      data: { prototype: { name: "Standalone Mode" } },
-      config: {}
+      data: { prototype: { name: "Python Deployment Mode" } },
+      config: { language: "python" }
     })
   );
 })();
@@ -29784,4 +29784,4 @@ react-dom/cjs/react-dom-client.development.js:
    * LICENSE file in the root directory of this source tree.
    *)
 */
-//# sourceMappingURL=standalone.js.map
+//# sourceMappingURL=standalone_python.js.map

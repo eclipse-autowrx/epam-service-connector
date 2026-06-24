@@ -56,45 +56,48 @@ Status: Running
 Container: aos-broadcaster
 ```
 
-## Complete config.yaml Template
+## Complete config.yaml Template (schemaVersion: 2)
 
 ```yaml
-publisher:
-    author: "developer@example.com"
-    company: "Example Corp"
+schemaVersion: 2
 
-build:
-    os: linux
-    arch: aarch64
-    sign_pkcs12: aos-user-sp.p12
-    symlinks: copy
+publisher:
+  author: "developer@example.com"
+  company: "Example Corp"
 
 publish:
-    url: aoscloud.io
-    service_uid: c0528145-b393-44c6-aeaa-b26bc560acee
-    tls_pkcs12: aos-user-sp.p12
-    version: "1.0.0"
+  tlsKey: "aos-user-sp.p12"
+  domain: "aoscloud.io"
 
-configuration:
-    cmd: /hello-aos
-    workingDir: '/'
-    state:
-        filename: default_state.dat
-        required: true
-    instances:
+items:
+  - identity:
+      type: "service"
+      codename: "hello-aos"
+      title: "Hello AOS Service"
+      description: "Simple hello world C++ service"
+    version: "1.0.0"
+    sourceFolder: "service"
+
+    images:
+      - sourceFolder: "src_amd64"
+        archInfo:
+          architecture: "amd64"
+      - sourceFolder: "src_arm64"
+        archInfo:
+          architecture: "arm64"
+
+    configuration:
+      workingDir: "/"
+      cmd: "/hello-aos"
+      instances:
         minInstances: 1
-        priority: 0
-    isResourceLimits: true
-    requestedResources:
-        cpu: 1000
-        ram: 10MB
-        storage: 5MB
-        state: 512KB
-    quotas:
-        cpu: 1000
-        mem: 10MB
-        state: 512KB
-        storage: 5MB
+        priority: 10
+      quotas:
+        cpuLimit: 1000
+        ramLimit: 10MB
+        storageLimit: 5MB
+        stateLimit: 512KB
+        tmpLimit: 256MiB
 ```
 
 ## Deployment Workflow
@@ -154,7 +157,7 @@ Baked into aos-edge-toolchain Docker image at `/root/.aos/security/`:
 ### List Services
 ```bash
 docker run --rm --entrypoint "" aos-edge-toolchain \
-  curl -k --http1.1 https://aoscloud.io:10000/api/v10/services/ \
+  curl -k --http1.1 https://aoscloud.io:10000/api/v11/services/ \
   --cert /root/.aos/security/aos-user-sp.p12 --cert-type P12 \
   -H "accept: application/json" | jq '.items[] | {uuid, title}'
 ```
@@ -162,7 +165,7 @@ docker run --rm --entrypoint "" aos-edge-toolchain \
 ### Check Service Status
 ```bash
 docker run --rm --entrypoint "" aos-edge-toolchain \
-  curl -k --http1.1 https://aoscloud.io:10000/api/v10/services/c0528145-b393-44c6-aeaa-b26bc560acee/ \
+  curl -k --http1.1 https://aoscloud.io:10000/api/v11/services/c0528145-b393-44c6-aeaa-b26bc560acee/ \
   --cert /root/.aos/security/aos-user-sp.p12 --cert-type P12 \
   -H "accept: application/json"
 ```
@@ -230,7 +233,7 @@ ssh user@<unit-ip> \
 
 ### Service not deploying
 1. Check if version is in "ready" state
-2. Verify unit is online: `curl https://aoscloud.io:10000/api/v10/units/`
+2. Verify unit is online: `curl https://aoscloud.io:10000/api/v11/units/`
 3. Check service has at least 1 unit assigned
 
 ### Build failures

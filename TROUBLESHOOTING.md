@@ -1,6 +1,116 @@
 # Troubleshooting Guide
 
-Common issues encountered when building, deploying, and running AOS services on AosEdge (Raspberry Pi 5).
+Common issues encountered when building, deploying, and running AOS services on AosEdge (Raspberry Pi 5 and aos-vm VirtualBox VMs).
+
+---
+
+## Provisioning: Secondary Node Never Connects (aos-vm)
+
+**Symptom:** After `aos-prov unit-new`, the main node appears but the secondary node never connects. Provisioning eventually times out with:
+```
+Getting Node IDs...  ['<main-node-id>']
+Wait while secondary node will be connected.
+... (repeats indefinitely)
+FAILED! StatusCode.UNAVAILABLE: failed to connect to all addresses
+```
+
+**Cause:** Three separate issues combine to prevent the secondary IAM from registering with the main node.
+
+### Fix 1: DNS
+
+VirtualBox NAT Network provides no working DNS. The VMs can't resolve `aoscloud.io`.
+
+```bash
+# On BOTH VMs
+mount -o remount,rw /
+mkdir -p /etc/systemd/resolved.conf.d
+printf '[Resolve]\nDNS=8.8.8.8 1.1.1.1\n' > /etc/systemd/resolved.conf.d/public-dns.conf
+systemctl restart systemd-resolved
+```
+
+### Fix 2: nftables Forward Chain
+
+The `aos-nftables` service sets a **default-drop** policy on the forward chain. New connections between VMs on the same subnet are silently dropped.
+
+```bash
+# On BOTH VMs
+nft add rule inet aos forward iifname enp0s3 oifname enp0s3 accept
+```
+
+### Fix 3: /etc/hosts Hostname Resolution
+
+The secondary IAM config references the main node by hostname (`main:8089`, `main:8090`), but `/etc/hosts` has no entry for `main`.
+
+```bash
+# On MAIN VM
+echo '<secondary-ip> secondary' >> /etc/hosts
+
+# On SECONDARY VM
+echo '<main-ip> main' >> /etc/hosts
+```
+
+Typically: main = `10.0.0.100`, secondary = `10.0.0.15` (check with `ip addr show enp0s3`).
+
+### Fix 4: SELinux and Clock
+
+```bash
+# On BOTH VMs
+setenforce 0
+date -s "$(date -u)"
+```
+
+### Fix 5: Restart IAM
+
+After applying all fixes, restart IAM on both VMs:
+
+```bash
+# On MAIN first, then SECONDARY
+systemctl restart aos-iam-prov   # if still provisioning
+systemctl restart aos-iam        # if already provisioned
+```
+
+### Verification
+
+Check secondary IAM logs for successful connection:
+```bash
+journalctl -u aos-iam-prov --no-pager -n 20
+# Should show: "Node registration stream established"
+# Should show: "IAM client connected"
+```
+
+**Note:** After provisioning completes, `aos-iam-prov.service` stops and `aos-iam.service` takes over. The `aos-iam-prov` service has `ConditionPathExists=!/var/aos/.provisionstate` — it only runs before provisioning is done.
+
+---
+
+## Provisioning: CM Fails to Start (Dependency on Encrypted Disks)
+
+**Symptom:** `aos-cm.service` fails with "Dependency failed" and `journalctl -xe` shows:
+```
+Timed out waiting for device /dev/aosvg/states
+Dependency failed for /var/aos/states
+```
+
+**Cause:** The encrypted disks haven't been created yet. The CM requires `/var/aos/states`, `/var/aos/storages`, and `/var/aos/workdirs` mounts which depend on LVM volumes under `/dev/aosvg/`. These are created during provisioning — if provisioning hasn't completed, the CM can't start.
+
+**Fix:** This is normal during provisioning. Wait for provisioning to complete (`.provisionstate` file appears at `/var/aos/.provisionstate`). If stuck, check that the IAM provisioning phase completed successfully.
+
+---
+
+## SSH Port Forwarding Changes Between Provision Runs
+
+**Symptom:** After re-provisioning, the SSH port numbers change. The ports shown in `aos-prov` output may not match the actual NAT network port forwards.
+
+**Fix:** Check the actual port forwards:
+```bash
+VBoxManage natnetwork list
+# Look for "mainssh" and "secondary-1ssh" port-forwarding entries
+```
+
+If the secondary has no SSH forward, add one:
+```bash
+VBoxManage natnetwork modify --netname aos-network-<UnitName> \
+  --port-forward-4 "secondaryssh:tcp:[]:<host-port>:[<secondary-ip>]:22"
+```
 
 ---
 

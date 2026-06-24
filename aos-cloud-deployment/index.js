@@ -3574,15 +3574,20 @@
     }
     // Build and deploy AOS application
     async buildAndDeploy(request) {
+      const lang = request.language || "cpp";
       const data = {
         name: request.name,
         displayName: request.displayName || request.name,
-        cppCode: request.cppCode,
         yamlConfig: request.yamlConfig,
-        language: "cpp",
+        language: lang,
         vehicleId: "default-vehicle"
       };
-      console.log("[AosService] Building app with code length:", request.cppCode?.length);
+      if (lang === "python") {
+        data.pythonCode = request.pythonCode || "";
+      } else {
+        data.cppCode = request.cppCode || "";
+      }
+      console.log("[AosService] Building app with language:", lang, "code length:", (request.cppCode || request.pythonCode || "").length);
       const response = await this.sendCommand("aos_build_deploy", data);
       if (response.status === "started" || response.result === "success" || response.status === "building" || response.status === "success") {
         return {
@@ -4584,7 +4589,7 @@ items:
 #include "kuksa/val/v1/val.grpc.pb.h"
 #include "kuksa/val/v1/types.pb.h"
 
-#define VERSION "1.0.0"
+#define VERSION "1.0.17"
 
 static std::string format_value(const kuksa::val::v1::Datapoint& dp) {
     switch (dp.value_case()) {
@@ -4788,11 +4793,11 @@ publish:
 
 items:
   - identity:
-      type: "service"
-      codename: "signal-reporter"
+      type: service
+      id: 242dd4d4-7236-432d-88b9-ba9bbb3288f8
       title: "Signal Reporter - Dashboard Relay"
       description: "Subscribes to all 9 vehicle signals and relays to dashboard via HTTP"
-    version: "1.0.0"
+    version: "1.0.17"
     sourceFolder: "signal-reporter"
 
     images:
@@ -5206,13 +5211,90 @@ items:
         storageLimit: 5MB
         stateLimit: 512KB
         tmpLimit: 256MiB`
+    },
+    // ── Python Presets ──
+    helloPython: {
+      name: "Hello Python",
+      appName: "hello-python",
+      description: "Simple Python hello-world service (aos-signer 2.x format)",
+      language: "python",
+      python: `#!/usr/bin/env python3
+"""
+Hello Python Service for AosEdge.
+Prints a heartbeat message every 10 seconds.
+"""
+import time
+import sys
+import datetime
+
+VERSION = "1.0.0"
+
+def main():
+    print("=" * 50, flush=True)
+    print("AosEdge Hello Python Service", flush=True)
+    print(f"Version: {VERSION}", flush=True)
+    print("Deployed via aos-edge-toolchain!", flush=True)
+    print("=" * 50, flush=True)
+
+    count = 0
+    while True:
+        time.sleep(10)
+        count += 1
+        timestamp = datetime.datetime.now().isoformat()
+        print(f"[{count}] [{timestamp}] Hello from AosEdge Python! v{VERSION}", flush=True)
+
+if __name__ == "__main__":
+    main()
+`,
+      yaml: `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
+# Python service \u2014 architecture-independent
+schemaVersion: 2
+
+publisher:
+  author: "developer@example.com"
+  company: "Example Corp"
+
+publish:
+  tlsKey: "aos-user-sp.p12"
+  domain: "aoscloud.io"
+
+items:
+  - identity:
+      type: service
+      codename: "hello-python"
+      title: "Hello Python Service"
+      description: "Simple Python hello-world service"
+    version: "1.0.0"
+    sourceFolder: "hello-python"
+
+    images:
+      - sourceFolder: "src_any"
+        archInfo:
+          architecture: "any"
+        workingDir: "/"
+        cmd: "/hello-python/run.sh"
+
+    configuration:
+      workingDir: "/"
+      cmd: "/hello-python/run.sh"
+      instances:
+        minInstances: 1
+        priority: 10
+      quotas:
+        cpuLimit: 5000
+        ramLimit: 512MiB
+        storageLimit: 32MiB
+        stateLimit: 1MiB
+        tmpLimit: 256MiB`
     }
   };
 
   // src/components/Page.tsx
   var React = globalThis.React;
   function Page({ data, config }) {
+    const [languageMode, setLanguageMode] = React.useState("cpp");
     const [cppCode, setCppCode] = React.useState(PRESETS.helloAos.cpp);
+    const [pythonCode, setPythonCode] = React.useState(PRESETS.helloPython?.python || "");
     const [yamlConfig, setYamlConfig] = React.useState(PRESETS.helloAos.yaml);
     const [appName, setAppName] = React.useState("hello-aos");
     const [isBuilding, setIsBuilding] = React.useState(false);
@@ -5225,8 +5307,10 @@ items:
     const [autoSyncServiceUid, setAutoSyncServiceUid] = React.useState(true);
     const [activeEditorTab, setActiveEditorTab] = React.useState("cpp");
     const cppCodeRef = React.useRef(cppCode);
+    const pythonCodeRef = React.useRef(pythonCode);
     const yamlConfigRef = React.useRef(yamlConfig);
     cppCodeRef.current = cppCode;
+    pythonCodeRef.current = pythonCode;
     yamlConfigRef.current = yamlConfig;
     const [dockerInstances, setDockerInstances] = React.useState([]);
     const [filterOnline, setFilterOnline] = React.useState(true);
@@ -6293,12 +6377,12 @@ items:
         return;
       }
       setBuildLogs([]);
-      let finalCpp = cppCodeRef.current;
+      let finalCode = languageMode === "python" ? pythonCodeRef.current : cppCodeRef.current;
       let finalYaml = yamlConfigRef.current;
       setIsBuilding(true);
       setBuildStatus("Starting build...");
       addLog(`[Build] Target: ${selectedInstance}`);
-      addLog("[Build] Starting AOS application build...");
+      addLog(`[Build] Starting AOS ${languageMode === "python" ? "Python" : "C++"} application build...`);
       const stageLabels = {
         init: "Init",
         config: "Config",
@@ -6313,7 +6397,9 @@ items:
         const response = await aosServiceRef.current.buildAndDeploy({
           name: appName,
           displayName: appName,
-          cppCode: finalCpp,
+          language: languageMode,
+          cppCode: languageMode === "cpp" ? finalCode : void 0,
+          pythonCode: languageMode === "python" ? finalCode : void 0,
           yamlConfig: finalYaml
         });
         if (response.message && response.message.includes("\n")) {
@@ -6386,20 +6472,36 @@ items:
       setSelectedPreset(presetName);
       const preset = PRESETS[presetName];
       if (preset) {
-        let cpp = preset.cpp;
+        const isPython = preset.language === "python" || !!preset.python;
+        let code = isPython ? preset.python : preset.cpp;
         let yaml = preset.yaml;
+        if (isPython) {
+          setLanguageMode("python");
+          setActiveEditorTab("python");
+        } else {
+          setLanguageMode("cpp");
+          setActiveEditorTab("cpp");
+        }
         if (autoIncVersion && serviceVersions.length > 0) {
           const latest = serviceVersions[0].version;
           const parts2 = latest.split(".");
           parts2[parts2.length - 1] = String(Number(parts2[parts2.length - 1]) + 1);
           const next = parts2.join(".");
-          cpp = cpp.replace(/#define\s+VERSION\s+"[^"]+"/, `#define VERSION "${next}"`);
+          if (isPython) {
+            code = code.replace(/VERSION\s*=\s*"[^"]+"/, `VERSION = "${next}"`);
+          } else {
+            code = code.replace(/#define\s+VERSION\s+"[^"]+"/, `#define VERSION "${next}"`);
+          }
           yaml = yaml.replace(/version:\s*"[^"]+"/, `version: "${next}"`);
           addLog(`[Preset] Loaded: ${preset.name || presetName} (version: ${next})`);
         } else {
           addLog(`[Preset] Loaded: ${preset.name || presetName}`);
         }
-        setCppCode(cpp);
+        if (isPython) {
+          setPythonCode(code);
+        } else {
+          setCppCode(code);
+        }
         setYamlConfig(yaml);
         setAppName(preset.appName || presetName);
       }
@@ -7010,14 +7112,19 @@ items:
             React.createElement("option", { value: "custom" }, "Write your own code"),
             React.createElement(
               "optgroup",
-              { label: "Example Presets" },
-              React.createElement("option", { value: "helloAos" }, "Hello AOS \u2014 simple starter"),
+              { label: "C++ Presets" },
+              React.createElement("option", { value: "helloAos" }, "Hello AOS \u2014 simple C++ starter"),
               React.createElement("option", { value: "kuksaWriter" }, "Signal Writer \u2014 write vehicle signals"),
               React.createElement("option", { value: "kuksaReader" }, "KUKSA Reader \u2014 read vehicle signals"),
               React.createElement("option", { value: "evRangeExtender" }, "EV Range Extender \u2014 battery management"),
               React.createElement("option", { value: "batteryEnergySaver" }, "Battery Energy Saver \u2014 HVAC/seat cutoff"),
               React.createElement("option", { value: "batteryEnergySaverSdvRuntime" }, "Battery Energy Saver \u2014 sdv-runtime / VSS 4.0"),
               React.createElement("option", { value: "signalReporter" }, "Signal Reporter \u2014 relay to dashboard")
+            ),
+            React.createElement(
+              "optgroup",
+              { label: "Python Presets" },
+              React.createElement("option", { value: "helloPython" }, "Hello Python \u2014 simple Python starter")
             )
           ),
           React.createElement("span", {
@@ -7552,7 +7659,10 @@ items:
               React.createElement(
                 "button",
                 {
-                  onClick: () => setActiveEditorTab("cpp"),
+                  onClick: () => {
+                    setActiveEditorTab("cpp");
+                    setLanguageMode("cpp");
+                  },
                   style: {
                     padding: "8px 16px",
                     fontSize: "13px",
@@ -7569,6 +7679,30 @@ items:
                 },
                 React.createElement(Icon, { name: "file-code", size: 14 }),
                 "main.cpp"
+              ),
+              React.createElement(
+                "button",
+                {
+                  onClick: () => {
+                    setActiveEditorTab("python");
+                    setLanguageMode("python");
+                  },
+                  style: {
+                    padding: "8px 16px",
+                    fontSize: "13px",
+                    fontWeight: 500,
+                    border: "none",
+                    cursor: "pointer",
+                    background: activeEditorTab === "python" ? "#fff" : "transparent",
+                    color: activeEditorTab === "python" ? "#2563eb" : "#6b7280",
+                    borderBottom: activeEditorTab === "python" ? "2px solid #2563eb" : "2px solid transparent",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px"
+                  }
+                },
+                React.createElement(Icon, { name: "file-code", size: 14 }),
+                "main.py"
               ),
               React.createElement(
                 "button",
@@ -7599,13 +7733,13 @@ items:
               React.createElement(
                 "pre",
                 { style: styles.lineNumbers },
-                (activeEditorTab === "cpp" ? cppCode : yamlConfig).split("\n").map((_, i) => `${i + 1}`).join("\n")
+                (activeEditorTab === "cpp" ? cppCode : activeEditorTab === "python" ? pythonCode : yamlConfig).split("\n").map((_, i) => `${i + 1}`).join("\n")
               ),
               React.createElement("textarea", {
                 style: { ...styles.textarea, flex: 1 },
-                value: activeEditorTab === "cpp" ? cppCode : yamlConfig,
-                onChange: (e) => activeEditorTab === "cpp" ? setCppCode(e.target.value) : setYamlConfig(e.target.value),
-                placeholder: activeEditorTab === "cpp" ? "// Enter your C++ code here..." : "# Enter your YAML configuration here...",
+                value: activeEditorTab === "cpp" ? cppCode : activeEditorTab === "python" ? pythonCode : yamlConfig,
+                onChange: (e) => activeEditorTab === "cpp" ? setCppCode(e.target.value) : activeEditorTab === "python" ? setPythonCode(e.target.value) : setYamlConfig(e.target.value),
+                placeholder: activeEditorTab === "cpp" ? "// Enter your C++ code here..." : activeEditorTab === "python" ? "# Enter your Python code here..." : "# Enter your YAML configuration here...",
                 spellCheck: false
               })
             )

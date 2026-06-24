@@ -25,7 +25,9 @@ interface DockerInstance {
 
 export default function Page({ data, config }: PluginProps) {
 
+  const [languageMode, setLanguageMode] = React.useState<'cpp' | 'python'>('cpp')
   const [cppCode, setCppCode] = React.useState(PRESETS.helloAos.cpp)
+  const [pythonCode, setPythonCode] = React.useState((PRESETS as any).helloPython?.python || '')
   const [yamlConfig, setYamlConfig] = React.useState(PRESETS.helloAos.yaml)
   const [appName, setAppName] = React.useState('hello-aos')
   const [isBuilding, setIsBuilding] = React.useState(false)
@@ -36,10 +38,12 @@ export default function Page({ data, config }: PluginProps) {
   const [selectedPreset, setSelectedPreset] = React.useState('custom')
   const [autoIncVersion, setAutoIncVersion] = React.useState(true)
   const [autoSyncServiceUid, setAutoSyncServiceUid] = React.useState(true)
-  const [activeEditorTab, setActiveEditorTab] = React.useState<'cpp' | 'yaml'>('cpp')
+  const [activeEditorTab, setActiveEditorTab] = React.useState<'cpp' | 'python' | 'yaml'>('cpp')
   const cppCodeRef = React.useRef(cppCode)
+  const pythonCodeRef = React.useRef(pythonCode)
   const yamlConfigRef = React.useRef(yamlConfig)
   cppCodeRef.current = cppCode
+  pythonCodeRef.current = pythonCode
   yamlConfigRef.current = yamlConfig
 
   // Docker instances state
@@ -1156,15 +1160,15 @@ export default function Page({ data, config }: PluginProps) {
 
     setBuildLogs([])
 
-    let finalCpp = cppCodeRef.current
+    let finalCode = languageMode === 'python' ? pythonCodeRef.current : cppCodeRef.current
     let finalYaml = yamlConfigRef.current
 
-    
+
 
     setIsBuilding(true)
     setBuildStatus('Starting build...')
     addLog(`[Build] Target: ${selectedInstance}`)
-    addLog('[Build] Starting AOS application build...')
+    addLog(`[Build] Starting AOS ${languageMode === 'python' ? 'Python' : 'C++'} application build...`)
 
     const stageLabels: Record<string, string> = {
       init: 'Init', config: 'Config', proto: 'Proto',
@@ -1176,7 +1180,9 @@ export default function Page({ data, config }: PluginProps) {
       const response = await aosServiceRef.current.buildAndDeploy({
         name: appName,
         displayName: appName,
-        cppCode: finalCpp,
+        language: languageMode,
+        cppCode: languageMode === 'cpp' ? finalCode : undefined,
+        pythonCode: languageMode === 'python' ? finalCode : undefined,
         yamlConfig: finalYaml
       })
 
@@ -1256,22 +1262,39 @@ export default function Page({ data, config }: PluginProps) {
     setSelectedPreset(presetName)
     const preset = (PRESETS as any)[presetName]
     if (preset) {
-      let cpp = preset.cpp
+      const isPython = preset.language === 'python' || !!preset.python
+      let code = isPython ? preset.python : preset.cpp
       let yaml = preset.yaml
+
+      if (isPython) {
+        setLanguageMode('python')
+        setActiveEditorTab('python')
+      } else {
+        setLanguageMode('cpp')
+        setActiveEditorTab('cpp')
+      }
 
       if (autoIncVersion && serviceVersions.length > 0) {
         const latest = serviceVersions[0].version
         const parts = latest.split('.')
         parts[parts.length - 1] = String(Number(parts[parts.length - 1]) + 1)
         const next = parts.join('.')
-        cpp = cpp.replace(/#define\s+VERSION\s+"[^"]+"/, `#define VERSION "${next}"`)
+        if (isPython) {
+          code = code.replace(/VERSION\s*=\s*"[^"]+"/, `VERSION = "${next}"`)
+        } else {
+          code = code.replace(/#define\s+VERSION\s+"[^"]+"/, `#define VERSION "${next}"`)
+        }
         yaml = yaml.replace(/version:\s*"[^"]+"/, `version: "${next}"`)
         addLog(`[Preset] Loaded: ${preset.name || presetName} (version: ${next})`)
       } else {
         addLog(`[Preset] Loaded: ${preset.name || presetName}`)
       }
 
-      setCppCode(cpp)
+      if (isPython) {
+        setPythonCode(code)
+      } else {
+        setCppCode(code)
+      }
       setYamlConfig(yaml)
       setAppName(preset.appName || presetName)
     }
@@ -1704,14 +1727,17 @@ export default function Page({ data, config }: PluginProps) {
           style: styles.select
         },
           React.createElement('option', { value: 'custom' }, 'Write your own code'),
-          React.createElement('optgroup', { label: 'Example Presets' },
-            React.createElement('option', { value: 'helloAos' }, 'Hello AOS — simple starter'),
+          React.createElement('optgroup', { label: 'C++ Presets' },
+            React.createElement('option', { value: 'helloAos' }, 'Hello AOS — simple C++ starter'),
             React.createElement('option', { value: 'kuksaWriter' }, 'Signal Writer — write vehicle signals'),
             React.createElement('option', { value: 'kuksaReader' }, 'KUKSA Reader — read vehicle signals'),
             React.createElement('option', { value: 'evRangeExtender' }, 'EV Range Extender — battery management'),
             React.createElement('option', { value: 'batteryEnergySaver' }, 'Battery Energy Saver — HVAC/seat cutoff'),
             React.createElement('option', { value: 'batteryEnergySaverSdvRuntime' }, 'Battery Energy Saver — sdv-runtime / VSS 4.0'),
             React.createElement('option', { value: 'signalReporter' }, 'Signal Reporter — relay to dashboard')
+          ),
+          React.createElement('optgroup', { label: 'Python Presets' },
+            React.createElement('option', { value: 'helloPython' }, 'Hello Python — simple Python starter')
           )
         ),
         React.createElement('span', {
@@ -2095,7 +2121,7 @@ export default function Page({ data, config }: PluginProps) {
           // Tab bar
           React.createElement('div', { style: { display: 'flex', borderBottom: '1px solid #e5e7eb', background: '#f9fafb' } },
             React.createElement('button', {
-              onClick: () => setActiveEditorTab('cpp'),
+              onClick: () => { setActiveEditorTab('cpp'); setLanguageMode('cpp'); },
               style: {
                 padding: '8px 16px', fontSize: '13px', fontWeight: 500, border: 'none', cursor: 'pointer',
                 background: activeEditorTab === 'cpp' ? '#fff' : 'transparent',
@@ -2106,6 +2132,19 @@ export default function Page({ data, config }: PluginProps) {
             },
               React.createElement(Icon, { name: 'file-code', size: 14 }),
               'main.cpp'
+            ),
+            React.createElement('button', {
+              onClick: () => { setActiveEditorTab('python'); setLanguageMode('python'); },
+              style: {
+                padding: '8px 16px', fontSize: '13px', fontWeight: 500, border: 'none', cursor: 'pointer',
+                background: activeEditorTab === 'python' ? '#fff' : 'transparent',
+                color: activeEditorTab === 'python' ? '#2563eb' : '#6b7280',
+                borderBottom: activeEditorTab === 'python' ? '2px solid #2563eb' : '2px solid transparent',
+                display: 'inline-flex', alignItems: 'center', gap: '6px'
+              }
+            },
+              React.createElement(Icon, { name: 'file-code', size: 14 }),
+              'main.py'
             ),
             React.createElement('button', {
               onClick: () => setActiveEditorTab('yaml'),
@@ -2124,13 +2163,13 @@ export default function Page({ data, config }: PluginProps) {
           // Active editor with line numbers
           React.createElement('div', { style: styles.editorContainer },
             React.createElement('pre', { style: styles.lineNumbers },
-              (activeEditorTab === 'cpp' ? cppCode : yamlConfig).split('\n').map((_: string, i: number) => `${i + 1}`).join('\n')
+              (activeEditorTab === 'cpp' ? cppCode : activeEditorTab === 'python' ? pythonCode : yamlConfig).split('\n').map((_: string, i: number) => `${i + 1}`).join('\n')
             ),
             React.createElement('textarea', {
               style: { ...styles.textarea, flex: 1 },
-              value: activeEditorTab === 'cpp' ? cppCode : yamlConfig,
-              onChange: (e: any) => activeEditorTab === 'cpp' ? setCppCode(e.target.value) : setYamlConfig(e.target.value),
-              placeholder: activeEditorTab === 'cpp' ? '// Enter your C++ code here...' : '# Enter your YAML configuration here...',
+              value: activeEditorTab === 'cpp' ? cppCode : activeEditorTab === 'python' ? pythonCode : yamlConfig,
+              onChange: (e: any) => activeEditorTab === 'cpp' ? setCppCode(e.target.value) : activeEditorTab === 'python' ? setPythonCode(e.target.value) : setYamlConfig(e.target.value),
+              placeholder: activeEditorTab === 'cpp' ? '// Enter your C++ code here...' : activeEditorTab === 'python' ? '# Enter your Python code here...' : '# Enter your YAML configuration here...',
               spellCheck: false
             })
           )

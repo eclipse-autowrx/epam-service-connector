@@ -6,10 +6,9 @@ Docker toolkit for AosEdge C++ service development: cross-compile, sign, upload,
 
 ```bash
 # 1. Create project structure
-mkdir -p my-service/src my-service/meta && cd my-service
+mkdir -p my-service/my-app/src_amd64 && cd my-service
 
-# 2. Create your C++ source (src/main.cpp), config (meta/config.yaml), and state file
-touch meta/default_state.dat
+# 2. Create your C++ source (my-app/src_amd64/main.cpp) and config (config.yaml)
 
 # 3. Build, sign, and upload in one command
 docker run --rm \
@@ -142,7 +141,7 @@ docker run --rm \
   aos-edge-toolchain sign
 ```
 
-Creates `service.tar.gz` in the workspace.
+Creates `batch.tar.gz` in the workspace.
 
 ### Upload
 
@@ -172,7 +171,7 @@ docker run --rm \
 docker run --rm \
   -e AZURE_KEY_VAULT_NAME=<vault-name> \
   --entrypoint "" aos-edge-toolchain \
-  curl -k --http1.1 -X POST https://aoscloud.io:10000/api/v10/services/ \
+  curl -k --http1.1 -X POST https://aoscloud.io:10000/api/v11/services/ \
   --cert /root/.aos/security/aos-user-sp.p12 --cert-type P12 \
   -H "Content-Type: application/json" \
   -d '{
@@ -193,42 +192,45 @@ Save the returned `uuid` for `config.yaml`.
 ### Step 2: Create config.yaml
 
 ```yaml
-publisher:
-    author: "Your Name"
-    company: "Your Company"
+schemaVersion: 2
 
-build:
-    os: linux
-    arch: aarch64
-    sign_pkcs12: aos-user-sp.p12
-    symlinks: copy
+publisher:
+  author: "Your Name"
+  company: "Your Company"
 
 publish:
-    url: aoscloud.io
-    service_uid: <UUID-FROM-STEP-1>
-    tls_pkcs12: aos-user-sp.p12
-    version: "1.0.0"
+  tlsKey: "aos-user-sp.p12"
+  domain: "aoscloud.io"
 
-configuration:
-    cmd: /my-binary
-    workingDir: '/'
-    state:
-        filename: default_state.dat
-        required: true
-    instances:
+items:
+  - identity:
+      type: "service"
+      codename: "my-service"
+      title: "My Service"
+      description: "My AosEdge C++ service"
+    version: "1.0.0"
+    sourceFolder: "my-app"
+
+    images:
+      - sourceFolder: "src_amd64"
+        archInfo:
+          architecture: "amd64"
+      - sourceFolder: "src_arm64"
+        archInfo:
+          architecture: "arm64"
+
+    configuration:
+      workingDir: "/"
+      cmd: "/my-binary"
+      instances:
         minInstances: 1
-        priority: 0
-    isResourceLimits: true
-    requestedResources:
-        cpu: 1000
-        ram: 10MB
-        storage: 5MB
-        state: 512KB
-    quotas:
-        cpu: 1000
-        mem: 10MB
-        state: 512KB
-        storage: 5MB
+        priority: 10
+      quotas:
+        cpuLimit: 5000
+        ramLimit: 50MB
+        storageLimit: 10MB
+        stateLimit: 1MB
+        tmpLimit: 256MiB
 ```
 
 ### Step 3: Build, Sign, Upload
@@ -248,7 +250,7 @@ docker run --rm \
   -e AZURE_KEY_VAULT_NAME=<vault-name> \
   --entrypoint "" aos-edge-toolchain \
   curl -k --http1.1 -X POST \
-  https://aoscloud.io:10000/api/v10/subjects/<SUBJECT_ID>/services/ \
+  https://aoscloud.io:10000/api/v11/subjects/<SUBJECT_ID>/services/ \
   --cert /root/.aos/security/aos-user-sp.p12 --cert-type P12 \
   -H "Content-Type: application/json" \
   -d '{"service_uuids": ["<SERVICE-UUID>"]}'
@@ -261,7 +263,7 @@ docker run --rm \
 docker run --rm \
   -e AZURE_KEY_VAULT_NAME=<vault-name> \
   --entrypoint "" aos-edge-toolchain \
-  curl -k --http1.1 https://aoscloud.io:10000/api/v10/services/<SERVICE-UUID>/ \
+  curl -k --http1.1 https://aoscloud.io:10000/api/v11/services/<SERVICE-UUID>/ \
   --cert /root/.aos/security/aos-user-sp.p12 --cert-type P12 \
   -H "accept: application/json" | jq
 ```
@@ -272,13 +274,13 @@ docker run --rm \
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/v10/services/` | GET, POST | List or create services |
-| `/api/v10/services/{id}/` | GET | Get service details (versions, status) |
-| `/api/v10/units/` | GET | List all units |
-| `/api/v10/units/{id}/` | GET | Get unit status with services |
-| `/api/v10/subjects/` | GET, POST | List or create subjects |
-| `/api/v10/subjects/{id}/services/` | POST | Add service to subject (deploy) |
-| `/api/v10/subjects/{id}/units/` | POST | Add unit to subject |
+| `/api/v11/services/` | GET, POST | List or create services |
+| `/api/v11/services/{id}/` | GET | Get service details (versions, status) |
+| `/api/v11/units/` | GET | List all units |
+| `/api/v11/units/{id}/` | GET | Get unit status with services |
+| `/api/v11/subjects/` | GET, POST | List or create subjects |
+| `/api/v11/subjects/{id}/services/` | POST | Add service to subject (deploy) |
+| `/api/v11/subjects/{id}/units/` | POST | Add unit to subject |
 
 All endpoints use `https://aoscloud.io:10000` with TLS client certificate authentication.
 
@@ -313,14 +315,14 @@ sudo minicom -b 115200 -D /dev/ttyUSB0
 
 ## Key Learnings
 
-### Binary must be in src/ for packaging
+### Binary must be in src_<arch>/ for packaging
 
-`aos-signer` packages files from the `src/` directory. If your binary is only in the root, it won't be included:
+`aos-signer` (2.x) packages files from the `src_<arch>/` directory specified in `config.yaml`. If your binary is only in the root, it won't be included:
 
 - Package ~2-3KB = source only (broken)
 - Package ~900KB = includes binary (correct)
 
-The `deploy` command handles this automatically. If running steps manually, copy the binary to `src/` before signing.
+The `deploy` command handles this automatically. If running steps manually, copy the binary to `src_amd64/` (or `src_arm64/`) before signing.
 
 ### Service quotas are required
 

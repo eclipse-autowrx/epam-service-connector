@@ -1489,5 +1489,82 @@ items:
         storageLimit: 5MB
         stateLimit: 512KB
         tmpLimit: 256MiB`
+  },
+
+  // ── Python Presets ──
+
+  helloPython: {
+    name: 'Hello Python',
+    appName: 'hello-python',
+    description: 'Simple Python hello-world service (aos-signer 2.x format)',
+    language: 'python' as const,
+    python: `#!/usr/bin/env python3
+"""
+Hello Python Service for AosEdge.
+Prints a heartbeat message every 10 seconds.
+"""
+import time
+import sys
+import datetime
+
+VERSION = "1.0.0"
+
+def main():
+    print("=" * 50, flush=True)
+    print("AosEdge Hello Python Service", flush=True)
+    print(f"Version: {VERSION}", flush=True)
+    print("Deployed via aos-edge-toolchain!", flush=True)
+    print("=" * 50, flush=True)
+
+    count = 0
+    while True:
+        time.sleep(10)
+        count += 1
+        timestamp = datetime.datetime.now().isoformat()
+        print(f"[{count}] [{timestamp}] Hello from AosEdge Python! v{VERSION}", flush=True)
+
+if __name__ == "__main__":
+    main()
+`,
+    yaml: `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
+# Python service — architecture-independent
+schemaVersion: 2
+
+publisher:
+  author: "developer@example.com"
+  company: "Example Corp"
+
+publish:
+  tlsKey: "aos-user-sp.p12"
+  domain: "aoscloud.io"
+
+items:
+  - identity:
+      type: service
+      codename: "hello-python"
+      title: "Hello Python Service"
+      description: "Simple Python hello-world service"
+    version: "1.0.0"
+    sourceFolder: "hello-python"
+
+    images:
+      - sourceFolder: "src_any"
+        archInfo:
+          architecture: "any"
+        workingDir: "/"
+        cmd: "/hello-python/run.sh"
+
+    configuration:
+      workingDir: "/"
+      cmd: "/hello-python/run.sh"
+      instances:
+        minInstances: 1
+        priority: 10
+      quotas:
+        cpuLimit: 5000
+        ramLimit: 512MiB
+        storageLimit: 32MiB
+        stateLimit: 1MiB
+        tmpLimit: 256MiB`
   }
 }

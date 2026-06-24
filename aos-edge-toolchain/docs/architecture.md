@@ -22,7 +22,7 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                         AosCloud                             │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │  REST API (https://aoscloud.io:10000/api/v10/)     │    │
+│  │  REST API (https://aoscloud.io:10000/api/v11/)     │    │
 │  │  • Services management                             │    │
 │  │  • Units/Subjects management                       │    │
 │  │  • Service deployment                              │    │
@@ -64,11 +64,11 @@
 
 | Endpoint | Method | Certificate |
 |----------|--------|-------------|
-| `/api/v10/services/` | GET, POST, DELETE | aos-user-sp.p12 |
-| `/api/v10/units/` | GET | aos-user-oem.p12 |
-| `/api/v10/subjects/` | GET, POST | aos-user-oem.p12 |
-| `/api/v10/subjects/{id}/services/` | POST, DELETE | aos-user-oem.p12 |
-| `/api/v10/subjects/{id}/units/` | POST | aos-user-oem.p12 |
+| `/api/v11/services/` | GET, POST, DELETE | aos-user-sp.p12 |
+| `/api/v11/units/` | GET | aos-user-oem.p12 |
+| `/api/v11/subjects/` | GET, POST | aos-user-oem.p12 |
+| `/api/v11/subjects/{id}/services/` | POST, DELETE | aos-user-oem.p12 |
+| `/api/v11/subjects/{id}/units/` | POST | aos-user-oem.p12 |
 
 ## Current Services
 
