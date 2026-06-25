@@ -17,9 +17,6 @@ npx esbuild src/index.ts \
   --format=iife \
   --platform=browser \
   --jsx=automatic \
-  --external:react \
-  --external:react-dom \
-  --external:react-dom/client \
   --sourcemap \
   --outfile=index.js
 
