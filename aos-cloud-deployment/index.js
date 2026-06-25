@@ -30,286 +30,6 @@
     mod
   ));
 
-  // node_modules/scheduler/cjs/scheduler.development.js
-  var require_scheduler_development = __commonJS({
-    "node_modules/scheduler/cjs/scheduler.development.js"(exports) {
-      "use strict";
-      (function() {
-        function performWorkUntilDeadline() {
-          needsPaint = false;
-          if (isMessageLoopRunning) {
-            var currentTime = exports.unstable_now();
-            startTime = currentTime;
-            var hasMoreWork = true;
-            try {
-              a: {
-                isHostCallbackScheduled = false;
-                isHostTimeoutScheduled && (isHostTimeoutScheduled = false, localClearTimeout(taskTimeoutID), taskTimeoutID = -1);
-                isPerformingWork = true;
-                var previousPriorityLevel = currentPriorityLevel;
-                try {
-                  b: {
-                    advanceTimers(currentTime);
-                    for (currentTask = peek(taskQueue); null !== currentTask && !(currentTask.expirationTime > currentTime && shouldYieldToHost()); ) {
-                      var callback = currentTask.callback;
-                      if ("function" === typeof callback) {
-                        currentTask.callback = null;
-                        currentPriorityLevel = currentTask.priorityLevel;
-                        var continuationCallback = callback(
-                          currentTask.expirationTime <= currentTime
-                        );
-                        currentTime = exports.unstable_now();
-                        if ("function" === typeof continuationCallback) {
-                          currentTask.callback = continuationCallback;
-                          advanceTimers(currentTime);
-                          hasMoreWork = true;
-                          break b;
-                        }
-                        currentTask === peek(taskQueue) && pop(taskQueue);
-                        advanceTimers(currentTime);
-                      } else
-                        pop(taskQueue);
-                      currentTask = peek(taskQueue);
-                    }
-                    if (null !== currentTask)
-                      hasMoreWork = true;
-                    else {
-                      var firstTimer = peek(timerQueue);
-                      null !== firstTimer && requestHostTimeout(
-                        handleTimeout,
-                        firstTimer.startTime - currentTime
-                      );
-                      hasMoreWork = false;
-                    }
-                  }
-                  break a;
-                } finally {
-                  currentTask = null, currentPriorityLevel = previousPriorityLevel, isPerformingWork = false;
-                }
-                hasMoreWork = void 0;
-              }
-            } finally {
-              hasMoreWork ? schedulePerformWorkUntilDeadline() : isMessageLoopRunning = false;
-            }
-          }
-        }
-        function push(heap, node) {
-          var index = heap.length;
-          heap.push(node);
-          a:
-            for (; 0 < index; ) {
-              var parentIndex = index - 1 >>> 1, parent = heap[parentIndex];
-              if (0 < compare(parent, node))
-                heap[parentIndex] = node, heap[index] = parent, index = parentIndex;
-              else
-                break a;
-            }
-        }
-        function peek(heap) {
-          return 0 === heap.length ? null : heap[0];
-        }
-        function pop(heap) {
-          if (0 === heap.length)
-            return null;
-          var first = heap[0], last = heap.pop();
-          if (last !== first) {
-            heap[0] = last;
-            a:
-              for (var index = 0, length = heap.length, halfLength = length >>> 1; index < halfLength; ) {
-                var leftIndex = 2 * (index + 1) - 1, left = heap[leftIndex], rightIndex = leftIndex + 1, right = heap[rightIndex];
-                if (0 > compare(left, last))
-                  rightIndex < length && 0 > compare(right, left) ? (heap[index] = right, heap[rightIndex] = last, index = rightIndex) : (heap[index] = left, heap[leftIndex] = last, index = leftIndex);
-                else if (rightIndex < length && 0 > compare(right, last))
-                  heap[index] = right, heap[rightIndex] = last, index = rightIndex;
-                else
-                  break a;
-              }
-          }
-          return first;
-        }
-        function compare(a, b) {
-          var diff = a.sortIndex - b.sortIndex;
-          return 0 !== diff ? diff : a.id - b.id;
-        }
-        function advanceTimers(currentTime) {
-          for (var timer = peek(timerQueue); null !== timer; ) {
-            if (null === timer.callback)
-              pop(timerQueue);
-            else if (timer.startTime <= currentTime)
-              pop(timerQueue), timer.sortIndex = timer.expirationTime, push(taskQueue, timer);
-            else
-              break;
-            timer = peek(timerQueue);
-          }
-        }
-        function handleTimeout(currentTime) {
-          isHostTimeoutScheduled = false;
-          advanceTimers(currentTime);
-          if (!isHostCallbackScheduled)
-            if (null !== peek(taskQueue))
-              isHostCallbackScheduled = true, isMessageLoopRunning || (isMessageLoopRunning = true, schedulePerformWorkUntilDeadline());
-            else {
-              var firstTimer = peek(timerQueue);
-              null !== firstTimer && requestHostTimeout(
-                handleTimeout,
-                firstTimer.startTime - currentTime
-              );
-            }
-        }
-        function shouldYieldToHost() {
-          return needsPaint ? true : exports.unstable_now() - startTime < frameInterval ? false : true;
-        }
-        function requestHostTimeout(callback, ms) {
-          taskTimeoutID = localSetTimeout(function() {
-            callback(exports.unstable_now());
-          }, ms);
-        }
-        "undefined" !== typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ && "function" === typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStart && __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStart(Error());
-        exports.unstable_now = void 0;
-        if ("object" === typeof performance && "function" === typeof performance.now) {
-          var localPerformance = performance;
-          exports.unstable_now = function() {
-            return localPerformance.now();
-          };
-        } else {
-          var localDate = Date, initialTime = localDate.now();
-          exports.unstable_now = function() {
-            return localDate.now() - initialTime;
-          };
-        }
-        var taskQueue = [], timerQueue = [], taskIdCounter = 1, currentTask = null, currentPriorityLevel = 3, isPerformingWork = false, isHostCallbackScheduled = false, isHostTimeoutScheduled = false, needsPaint = false, localSetTimeout = "function" === typeof setTimeout ? setTimeout : null, localClearTimeout = "function" === typeof clearTimeout ? clearTimeout : null, localSetImmediate = "undefined" !== typeof setImmediate ? setImmediate : null, isMessageLoopRunning = false, taskTimeoutID = -1, frameInterval = 5, startTime = -1;
-        if ("function" === typeof localSetImmediate)
-          var schedulePerformWorkUntilDeadline = function() {
-            localSetImmediate(performWorkUntilDeadline);
-          };
-        else if ("undefined" !== typeof MessageChannel) {
-          var channel = new MessageChannel(), port = channel.port2;
-          channel.port1.onmessage = performWorkUntilDeadline;
-          schedulePerformWorkUntilDeadline = function() {
-            port.postMessage(null);
-          };
-        } else
-          schedulePerformWorkUntilDeadline = function() {
-            localSetTimeout(performWorkUntilDeadline, 0);
-          };
-        exports.unstable_IdlePriority = 5;
-        exports.unstable_ImmediatePriority = 1;
-        exports.unstable_LowPriority = 4;
-        exports.unstable_NormalPriority = 3;
-        exports.unstable_Profiling = null;
-        exports.unstable_UserBlockingPriority = 2;
-        exports.unstable_cancelCallback = function(task) {
-          task.callback = null;
-        };
-        exports.unstable_forceFrameRate = function(fps) {
-          0 > fps || 125 < fps ? console.error(
-            "forceFrameRate takes a positive int between 0 and 125, forcing frame rates higher than 125 fps is not supported"
-          ) : frameInterval = 0 < fps ? Math.floor(1e3 / fps) : 5;
-        };
-        exports.unstable_getCurrentPriorityLevel = function() {
-          return currentPriorityLevel;
-        };
-        exports.unstable_next = function(eventHandler) {
-          switch (currentPriorityLevel) {
-            case 1:
-            case 2:
-            case 3:
-              var priorityLevel = 3;
-              break;
-            default:
-              priorityLevel = currentPriorityLevel;
-          }
-          var previousPriorityLevel = currentPriorityLevel;
-          currentPriorityLevel = priorityLevel;
-          try {
-            return eventHandler();
-          } finally {
-            currentPriorityLevel = previousPriorityLevel;
-          }
-        };
-        exports.unstable_requestPaint = function() {
-          needsPaint = true;
-        };
-        exports.unstable_runWithPriority = function(priorityLevel, eventHandler) {
-          switch (priorityLevel) {
-            case 1:
-            case 2:
-            case 3:
-            case 4:
-            case 5:
-              break;
-            default:
-              priorityLevel = 3;
-          }
-          var previousPriorityLevel = currentPriorityLevel;
-          currentPriorityLevel = priorityLevel;
-          try {
-            return eventHandler();
-          } finally {
-            currentPriorityLevel = previousPriorityLevel;
-          }
-        };
-        exports.unstable_scheduleCallback = function(priorityLevel, callback, options) {
-          var currentTime = exports.unstable_now();
-          "object" === typeof options && null !== options ? (options = options.delay, options = "number" === typeof options && 0 < options ? currentTime + options : currentTime) : options = currentTime;
-          switch (priorityLevel) {
-            case 1:
-              var timeout = -1;
-              break;
-            case 2:
-              timeout = 250;
-              break;
-            case 5:
-              timeout = 1073741823;
-              break;
-            case 4:
-              timeout = 1e4;
-              break;
-            default:
-              timeout = 5e3;
-          }
-          timeout = options + timeout;
-          priorityLevel = {
-            id: taskIdCounter++,
-            callback,
-            priorityLevel,
-            startTime: options,
-            expirationTime: timeout,
-            sortIndex: -1
-          };
-          options > currentTime ? (priorityLevel.sortIndex = options, push(timerQueue, priorityLevel), null === peek(taskQueue) && priorityLevel === peek(timerQueue) && (isHostTimeoutScheduled ? (localClearTimeout(taskTimeoutID), taskTimeoutID = -1) : isHostTimeoutScheduled = true, requestHostTimeout(handleTimeout, options - currentTime))) : (priorityLevel.sortIndex = timeout, push(taskQueue, priorityLevel), isHostCallbackScheduled || isPerformingWork || (isHostCallbackScheduled = true, isMessageLoopRunning || (isMessageLoopRunning = true, schedulePerformWorkUntilDeadline())));
-          return priorityLevel;
-        };
-        exports.unstable_shouldYield = shouldYieldToHost;
-        exports.unstable_wrapCallback = function(callback) {
-          var parentPriorityLevel = currentPriorityLevel;
-          return function() {
-            var previousPriorityLevel = currentPriorityLevel;
-            currentPriorityLevel = parentPriorityLevel;
-            try {
-              return callback.apply(this, arguments);
-            } finally {
-              currentPriorityLevel = previousPriorityLevel;
-            }
-          };
-        };
-        "undefined" !== typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ && "function" === typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStop && __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStop(Error());
-      })();
-    }
-  });
-
-  // node_modules/scheduler/index.js
-  var require_scheduler = __commonJS({
-    "node_modules/scheduler/index.js"(exports, module) {
-      "use strict";
-      if (false) {
-        module.exports = null;
-      } else {
-        module.exports = require_scheduler_development();
-      }
-    }
-  });
-
   // node_modules/react/cjs/react.development.js
   var require_react_development = __commonJS({
     "node_modules/react/cjs/react.development.js"(exports, module) {
@@ -1307,6 +1027,286 @@
     }
   });
 
+  // node_modules/scheduler/cjs/scheduler.development.js
+  var require_scheduler_development = __commonJS({
+    "node_modules/scheduler/cjs/scheduler.development.js"(exports) {
+      "use strict";
+      (function() {
+        function performWorkUntilDeadline() {
+          needsPaint = false;
+          if (isMessageLoopRunning) {
+            var currentTime = exports.unstable_now();
+            startTime = currentTime;
+            var hasMoreWork = true;
+            try {
+              a: {
+                isHostCallbackScheduled = false;
+                isHostTimeoutScheduled && (isHostTimeoutScheduled = false, localClearTimeout(taskTimeoutID), taskTimeoutID = -1);
+                isPerformingWork = true;
+                var previousPriorityLevel = currentPriorityLevel;
+                try {
+                  b: {
+                    advanceTimers(currentTime);
+                    for (currentTask = peek(taskQueue); null !== currentTask && !(currentTask.expirationTime > currentTime && shouldYieldToHost()); ) {
+                      var callback = currentTask.callback;
+                      if ("function" === typeof callback) {
+                        currentTask.callback = null;
+                        currentPriorityLevel = currentTask.priorityLevel;
+                        var continuationCallback = callback(
+                          currentTask.expirationTime <= currentTime
+                        );
+                        currentTime = exports.unstable_now();
+                        if ("function" === typeof continuationCallback) {
+                          currentTask.callback = continuationCallback;
+                          advanceTimers(currentTime);
+                          hasMoreWork = true;
+                          break b;
+                        }
+                        currentTask === peek(taskQueue) && pop(taskQueue);
+                        advanceTimers(currentTime);
+                      } else
+                        pop(taskQueue);
+                      currentTask = peek(taskQueue);
+                    }
+                    if (null !== currentTask)
+                      hasMoreWork = true;
+                    else {
+                      var firstTimer = peek(timerQueue);
+                      null !== firstTimer && requestHostTimeout(
+                        handleTimeout,
+                        firstTimer.startTime - currentTime
+                      );
+                      hasMoreWork = false;
+                    }
+                  }
+                  break a;
+                } finally {
+                  currentTask = null, currentPriorityLevel = previousPriorityLevel, isPerformingWork = false;
+                }
+                hasMoreWork = void 0;
+              }
+            } finally {
+              hasMoreWork ? schedulePerformWorkUntilDeadline() : isMessageLoopRunning = false;
+            }
+          }
+        }
+        function push(heap, node) {
+          var index = heap.length;
+          heap.push(node);
+          a:
+            for (; 0 < index; ) {
+              var parentIndex = index - 1 >>> 1, parent = heap[parentIndex];
+              if (0 < compare(parent, node))
+                heap[parentIndex] = node, heap[index] = parent, index = parentIndex;
+              else
+                break a;
+            }
+        }
+        function peek(heap) {
+          return 0 === heap.length ? null : heap[0];
+        }
+        function pop(heap) {
+          if (0 === heap.length)
+            return null;
+          var first = heap[0], last = heap.pop();
+          if (last !== first) {
+            heap[0] = last;
+            a:
+              for (var index = 0, length = heap.length, halfLength = length >>> 1; index < halfLength; ) {
+                var leftIndex = 2 * (index + 1) - 1, left = heap[leftIndex], rightIndex = leftIndex + 1, right = heap[rightIndex];
+                if (0 > compare(left, last))
+                  rightIndex < length && 0 > compare(right, left) ? (heap[index] = right, heap[rightIndex] = last, index = rightIndex) : (heap[index] = left, heap[leftIndex] = last, index = leftIndex);
+                else if (rightIndex < length && 0 > compare(right, last))
+                  heap[index] = right, heap[rightIndex] = last, index = rightIndex;
+                else
+                  break a;
+              }
+          }
+          return first;
+        }
+        function compare(a, b) {
+          var diff = a.sortIndex - b.sortIndex;
+          return 0 !== diff ? diff : a.id - b.id;
+        }
+        function advanceTimers(currentTime) {
+          for (var timer = peek(timerQueue); null !== timer; ) {
+            if (null === timer.callback)
+              pop(timerQueue);
+            else if (timer.startTime <= currentTime)
+              pop(timerQueue), timer.sortIndex = timer.expirationTime, push(taskQueue, timer);
+            else
+              break;
+            timer = peek(timerQueue);
+          }
+        }
+        function handleTimeout(currentTime) {
+          isHostTimeoutScheduled = false;
+          advanceTimers(currentTime);
+          if (!isHostCallbackScheduled)
+            if (null !== peek(taskQueue))
+              isHostCallbackScheduled = true, isMessageLoopRunning || (isMessageLoopRunning = true, schedulePerformWorkUntilDeadline());
+            else {
+              var firstTimer = peek(timerQueue);
+              null !== firstTimer && requestHostTimeout(
+                handleTimeout,
+                firstTimer.startTime - currentTime
+              );
+            }
+        }
+        function shouldYieldToHost() {
+          return needsPaint ? true : exports.unstable_now() - startTime < frameInterval ? false : true;
+        }
+        function requestHostTimeout(callback, ms) {
+          taskTimeoutID = localSetTimeout(function() {
+            callback(exports.unstable_now());
+          }, ms);
+        }
+        "undefined" !== typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ && "function" === typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStart && __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStart(Error());
+        exports.unstable_now = void 0;
+        if ("object" === typeof performance && "function" === typeof performance.now) {
+          var localPerformance = performance;
+          exports.unstable_now = function() {
+            return localPerformance.now();
+          };
+        } else {
+          var localDate = Date, initialTime = localDate.now();
+          exports.unstable_now = function() {
+            return localDate.now() - initialTime;
+          };
+        }
+        var taskQueue = [], timerQueue = [], taskIdCounter = 1, currentTask = null, currentPriorityLevel = 3, isPerformingWork = false, isHostCallbackScheduled = false, isHostTimeoutScheduled = false, needsPaint = false, localSetTimeout = "function" === typeof setTimeout ? setTimeout : null, localClearTimeout = "function" === typeof clearTimeout ? clearTimeout : null, localSetImmediate = "undefined" !== typeof setImmediate ? setImmediate : null, isMessageLoopRunning = false, taskTimeoutID = -1, frameInterval = 5, startTime = -1;
+        if ("function" === typeof localSetImmediate)
+          var schedulePerformWorkUntilDeadline = function() {
+            localSetImmediate(performWorkUntilDeadline);
+          };
+        else if ("undefined" !== typeof MessageChannel) {
+          var channel = new MessageChannel(), port = channel.port2;
+          channel.port1.onmessage = performWorkUntilDeadline;
+          schedulePerformWorkUntilDeadline = function() {
+            port.postMessage(null);
+          };
+        } else
+          schedulePerformWorkUntilDeadline = function() {
+            localSetTimeout(performWorkUntilDeadline, 0);
+          };
+        exports.unstable_IdlePriority = 5;
+        exports.unstable_ImmediatePriority = 1;
+        exports.unstable_LowPriority = 4;
+        exports.unstable_NormalPriority = 3;
+        exports.unstable_Profiling = null;
+        exports.unstable_UserBlockingPriority = 2;
+        exports.unstable_cancelCallback = function(task) {
+          task.callback = null;
+        };
+        exports.unstable_forceFrameRate = function(fps) {
+          0 > fps || 125 < fps ? console.error(
+            "forceFrameRate takes a positive int between 0 and 125, forcing frame rates higher than 125 fps is not supported"
+          ) : frameInterval = 0 < fps ? Math.floor(1e3 / fps) : 5;
+        };
+        exports.unstable_getCurrentPriorityLevel = function() {
+          return currentPriorityLevel;
+        };
+        exports.unstable_next = function(eventHandler) {
+          switch (currentPriorityLevel) {
+            case 1:
+            case 2:
+            case 3:
+              var priorityLevel = 3;
+              break;
+            default:
+              priorityLevel = currentPriorityLevel;
+          }
+          var previousPriorityLevel = currentPriorityLevel;
+          currentPriorityLevel = priorityLevel;
+          try {
+            return eventHandler();
+          } finally {
+            currentPriorityLevel = previousPriorityLevel;
+          }
+        };
+        exports.unstable_requestPaint = function() {
+          needsPaint = true;
+        };
+        exports.unstable_runWithPriority = function(priorityLevel, eventHandler) {
+          switch (priorityLevel) {
+            case 1:
+            case 2:
+            case 3:
+            case 4:
+            case 5:
+              break;
+            default:
+              priorityLevel = 3;
+          }
+          var previousPriorityLevel = currentPriorityLevel;
+          currentPriorityLevel = priorityLevel;
+          try {
+            return eventHandler();
+          } finally {
+            currentPriorityLevel = previousPriorityLevel;
+          }
+        };
+        exports.unstable_scheduleCallback = function(priorityLevel, callback, options) {
+          var currentTime = exports.unstable_now();
+          "object" === typeof options && null !== options ? (options = options.delay, options = "number" === typeof options && 0 < options ? currentTime + options : currentTime) : options = currentTime;
+          switch (priorityLevel) {
+            case 1:
+              var timeout = -1;
+              break;
+            case 2:
+              timeout = 250;
+              break;
+            case 5:
+              timeout = 1073741823;
+              break;
+            case 4:
+              timeout = 1e4;
+              break;
+            default:
+              timeout = 5e3;
+          }
+          timeout = options + timeout;
+          priorityLevel = {
+            id: taskIdCounter++,
+            callback,
+            priorityLevel,
+            startTime: options,
+            expirationTime: timeout,
+            sortIndex: -1
+          };
+          options > currentTime ? (priorityLevel.sortIndex = options, push(timerQueue, priorityLevel), null === peek(taskQueue) && priorityLevel === peek(timerQueue) && (isHostTimeoutScheduled ? (localClearTimeout(taskTimeoutID), taskTimeoutID = -1) : isHostTimeoutScheduled = true, requestHostTimeout(handleTimeout, options - currentTime))) : (priorityLevel.sortIndex = timeout, push(taskQueue, priorityLevel), isHostCallbackScheduled || isPerformingWork || (isHostCallbackScheduled = true, isMessageLoopRunning || (isMessageLoopRunning = true, schedulePerformWorkUntilDeadline())));
+          return priorityLevel;
+        };
+        exports.unstable_shouldYield = shouldYieldToHost;
+        exports.unstable_wrapCallback = function(callback) {
+          var parentPriorityLevel = currentPriorityLevel;
+          return function() {
+            var previousPriorityLevel = currentPriorityLevel;
+            currentPriorityLevel = parentPriorityLevel;
+            try {
+              return callback.apply(this, arguments);
+            } finally {
+              currentPriorityLevel = previousPriorityLevel;
+            }
+          };
+        };
+        "undefined" !== typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ && "function" === typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStop && __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStop(Error());
+      })();
+    }
+  });
+
+  // node_modules/scheduler/index.js
+  var require_scheduler = __commonJS({
+    "node_modules/scheduler/index.js"(exports, module) {
+      "use strict";
+      if (false) {
+        module.exports = null;
+      } else {
+        module.exports = require_scheduler_development();
+      }
+    }
+  });
+
   // node_modules/react-dom/cjs/react-dom.development.js
   var require_react_dom_development = __commonJS({
     "node_modules/react-dom/cjs/react-dom.development.js"(exports) {
@@ -1357,7 +1357,7 @@
           return dispatcher;
         }
         "undefined" !== typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ && "function" === typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStart && __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStart(Error());
-        var React3 = require_react(), Internals = {
+        var React4 = require_react(), Internals = {
           d: {
             f: noop,
             r: function() {
@@ -1375,7 +1375,7 @@
           },
           p: 0,
           findDOMNode: null
-        }, REACT_PORTAL_TYPE = Symbol.for("react.portal"), ReactSharedInternals = React3.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+        }, REACT_PORTAL_TYPE = Symbol.for("react.portal"), ReactSharedInternals = React4.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
         "function" === typeof Map && null != Map.prototype && "function" === typeof Map.prototype.forEach && "function" === typeof Set && null != Set.prototype && "function" === typeof Set.prototype.clear && "function" === typeof Set.prototype.forEach || console.error(
           "React depends on Map and Set built-in types. Make sure that you load a polyfill in older browsers. https://reactjs.org/link/react-polyfills"
         );
@@ -2947,7 +2947,7 @@
           "number" === type && getActiveElement(node.ownerDocument) === node || node.defaultValue === "" + value2 || (node.defaultValue = "" + value2);
         }
         function validateOptionProps(element, props) {
-          null == props.value && ("object" === typeof props.children && null !== props.children ? React3.Children.forEach(props.children, function(child) {
+          null == props.value && ("object" === typeof props.children && null !== props.children ? React4.Children.forEach(props.children, function(child) {
             null == child || "string" === typeof child || "number" === typeof child || "bigint" === typeof child || didWarnInvalidChild || (didWarnInvalidChild = true, console.error(
               "Cannot infer the option value of complex children. Pass a `value` prop or use a plain string as children to <option>."
             ));
@@ -18785,14 +18785,14 @@
           ));
         }
         "undefined" !== typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ && "function" === typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStart && __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStart(Error());
-        var Scheduler = require_scheduler(), React3 = require_react(), ReactDOM2 = require_react_dom(), assign = Object.assign, REACT_LEGACY_ELEMENT_TYPE = Symbol.for("react.element"), REACT_ELEMENT_TYPE = Symbol.for("react.transitional.element"), REACT_PORTAL_TYPE = Symbol.for("react.portal"), REACT_FRAGMENT_TYPE = Symbol.for("react.fragment"), REACT_STRICT_MODE_TYPE = Symbol.for("react.strict_mode"), REACT_PROFILER_TYPE = Symbol.for("react.profiler"), REACT_CONSUMER_TYPE = Symbol.for("react.consumer"), REACT_CONTEXT_TYPE = Symbol.for("react.context"), REACT_FORWARD_REF_TYPE = Symbol.for("react.forward_ref"), REACT_SUSPENSE_TYPE = Symbol.for("react.suspense"), REACT_SUSPENSE_LIST_TYPE = Symbol.for("react.suspense_list"), REACT_MEMO_TYPE = Symbol.for("react.memo"), REACT_LAZY_TYPE = Symbol.for("react.lazy");
+        var Scheduler = require_scheduler(), React4 = require_react(), ReactDOM2 = require_react_dom(), assign = Object.assign, REACT_LEGACY_ELEMENT_TYPE = Symbol.for("react.element"), REACT_ELEMENT_TYPE = Symbol.for("react.transitional.element"), REACT_PORTAL_TYPE = Symbol.for("react.portal"), REACT_FRAGMENT_TYPE = Symbol.for("react.fragment"), REACT_STRICT_MODE_TYPE = Symbol.for("react.strict_mode"), REACT_PROFILER_TYPE = Symbol.for("react.profiler"), REACT_CONSUMER_TYPE = Symbol.for("react.consumer"), REACT_CONTEXT_TYPE = Symbol.for("react.context"), REACT_FORWARD_REF_TYPE = Symbol.for("react.forward_ref"), REACT_SUSPENSE_TYPE = Symbol.for("react.suspense"), REACT_SUSPENSE_LIST_TYPE = Symbol.for("react.suspense_list"), REACT_MEMO_TYPE = Symbol.for("react.memo"), REACT_LAZY_TYPE = Symbol.for("react.lazy");
         Symbol.for("react.scope");
         var REACT_ACTIVITY_TYPE = Symbol.for("react.activity");
         Symbol.for("react.legacy_hidden");
         Symbol.for("react.tracing_marker");
         var REACT_MEMO_CACHE_SENTINEL = Symbol.for("react.memo_cache_sentinel");
         Symbol.for("react.view_transition");
-        var MAYBE_ITERATOR_SYMBOL = Symbol.iterator, REACT_CLIENT_REFERENCE = Symbol.for("react.client.reference"), isArrayImpl = Array.isArray, ReactSharedInternals = React3.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE, ReactDOMSharedInternals = ReactDOM2.__DOM_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE, NotPending = Object.freeze({
+        var MAYBE_ITERATOR_SYMBOL = Symbol.iterator, REACT_CLIENT_REFERENCE = Symbol.for("react.client.reference"), isArrayImpl = Array.isArray, ReactSharedInternals = React4.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE, ReactDOMSharedInternals = ReactDOM2.__DOM_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE, NotPending = Object.freeze({
           pending: false,
           data: null,
           method: null,
@@ -21585,7 +21585,7 @@
           }
         };
         (function() {
-          var isomorphicReactPackageVersion = React3.version;
+          var isomorphicReactPackageVersion = React4.version;
           if ("19.2.4" !== isomorphicReactPackageVersion)
             throw Error(
               'Incompatible React versions: The "react" and "react-dom" packages must have the exact same version. Instead got:\n  - react:      ' + (isomorphicReactPackageVersion + "\n  - react-dom:  19.2.4\nLearn more: https://react.dev/warnings/version-mismatch")
@@ -21725,9 +21725,13 @@
     }
   });
 
+  // src/setup-react.ts
+  var React = __toESM(require_react(), 1);
+  globalThis.React = React;
+
   // src/index.ts
+  var React3 = __toESM(require_react(), 1);
   var ReactDOM = __toESM(require_client(), 1);
-  var React2 = __toESM(require_react(), 1);
 
   // node_modules/engine.io-parser/build/esm/commons.js
   var PACKET_TYPES = /* @__PURE__ */ Object.create(null);
@@ -27756,61 +27760,61 @@ items:
   };
 
   // src/components/Page.tsx
-  var React = globalThis.React;
+  var React2 = globalThis.React;
   function Page({ data, config }) {
     const forcedLanguage = config?.language;
-    const [languageMode, setLanguageMode] = React.useState(forcedLanguage || "python");
-    const [cppCode, setCppCode] = React.useState(forcedLanguage === "cpp" ? PRESETS.helloAos.cpp : "");
-    const [pythonCode, setPythonCode] = React.useState(forcedLanguage === "cpp" ? "" : PRESETS.helloPython?.python || "");
-    const [yamlConfig, setYamlConfig] = React.useState(forcedLanguage === "cpp" ? PRESETS.helloAos.yaml : PRESETS.helloPython?.yaml || PRESETS.helloAos.yaml);
-    const [appName, setAppName] = React.useState(forcedLanguage === "cpp" ? "hello-aos" : "hello-python");
-    const [isBuilding, setIsBuilding] = React.useState(false);
-    const [buildStatus, setBuildStatus] = React.useState("");
-    const [buildLogs, setBuildLogs] = React.useState([]);
-    const [deployedApps, setDeployedApps] = React.useState([]);
-    const [connectionStatus, setConnectionStatus] = React.useState("disconnected");
-    const [selectedPreset, setSelectedPreset] = React.useState("custom");
-    const [autoIncVersion, setAutoIncVersion] = React.useState(true);
-    const [autoSyncServiceUid, setAutoSyncServiceUid] = React.useState(true);
-    const [activeEditorTab, setActiveEditorTab] = React.useState(forcedLanguage === "cpp" ? "cpp" : "python");
-    const cppCodeRef = React.useRef(cppCode);
-    const pythonCodeRef = React.useRef(pythonCode);
-    const yamlConfigRef = React.useRef(yamlConfig);
+    const [languageMode, setLanguageMode] = React2.useState(forcedLanguage || "python");
+    const [cppCode, setCppCode] = React2.useState(forcedLanguage === "cpp" ? PRESETS.helloAos.cpp : "");
+    const [pythonCode, setPythonCode] = React2.useState(forcedLanguage === "cpp" ? "" : PRESETS.helloPython?.python || "");
+    const [yamlConfig, setYamlConfig] = React2.useState(forcedLanguage === "cpp" ? PRESETS.helloAos.yaml : PRESETS.helloPython?.yaml || PRESETS.helloAos.yaml);
+    const [appName, setAppName] = React2.useState(forcedLanguage === "cpp" ? "hello-aos" : "hello-python");
+    const [isBuilding, setIsBuilding] = React2.useState(false);
+    const [buildStatus, setBuildStatus] = React2.useState("");
+    const [buildLogs, setBuildLogs] = React2.useState([]);
+    const [deployedApps, setDeployedApps] = React2.useState([]);
+    const [connectionStatus, setConnectionStatus] = React2.useState("disconnected");
+    const [selectedPreset, setSelectedPreset] = React2.useState("custom");
+    const [autoIncVersion, setAutoIncVersion] = React2.useState(true);
+    const [autoSyncServiceUid, setAutoSyncServiceUid] = React2.useState(true);
+    const [activeEditorTab, setActiveEditorTab] = React2.useState(forcedLanguage === "cpp" ? "cpp" : "python");
+    const cppCodeRef = React2.useRef(cppCode);
+    const pythonCodeRef = React2.useRef(pythonCode);
+    const yamlConfigRef = React2.useRef(yamlConfig);
     cppCodeRef.current = cppCode;
     pythonCodeRef.current = pythonCode;
     yamlConfigRef.current = yamlConfig;
-    const [dockerInstances, setDockerInstances] = React.useState([]);
-    const [filterOnline, setFilterOnline] = React.useState(true);
-    const [selectedInstance, setSelectedInstance] = React.useState("");
-    const [showDockerPanel, setShowDockerPanel] = React.useState(true);
-    const [deploymentStatus, setDeploymentStatus] = React.useState(null);
-    const [isLoadingStatus, setIsLoadingStatus] = React.useState(false);
-    const [statusError, setStatusError] = React.useState("");
-    const [certStatus, setCertStatus] = React.useState(null);
-    const [isUploadingCert, setIsUploadingCert] = React.useState(false);
-    const [isRemovingCert, setIsRemovingCert] = React.useState(false);
-    const [certError, setCertError] = React.useState("");
-    const [showAdvanced, setShowAdvanced] = React.useState(false);
-    const [aosServices, setAosServices] = React.useState([]);
-    const [selectedServiceUuid, setSelectedServiceUuid] = React.useState("");
-    const [selectedServiceCodename, setSelectedServiceCodename] = React.useState("");
-    const [serviceUnits, setServiceUnits] = React.useState([]);
-    const [serviceVersions, setServiceVersions] = React.useState([]);
-    const [serviceName, setServiceName] = React.useState("");
-    const [selectedMonitorUnit, setSelectedMonitorUnit] = React.useState("");
-    const [unitMonitoring, setUnitMonitoring] = React.useState(null);
-    const [alerts, setAlerts] = React.useState([]);
-    const [isLoadingAosCloud, setIsLoadingAosCloud] = React.useState(false);
-    const [showGuide, setShowGuide] = React.useState(false);
-    const [serviceLogs, setServiceLogs] = React.useState([]);
-    const [isRequestingLog, setIsRequestingLog] = React.useState(false);
-    const [selectedUnitUid, setSelectedUnitUid] = React.useState("");
-    const [selectedSubjectId, setSelectedSubjectId] = React.useState("");
-    const aosCloudLoadedRef = React.useRef(false);
-    const aosServiceRef = React.useRef(null);
-    const buildLogsRef = React.useRef(null);
-    const pollingIntervalRef = React.useRef(null);
-    const [detailUnitUid, setDetailUnitUid] = React.useState(null);
+    const [dockerInstances, setDockerInstances] = React2.useState([]);
+    const [filterOnline, setFilterOnline] = React2.useState(true);
+    const [selectedInstance, setSelectedInstance] = React2.useState("");
+    const [showDockerPanel, setShowDockerPanel] = React2.useState(true);
+    const [deploymentStatus, setDeploymentStatus] = React2.useState(null);
+    const [isLoadingStatus, setIsLoadingStatus] = React2.useState(false);
+    const [statusError, setStatusError] = React2.useState("");
+    const [certStatus, setCertStatus] = React2.useState(null);
+    const [isUploadingCert, setIsUploadingCert] = React2.useState(false);
+    const [isRemovingCert, setIsRemovingCert] = React2.useState(false);
+    const [certError, setCertError] = React2.useState("");
+    const [showAdvanced, setShowAdvanced] = React2.useState(false);
+    const [aosServices, setAosServices] = React2.useState([]);
+    const [selectedServiceUuid, setSelectedServiceUuid] = React2.useState("");
+    const [selectedServiceCodename, setSelectedServiceCodename] = React2.useState("");
+    const [serviceUnits, setServiceUnits] = React2.useState([]);
+    const [serviceVersions, setServiceVersions] = React2.useState([]);
+    const [serviceName, setServiceName] = React2.useState("");
+    const [selectedMonitorUnit, setSelectedMonitorUnit] = React2.useState("");
+    const [unitMonitoring, setUnitMonitoring] = React2.useState(null);
+    const [alerts, setAlerts] = React2.useState([]);
+    const [isLoadingAosCloud, setIsLoadingAosCloud] = React2.useState(false);
+    const [showGuide, setShowGuide] = React2.useState(false);
+    const [serviceLogs, setServiceLogs] = React2.useState([]);
+    const [isRequestingLog, setIsRequestingLog] = React2.useState(false);
+    const [selectedUnitUid, setSelectedUnitUid] = React2.useState("");
+    const [selectedSubjectId, setSelectedSubjectId] = React2.useState("");
+    const aosCloudLoadedRef = React2.useRef(false);
+    const aosServiceRef = React2.useRef(null);
+    const buildLogsRef = React2.useRef(null);
+    const pollingIntervalRef = React2.useRef(null);
+    const [detailUnitUid, setDetailUnitUid] = React2.useState(null);
     const ICONS = {
       "box": "M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z|m3.3 7 8.7 5 8.7-5|M12 22V12",
       "shield-check": "M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.79 17 5 19 5a1 1 0 0 1 1 1z|m9 12 2 2 4-4",
@@ -27836,7 +27840,7 @@ items:
       const d = ICONS[name];
       if (!d)
         return null;
-      return React.createElement("svg", {
+      return React2.createElement("svg", {
         width: size,
         height: size,
         viewBox: "0 0 24 24",
@@ -27847,7 +27851,7 @@ items:
         strokeLinejoin: "round",
         style: { display: "inline-block", flexShrink: 0, verticalAlign: "middle", ...style || {} }
       }, ...d.split("|").map(
-        (p, i) => React.createElement("path", { key: i, d: p })
+        (p, i) => React2.createElement("path", { key: i, d: p })
       ));
     };
     const styles = {
@@ -28315,7 +28319,7 @@ items:
         color: "#1f2937"
       }
     };
-    React.useEffect(() => {
+    React2.useEffect(() => {
       const serviceUrl = config?.aosServiceUrl || config?.runtimeUrl || "https://kit.digitalauto.tech";
       const service = new AosService(serviceUrl, selectedInstance || "default-aos-target");
       aosServiceRef.current = service;
@@ -28420,7 +28424,7 @@ items:
         service.disconnect();
       };
     }, [config?.aosServiceUrl, config?.runtimeUrl, selectedInstance]);
-    React.useEffect(() => {
+    React2.useEffect(() => {
       if (buildLogsRef.current) {
         buildLogsRef.current.scrollTop = buildLogsRef.current.scrollHeight;
       }
@@ -29048,31 +29052,31 @@ items:
     const filteredInstances = getFilteredInstances();
     const onlineCount = dockerInstances.filter((d) => d.online).length;
     if (!data?.prototype?.name) {
-      return React.createElement(
+      return React2.createElement(
         "div",
         { style: styles.page },
-        React.createElement(
+        React2.createElement(
           "div",
           { style: styles.emptyState },
-          React.createElement("div", { style: styles.emptyIcon }, "\u{1F4E6}"),
-          React.createElement("h2", { style: { margin: "0 0 8px 0", fontSize: "18px", fontWeight: 600, color: "#1f2937" } }, "AOS Cloud Deployment"),
-          React.createElement("p", { style: styles.emptyText }, 'This plugin is available inside a Prototype. Go to Prototype Library, open a prototype, and select the "aos-cloud" tab.')
+          React2.createElement("div", { style: styles.emptyIcon }, "\u{1F4E6}"),
+          React2.createElement("h2", { style: { margin: "0 0 8px 0", fontSize: "18px", fontWeight: 600, color: "#1f2937" } }, "AOS Cloud Deployment"),
+          React2.createElement("p", { style: styles.emptyText }, 'This plugin is available inside a Prototype. Go to Prototype Library, open a prototype, and select the "aos-cloud" tab.')
         )
       );
     }
-    return React.createElement(
+    return React2.createElement(
       "div",
       { style: styles.page },
       // Global keyframes for build-progress animations. Injected once; the GPU
       // handles painting on the compositor thread, so there is no JS cost while
       // animations run.
-      React.createElement(
+      React2.createElement(
         "style",
         null,
         "@keyframes aos-spin { to { transform: rotate(360deg); } }@keyframes aos-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }@keyframes aos-bar { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }"
       ),
       // Quick Guide Overlay
-      showGuide && React.createElement(
+      showGuide && React2.createElement(
         "div",
         {
           style: {
@@ -29089,7 +29093,7 @@ items:
           },
           onClick: () => setShowGuide(false)
         },
-        React.createElement(
+        React2.createElement(
           "div",
           {
             style: {
@@ -29104,98 +29108,98 @@ items:
             },
             onClick: (e) => e.stopPropagation()
           },
-          React.createElement(
+          React2.createElement(
             "div",
             { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" } },
-            React.createElement("h2", { style: { margin: 0, fontSize: "18px", fontWeight: 600 } }, "\u{1F4D6} Quick Setup Guide"),
-            React.createElement("button", {
+            React2.createElement("h2", { style: { margin: 0, fontSize: "18px", fontWeight: 600 } }, "\u{1F4D6} Quick Setup Guide"),
+            React2.createElement("button", {
               onClick: () => setShowGuide(false),
               style: { border: "none", background: "none", fontSize: "20px", cursor: "pointer", color: "#6b7280" }
             }, "\u2715")
           ),
-          React.createElement(
+          React2.createElement(
             "div",
             { style: { fontSize: "13px", lineHeight: 1.8, color: "#374151" } },
-            React.createElement("h3", { style: { fontSize: "14px", marginTop: 0, marginBottom: "8px" } }, "1. Pick a Docker Instance"),
-            React.createElement(
+            React2.createElement("h3", { style: { fontSize: "14px", marginTop: 0, marginBottom: "8px" } }, "1. Pick a Docker Instance"),
+            React2.createElement(
               "p",
               { style: { color: "#6b7280", marginBottom: "8px" } },
               "In the left panel, pick an online Docker instance from the dropdown. This is the build server that compiles, signs, and uploads your service to AosCloud. Switching instances clears the cards below and reloads everything from the newly-selected broadcaster."
             ),
-            React.createElement(
+            React2.createElement(
               "p",
               { style: { color: "#6b7280", marginBottom: "16px", fontSize: "12px" } },
-              React.createElement("strong", null, "Tip: "),
+              React2.createElement("strong", null, "Tip: "),
               "Use ",
-              React.createElement("strong", null, "AET-CLOUD-001"),
+              React2.createElement("strong", null, "AET-CLOUD-001"),
               " for builds that should be signed with the shared SP cert; use ",
-              React.createElement("strong", null, "AET-CLOUD-002"),
+              React2.createElement("strong", null, "AET-CLOUD-002"),
               " if you want to upload your own personal cert without affecting other users."
             ),
-            React.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "2. Check or upload your Certificate"),
-            React.createElement(
+            React2.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "2. Check or upload your Certificate"),
+            React2.createElement(
               "p",
               { style: { color: "#6b7280", marginBottom: "16px" } },
               "The Certificate card shows whether the selected instance has a .p12 loaded. Click ",
-              React.createElement("strong", null, "Manage"),
+              React2.createElement("strong", null, "Manage"),
               " to expand it. There you can see the loaded cert\u2019s CN, upload or replace a .p12, or remove the current one. ",
               "Uploading a cert replaces the active signing identity on that broadcaster."
             ),
-            React.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "3. Choose an AosCloud Service"),
-            React.createElement(
+            React2.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "3. Choose an AosCloud Service"),
+            React2.createElement(
               "p",
               { style: { color: "#6b7280", marginBottom: "16px" } },
               "Pick a service from the AosCloud Service dropdown. The chosen service\u2019s UUID is automatically written into ",
-              React.createElement("code", null, "config.yaml"),
+              React2.createElement("code", null, "config.yaml"),
               " (toggle ",
-              React.createElement("strong", null, "Auto-sync codename"),
+              React2.createElement("strong", null, "Auto-sync codename"),
               " to disable). ",
               "The version pills below the dropdown show the latest versions deployed; with ",
-              React.createElement("strong", null, "Auto-increment version after build"),
+              React2.createElement("strong", null, "Auto-increment version after build"),
               " enabled, the editor bumps to the next patch number after each successful build."
             ),
-            React.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "4. Edit your code"),
-            React.createElement(
+            React2.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "4. Edit your code"),
+            React2.createElement(
               "p",
               { style: { color: "#6b7280", marginBottom: "4px" } },
               "The middle column has a tabbed editor. Use the preset dropdown (top-right header) to load a starting point, then edit the tabs:"
             ),
-            React.createElement(
+            React2.createElement(
               "ul",
               { style: { color: "#6b7280", marginBottom: "16px", paddingLeft: "20px" } },
-              React.createElement("li", null, React.createElement("strong", null, "main.cpp"), " \u2014 your C++ application source code"),
-              React.createElement("li", null, React.createElement("strong", null, "main.py"), " \u2014 your Python application source code (Python mode only)"),
-              React.createElement("li", null, React.createElement("strong", null, "config.yaml"), " \u2014 service metadata: architecture, version, resource quotas, entry point")
+              React2.createElement("li", null, React2.createElement("strong", null, "main.cpp"), " \u2014 your C++ application source code"),
+              React2.createElement("li", null, React2.createElement("strong", null, "main.py"), " \u2014 your Python application source code (Python mode only)"),
+              React2.createElement("li", null, React2.createElement("strong", null, "config.yaml"), " \u2014 service metadata: architecture, version, resource quotas, entry point")
             ),
-            React.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "5. Build & Deploy"),
-            React.createElement(
+            React2.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "5. Build & Deploy"),
+            React2.createElement(
               "p",
               { style: { color: "#6b7280", marginBottom: "16px" } },
               "Click ",
-              React.createElement("strong", null, "Build & Deploy"),
+              React2.createElement("strong", null, "Build & Deploy"),
               ". The selected broadcaster compiles your code, signs the package with its loaded cert, and uploads it to AosCloud. The edge unit picks up the new version via OTA. ",
               "Watch the right column for live progress: the Build Status banner pulses while running, the Build Logs card streams output, and a thin progress bar across the top of that card animates during long silent steps (uploading, signing). ",
               "After success, the AosCloud Service card auto-refreshes with the new version pill."
             ),
-            React.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "6. Inspect a unit"),
-            React.createElement(
+            React2.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "6. Inspect a unit"),
+            React2.createElement(
               "p",
               { style: { color: "#6b7280", marginBottom: "16px" } },
               "In the Units card, click any unit row to open a detail overlay with that unit\u2019s hardware specs, live CPU/RAM/disk usage, and the latest alerts. ",
-              React.createElement("em", null, "Note: "),
+              React2.createElement("em", null, "Note: "),
               'AosCloud only shares device-level monitoring with the unit\u2019s OEM account, so units provisioned by someone else will show "Hardware monitoring not available" \u2014 services still deploy and run normally.'
             ),
-            React.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "Available Presets"),
-            React.createElement(
+            React2.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "Available Presets"),
+            React2.createElement(
               "ul",
               { style: { color: "#6b7280", paddingLeft: "20px", marginBottom: 0 } },
-              React.createElement("li", null, React.createElement("strong", null, "Hello AOS"), " \u2014 simple C++ hello world service"),
-              React.createElement("li", null, React.createElement("strong", null, "Hello Python"), " \u2014 simple Python hello world service"),
-              React.createElement("li", null, React.createElement("strong", null, "Signal Writer"), " \u2014 writes vehicle signals to KUKSA Databroker (C++ and Python)"),
-              React.createElement("li", null, React.createElement("strong", null, "KUKSA Reader"), " \u2014 subscribes to vehicle signals (C++ and Python)"),
-              React.createElement("li", null, React.createElement("strong", null, "EV Range Extender"), " \u2014 battery management with power-save mode (C++ and Python)"),
-              React.createElement("li", null, React.createElement("strong", null, "Battery Energy Saver"), " \u2014 forces HVAC/seat off below SoC thresholds (C++ and Python)"),
-              React.createElement("li", null, React.createElement("strong", null, "Signal Reporter"), " \u2014 relays signals to the live dashboard (C++ and Python)")
+              React2.createElement("li", null, React2.createElement("strong", null, "Hello AOS"), " \u2014 simple C++ hello world service"),
+              React2.createElement("li", null, React2.createElement("strong", null, "Hello Python"), " \u2014 simple Python hello world service"),
+              React2.createElement("li", null, React2.createElement("strong", null, "Signal Writer"), " \u2014 writes vehicle signals to KUKSA Databroker (C++ and Python)"),
+              React2.createElement("li", null, React2.createElement("strong", null, "KUKSA Reader"), " \u2014 subscribes to vehicle signals (C++ and Python)"),
+              React2.createElement("li", null, React2.createElement("strong", null, "EV Range Extender"), " \u2014 battery management with power-save mode (C++ and Python)"),
+              React2.createElement("li", null, React2.createElement("strong", null, "Battery Energy Saver"), " \u2014 forces HVAC/seat off below SoC thresholds (C++ and Python)"),
+              React2.createElement("li", null, React2.createElement("strong", null, "Signal Reporter"), " \u2014 relays signals to the live dashboard (C++ and Python)")
             )
           )
         )
@@ -29204,7 +29208,7 @@ items:
       // card. Shows that unit's monitoring + alerts in a focused, scrollable
       // modal. Closes on backdrop click or ✕ Close button. The Clear button
       // empties the alert list (does NOT close the alerts area).
-      detailUnitUid && React.createElement(
+      detailUnitUid && React2.createElement(
         "div",
         {
           onClick: () => setDetailUnitUid(null),
@@ -29219,7 +29223,7 @@ items:
             padding: "20px"
           }
         },
-        React.createElement(
+        React2.createElement(
           "div",
           {
             onClick: (e) => e.stopPropagation(),
@@ -29236,7 +29240,7 @@ items:
             }
           },
           // Modal header
-          React.createElement(
+          React2.createElement(
             "div",
             {
               style: {
@@ -29253,7 +29257,7 @@ items:
               const u = serviceUnits.find((x) => x.uid === detailUnitUid);
               const displayUid = u?.systemUid || detailUnitUid || "";
               const shortUid = displayUid.length > 12 ? displayUid.substring(0, 8) + "\u2026" : displayUid;
-              const chip = (bg, fg, text, title) => React.createElement("span", {
+              const chip = (bg, fg, text, title) => React2.createElement("span", {
                 title,
                 style: {
                   fontSize: "11px",
@@ -29267,21 +29271,21 @@ items:
                   gap: "4px"
                 }
               }, text);
-              return React.createElement(
+              return React2.createElement(
                 "div",
                 { style: { display: "flex", alignItems: "flex-start", gap: "10px", minWidth: 0, flex: 1 } },
-                React.createElement(Icon, { name: "server", size: 22, color: "#6366f1", style: { marginTop: "2px" } }),
-                React.createElement(
+                React2.createElement(Icon, { name: "server", size: 22, color: "#6366f1", style: { marginTop: "2px" } }),
+                React2.createElement(
                   "div",
                   { style: { minWidth: 0, flex: 1 } },
-                  React.createElement("div", { style: { fontSize: "14px", fontWeight: 600, color: "#1f2937", wordBreak: "break-word" } }, u?.name || "Unit"),
-                  React.createElement(
+                  React2.createElement("div", { style: { fontSize: "14px", fontWeight: 600, color: "#1f2937", wordBreak: "break-word" } }, u?.name || "Unit"),
+                  React2.createElement(
                     "div",
                     {
                       style: { display: "flex", alignItems: "center", gap: "6px", marginTop: "4px", flexWrap: "wrap" }
                     },
                     // Short UID + copy
-                    React.createElement(
+                    React2.createElement(
                       "span",
                       {
                         style: {
@@ -29298,7 +29302,7 @@ items:
                         title: displayUid
                       },
                       shortUid,
-                      React.createElement("button", {
+                      React2.createElement("button", {
                         onClick: () => {
                           if (displayUid) {
                             navigator.clipboard.writeText(displayUid);
@@ -29315,19 +29319,19 @@ items:
                 )
               );
             })(),
-            React.createElement(
+            React2.createElement(
               "button",
               {
                 onClick: () => setDetailUnitUid(null),
                 style: { border: "none", background: "none", fontSize: "14px", cursor: "pointer", color: "#6b7280", padding: "4px 8px", flexShrink: 0, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: "4px" },
                 title: "Close"
               },
-              React.createElement(Icon, { name: "x", size: 14 }),
+              React2.createElement(Icon, { name: "x", size: 14 }),
               "Close"
             )
           ),
           // Modal body — scrollable
-          React.createElement(
+          React2.createElement(
             "div",
             {
               style: {
@@ -29340,36 +29344,36 @@ items:
               }
             },
             // Monitoring section
-            React.createElement(
+            React2.createElement(
               "div",
               null,
-              React.createElement(
+              React2.createElement(
                 "div",
                 { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" } },
-                React.createElement(
+                React2.createElement(
                   "div",
                   { style: { fontSize: "12px", fontWeight: 600, color: "#374151", display: "flex", alignItems: "center", gap: "6px" } },
-                  React.createElement(Icon, { name: "activity", size: 14, color: "#3b82f6" }),
+                  React2.createElement(Icon, { name: "activity", size: 14, color: "#3b82f6" }),
                   "Resource Monitoring"
                 ),
-                React.createElement("button", {
+                React2.createElement("button", {
                   onClick: () => loadUnitMonitoring(detailUnitUid),
                   style: { ...styles.iconButton, width: "22px", height: "22px", fontSize: "12px" },
                   title: "Refresh"
                 }, "\u21BB")
               ),
-              !unitMonitoring ? React.createElement("div", { style: { fontSize: "12px", color: "#6b7280", fontStyle: "italic" } }, "Loading\u2026") : unitMonitoring.status === "error" ? React.createElement(
+              !unitMonitoring ? React2.createElement("div", { style: { fontSize: "12px", color: "#6b7280", fontStyle: "italic" } }, "Loading\u2026") : unitMonitoring.status === "error" ? React2.createElement(
                 "div",
                 { style: { fontSize: "12px", color: "#6b7280", fontStyle: "italic" } },
-                unitMonitoring.message?.includes("forbidden") ? React.createElement(
+                unitMonitoring.message?.includes("forbidden") ? React2.createElement(
                   "div",
                   null,
-                  React.createElement(
+                  React2.createElement(
                     "div",
                     { style: { fontWeight: 500, color: "#92400e", marginBottom: "4px" } },
                     "Hardware monitoring not available on this unit."
                   ),
-                  React.createElement(
+                  React2.createElement(
                     "div",
                     { style: { color: "#6b7280" } },
                     "AosCloud restricts CPU/RAM/disk metrics to the unit\u2019s OEM account. ",
@@ -29396,11 +29400,11 @@ items:
                 const coresBusy = cpuVal / 1e3;
                 const cpuPctTotal = cpuVal / (numCpus * 1e3) * 100;
                 const partitions = unitMonitoring.diskPartitions || [];
-                return React.createElement(
+                return React2.createElement(
                   "div",
                   { style: { display: "flex", flexDirection: "column", gap: "10px" } },
                   // Hardware summary header
-                  hw && React.createElement(
+                  hw && React2.createElement(
                     "div",
                     {
                       style: {
@@ -29412,40 +29416,40 @@ items:
                         padding: "6px 10px"
                       }
                     },
-                    React.createElement(
+                    React2.createElement(
                       "div",
                       { style: { display: "flex", gap: "6px", alignItems: "baseline", flexWrap: "wrap" } },
-                      hw.cpuModel && React.createElement("span", { style: { color: "#374151", fontWeight: 500, wordBreak: "break-word" } }, hw.cpuModel),
-                      hw.cpuModel && React.createElement("span", null, "\xB7"),
-                      React.createElement("span", null, `${hw.numCores} core${hw.numCores === 1 ? "" : "s"}`),
-                      hw.numThreads && hw.numThreads !== hw.numCores && React.createElement("span", null, ` / ${hw.numThreads} threads`),
-                      hw.ramTotal > 0 && React.createElement("span", null, "\xB7"),
-                      hw.ramTotal > 0 && React.createElement("span", null, `${fmtBytes(hw.ramTotal)} RAM`),
-                      hw.nodeCount > 1 && React.createElement("span", null, "\xB7"),
-                      hw.nodeCount > 1 && React.createElement("span", null, `${hw.nodeCount} nodes (showing node 0)`)
+                      hw.cpuModel && React2.createElement("span", { style: { color: "#374151", fontWeight: 500, wordBreak: "break-word" } }, hw.cpuModel),
+                      hw.cpuModel && React2.createElement("span", null, "\xB7"),
+                      React2.createElement("span", null, `${hw.numCores} core${hw.numCores === 1 ? "" : "s"}`),
+                      hw.numThreads && hw.numThreads !== hw.numCores && React2.createElement("span", null, ` / ${hw.numThreads} threads`),
+                      hw.ramTotal > 0 && React2.createElement("span", null, "\xB7"),
+                      hw.ramTotal > 0 && React2.createElement("span", null, `${fmtBytes(hw.ramTotal)} RAM`),
+                      hw.nodeCount > 1 && React2.createElement("span", null, "\xB7"),
+                      hw.nodeCount > 1 && React2.createElement("span", null, `${hw.nodeCount} nodes (showing node 0)`)
                     )
                   ),
                   // CPU
-                  React.createElement(
+                  React2.createElement(
                     "div",
                     null,
-                    React.createElement(
+                    React2.createElement(
                       "div",
                       { style: { display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "3px" } },
-                      React.createElement("span", {
+                      React2.createElement("span", {
                         style: { color: "#6b7280" },
                         title: hw ? `${cpuVal} milli-CPU on a ${numCpus}-core node = ${coresBusy.toFixed(2)} cores busy` : "CPU value reported in milli-CPU; total core count unknown"
                       }, "CPU"),
-                      React.createElement(
+                      React2.createElement(
                         "span",
                         { style: { fontWeight: 500 } },
                         hw ? `${cpuPctTotal.toFixed(1)}% \xB7 ${coresBusy.toFixed(2)} / ${numCpus} cores` : `${coresBusy.toFixed(2)} cores busy (total unknown)`
                       )
                     ),
-                    React.createElement(
+                    React2.createElement(
                       "div",
                       { style: { height: "6px", backgroundColor: "#e5e7eb", borderRadius: "3px", overflow: "hidden" } },
-                      React.createElement("div", { style: {
+                      React2.createElement("div", { style: {
                         height: "100%",
                         width: `${Math.min(hw ? cpuPctTotal : coresBusy * 100 / 4, 100)}%`,
                         backgroundColor: cpuPctTotal > 80 ? "#dc2626" : cpuPctTotal > 50 ? "#d97706" : "#3b82f6",
@@ -29455,23 +29459,23 @@ items:
                     )
                   ),
                   // RAM
-                  React.createElement(
+                  React2.createElement(
                     "div",
                     null,
-                    React.createElement(
+                    React2.createElement(
                       "div",
                       { style: { display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "3px" } },
-                      React.createElement("span", { style: { color: "#6b7280" } }, "RAM"),
-                      React.createElement(
+                      React2.createElement("span", { style: { color: "#6b7280" } }, "RAM"),
+                      React2.createElement(
                         "span",
                         { style: { fontWeight: 500 } },
                         ramTotal ? `${(ramUsed / ramTotal * 100).toFixed(1)}% \xB7 ${fmtBytes(ramUsed)} / ${fmtBytes(ramTotal)}` : ramUsed ? `${fmtBytes(ramUsed)} (total unknown)` : "\u2014"
                       )
                     ),
-                    ramTotal > 0 && React.createElement(
+                    ramTotal > 0 && React2.createElement(
                       "div",
                       { style: { height: "6px", backgroundColor: "#e5e7eb", borderRadius: "3px", overflow: "hidden" } },
-                      React.createElement("div", { style: {
+                      React2.createElement("div", { style: {
                         height: "100%",
                         width: `${Math.min(ramUsed / ramTotal * 100, 100)}%`,
                         backgroundColor: ramUsed / ramTotal > 0.85 ? "#dc2626" : ramUsed / ramTotal > 0.65 ? "#d97706" : "#8b5cf6",
@@ -29481,32 +29485,32 @@ items:
                     )
                   ),
                   // Disk — per-partition rows
-                  partitions.length > 0 && React.createElement(
+                  partitions.length > 0 && React2.createElement(
                     "div",
                     null,
-                    React.createElement("div", { style: { fontSize: "12px", color: "#6b7280", marginBottom: "4px" } }, "Disk"),
-                    React.createElement(
+                    React2.createElement("div", { style: { fontSize: "12px", color: "#6b7280", marginBottom: "4px" } }, "Disk"),
+                    React2.createElement(
                       "div",
                       { style: { display: "flex", flexDirection: "column", gap: "6px", paddingLeft: "8px" } },
                       ...partitions.map((p) => {
                         const pct = p.total ? p.used / p.total * 100 : 0;
-                        return React.createElement(
+                        return React2.createElement(
                           "div",
                           { key: p.name },
-                          React.createElement(
+                          React2.createElement(
                             "div",
                             { style: { display: "flex", justifyContent: "space-between", fontSize: "11px", marginBottom: "2px", color: "#6b7280" } },
-                            React.createElement("span", { style: { fontFamily: "monospace" } }, p.name),
-                            React.createElement(
+                            React2.createElement("span", { style: { fontFamily: "monospace" } }, p.name),
+                            React2.createElement(
                               "span",
                               { style: { fontWeight: 500, color: "#374151" } },
                               p.total ? `${pct.toFixed(1)}% \xB7 ${fmtBytes(p.used)} / ${fmtBytes(p.total)}` : p.used ? `${fmtBytes(p.used)} (total unknown)` : "\u2014"
                             )
                           ),
-                          p.total > 0 && React.createElement(
+                          p.total > 0 && React2.createElement(
                             "div",
                             { style: { height: "4px", backgroundColor: "#e5e7eb", borderRadius: "2px", overflow: "hidden" } },
-                            React.createElement("div", { style: {
+                            React2.createElement("div", { style: {
                               height: "100%",
                               width: `${Math.min(pct, 100)}%`,
                               backgroundColor: pct > 85 ? "#dc2626" : pct > 65 ? "#d97706" : "#f59e0b",
@@ -29522,19 +29526,19 @@ items:
               })()
             ),
             // Alerts section
-            React.createElement(
+            React2.createElement(
               "div",
               null,
-              React.createElement(
+              React2.createElement(
                 "div",
                 { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" } },
-                React.createElement(
+                React2.createElement(
                   "div",
                   { style: { fontSize: "12px", fontWeight: 600, color: "#374151", display: "flex", alignItems: "center", gap: "6px" } },
-                  React.createElement(Icon, { name: "triangle-alert", size: 14, color: "#d97706" }),
+                  React2.createElement(Icon, { name: "triangle-alert", size: 14, color: "#d97706" }),
                   `Alerts (${alerts.length})`
                 ),
-                alerts.length > 0 && React.createElement(
+                alerts.length > 0 && React2.createElement(
                   "button",
                   {
                     onClick: () => {
@@ -29555,27 +29559,27 @@ items:
                     },
                     title: "Clear all alerts from the list"
                   },
-                  React.createElement(Icon, { name: "trash", size: 12 }),
+                  React2.createElement(Icon, { name: "trash", size: 12 }),
                   "Clear"
                 )
               ),
-              alerts.length === 0 ? React.createElement("div", { style: { fontSize: "12px", color: "#6b7280", fontStyle: "italic" } }, "No alerts") : React.createElement(
+              alerts.length === 0 ? React2.createElement("div", { style: { fontSize: "12px", color: "#6b7280", fontStyle: "italic" } }, "No alerts") : React2.createElement(
                 "div",
                 { style: { maxHeight: "220px", overflowY: "auto", border: "1px solid #f3f4f6", borderRadius: "6px" } },
                 ...alerts.map(
-                  (a, i) => React.createElement(
+                  (a, i) => React2.createElement(
                     "div",
                     {
                       key: a.id || i,
                       style: { padding: "8px 10px", borderBottom: "1px solid #f3f4f6", fontSize: "11px" }
                     },
-                    React.createElement("div", { style: { color: "#dc2626", fontWeight: 500 } }, a.tag || "Alert"),
-                    React.createElement(
+                    React2.createElement("div", { style: { color: "#dc2626", fontWeight: 500 } }, a.tag || "Alert"),
+                    React2.createElement(
                       "div",
                       { style: { color: "#6b7280", marginTop: "2px" } },
                       typeof a.message === "string" ? a.message : JSON.stringify(a.message)
                     ),
-                    a.timestamp && React.createElement("div", { style: { color: "#9ca3af", marginTop: "2px", fontSize: "10px" } }, a.timestamp)
+                    a.timestamp && React2.createElement("div", { style: { color: "#9ca3af", marginTop: "2px", fontSize: "10px" } }, a.timestamp)
                   )
                 )
               )
@@ -29584,18 +29588,18 @@ items:
         )
       ),
       // Header
-      React.createElement(
+      React2.createElement(
         "header",
         { style: styles.header },
-        React.createElement(
+        React2.createElement(
           "div",
           { style: styles.headerLeft },
-          React.createElement("h1", { style: styles.title }, "AOS Cloud Deployment")
+          React2.createElement("h1", { style: styles.title }, "AOS Cloud Deployment")
         ),
-        React.createElement(
+        React2.createElement(
           "div",
           { style: styles.headerRight },
-          React.createElement("button", {
+          React2.createElement("button", {
             onClick: () => setShowGuide(!showGuide),
             style: {
               width: "28px",
@@ -29613,41 +29617,41 @@ items:
             },
             title: "Quick Setup Guide"
           }, "?"),
-          React.createElement(
+          React2.createElement(
             "select",
             {
               value: selectedPreset,
               onChange: (e) => handlePresetChange(e.target.value),
               style: styles.select
             },
-            React.createElement("option", { value: "custom" }, "Write your own code"),
-            forcedLanguage !== "python" ? React.createElement(
+            React2.createElement("option", { value: "custom" }, "Write your own code"),
+            forcedLanguage !== "python" ? React2.createElement(
               "optgroup",
               { label: "C++ Presets" },
-              React.createElement("option", { value: "helloAos" }, "Hello AOS \u2014 simple C++ starter"),
-              React.createElement("option", { value: "kuksaWriter" }, "Signal Writer \u2014 write vehicle signals"),
-              React.createElement("option", { value: "kuksaReader" }, "KUKSA Reader \u2014 read vehicle signals"),
-              React.createElement("option", { value: "evRangeExtender" }, "EV Range Extender \u2014 battery management"),
-              React.createElement("option", { value: "batteryEnergySaver" }, "Battery Energy Saver \u2014 HVAC/seat cutoff"),
-              React.createElement("option", { value: "batteryEnergySaverSdvRuntime" }, "Battery Energy Saver \u2014 sdv-runtime / VSS 4.0"),
-              React.createElement("option", { value: "signalReporter" }, "Signal Reporter \u2014 relay to dashboard")
+              React2.createElement("option", { value: "helloAos" }, "Hello AOS \u2014 simple C++ starter"),
+              React2.createElement("option", { value: "kuksaWriter" }, "Signal Writer \u2014 write vehicle signals"),
+              React2.createElement("option", { value: "kuksaReader" }, "KUKSA Reader \u2014 read vehicle signals"),
+              React2.createElement("option", { value: "evRangeExtender" }, "EV Range Extender \u2014 battery management"),
+              React2.createElement("option", { value: "batteryEnergySaver" }, "Battery Energy Saver \u2014 HVAC/seat cutoff"),
+              React2.createElement("option", { value: "batteryEnergySaverSdvRuntime" }, "Battery Energy Saver \u2014 sdv-runtime / VSS 4.0"),
+              React2.createElement("option", { value: "signalReporter" }, "Signal Reporter \u2014 relay to dashboard")
             ) : null,
-            forcedLanguage !== "cpp" ? React.createElement(
+            forcedLanguage !== "cpp" ? React2.createElement(
               "optgroup",
               { label: "Python Presets" },
-              React.createElement("option", { value: "helloPython" }, "Hello Python \u2014 simple Python starter"),
-              React.createElement("option", { value: "kuksaWriterPython" }, "Signal Writer \u2014 write vehicle signals"),
-              React.createElement("option", { value: "kuksaReaderPython" }, "KUKSA Reader \u2014 read vehicle signals"),
-              React.createElement("option", { value: "evRangeExtenderPython" }, "EV Range Extender \u2014 battery management"),
-              React.createElement("option", { value: "batteryEnergySaverPython" }, "Battery Energy Saver \u2014 HVAC/seat cutoff"),
-              React.createElement("option", { value: "signalReporterPython" }, "Signal Reporter \u2014 relay to dashboard")
+              React2.createElement("option", { value: "helloPython" }, "Hello Python \u2014 simple Python starter"),
+              React2.createElement("option", { value: "kuksaWriterPython" }, "Signal Writer \u2014 write vehicle signals"),
+              React2.createElement("option", { value: "kuksaReaderPython" }, "KUKSA Reader \u2014 read vehicle signals"),
+              React2.createElement("option", { value: "evRangeExtenderPython" }, "EV Range Extender \u2014 battery management"),
+              React2.createElement("option", { value: "batteryEnergySaverPython" }, "Battery Energy Saver \u2014 HVAC/seat cutoff"),
+              React2.createElement("option", { value: "signalReporterPython" }, "Signal Reporter \u2014 relay to dashboard")
             ) : null
           ),
-          React.createElement("span", {
+          React2.createElement("span", {
             style: { fontSize: "12px", color: "#6b7280", fontWeight: 500 },
             title: 'The compiled binary name. Must match the "cmd" field in config.yaml (e.g. cmd: /my-app). Auto-filled when selecting a preset.'
           }, "App name:"),
-          React.createElement("input", {
+          React2.createElement("input", {
             type: "text",
             value: appName,
             onChange: (e) => setAppName(e.target.value),
@@ -29658,34 +29662,34 @@ items:
         )
       ),
       // Main Content
-      React.createElement(
+      React2.createElement(
         "div",
         { style: styles.content },
         // Left Column - Docker Instances
-        showDockerPanel && React.createElement(
+        showDockerPanel && React2.createElement(
           "div",
           { style: styles.dockerColumn },
-          React.createElement(
+          React2.createElement(
             "div",
             { style: styles.card },
             // Compact header: title + count + filter toggle + refresh, all on one row
-            React.createElement(
+            React2.createElement(
               "div",
               { style: { ...styles.cardHeader, padding: "8px 12px" } },
-              React.createElement(
+              React2.createElement(
                 "div",
                 { style: { ...styles.cardTitle, fontSize: "13px", gap: "6px" } },
-                React.createElement(Icon, { name: "box", size: 15, color: "#2563eb" }),
+                React2.createElement(Icon, { name: "box", size: 15, color: "#2563eb" }),
                 "Docker",
-                React.createElement("span", {
+                React2.createElement("span", {
                   style: { fontSize: "11px", fontWeight: 400, color: "#6b7280" },
                   title: `${onlineCount} of ${dockerInstances.length} broadcasters reachable`
                 }, ` \xB7 ${onlineCount} online`)
               ),
-              React.createElement(
+              React2.createElement(
                 "div",
                 { style: { display: "flex", alignItems: "center", gap: "8px" } },
-                React.createElement("button", {
+                React2.createElement("button", {
                   onClick: () => fetchDockerInstances(),
                   style: { ...styles.iconButton, width: "22px", height: "22px", fontSize: "12px" },
                   title: "Refresh"
@@ -29693,18 +29697,18 @@ items:
               )
             ),
             // Compact instance dropdown (saves vertical space vs. a list)
-            React.createElement(
+            React2.createElement(
               "div",
               { style: { padding: "8px 12px" } },
-              filteredInstances.length === 0 ? React.createElement(
+              filteredInstances.length === 0 ? React2.createElement(
                 "div",
                 { style: { ...styles.empty, padding: "6px 0", fontSize: "11px" } },
                 filterOnline ? "No online devices" : "No Docker instances found"
-              ) : React.createElement(
+              ) : React2.createElement(
                 "div",
                 { style: { display: "flex", alignItems: "center", gap: "6px" } },
                 // Online status dot for the currently-selected instance
-                React.createElement("span", {
+                React2.createElement("span", {
                   style: {
                     width: "8px",
                     height: "8px",
@@ -29724,7 +29728,7 @@ items:
                     return sel.online ? "Online" : "Offline";
                   })()
                 }),
-                React.createElement(
+                React2.createElement(
                   "select",
                   {
                     value: selectedInstance,
@@ -29735,9 +29739,9 @@ items:
                     },
                     style: { ...styles.select, flex: 1, minWidth: 0, fontSize: "12px", padding: "4px 6px" }
                   },
-                  !selectedInstance && React.createElement("option", { value: "" }, "\u2014 Select instance \u2014"),
+                  !selectedInstance && React2.createElement("option", { value: "" }, "\u2014 Select instance \u2014"),
                   ...filteredInstances.map(
-                    (instance) => React.createElement("option", {
+                    (instance) => React2.createElement("option", {
                       key: instance.instance_id,
                       value: instance.instance_id
                     }, `${instance.online ? "\u25CF" : "\u25CB"} ${instance.name} (${instance.instance_id})`)
@@ -29747,10 +29751,10 @@ items:
             )
           ),
           // Certificate Panel (collapsible)
-          React.createElement(
+          React2.createElement(
             "div",
             { style: { ...styles.card, padding: showAdvanced ? 0 : "8px 12px" } },
-            React.createElement(
+            React2.createElement(
               "div",
               {
                 onClick: () => setShowAdvanced(!showAdvanced),
@@ -29764,7 +29768,7 @@ items:
                   gap: "8px"
                 }
               },
-              React.createElement(
+              React2.createElement(
                 "div",
                 {
                   style: {
@@ -29778,9 +29782,9 @@ items:
                     flex: 1
                   }
                 },
-                React.createElement(Icon, { name: "shield-check", size: 15, color: "#0891b2" }),
-                React.createElement("span", { style: { flexShrink: 0 } }, "Certificate"),
-                React.createElement("span", {
+                React2.createElement(Icon, { name: "shield-check", size: 15, color: "#0891b2" }),
+                React2.createElement("span", { style: { flexShrink: 0 } }, "Certificate"),
+                React2.createElement("span", {
                   style: {
                     width: "8px",
                     height: "8px",
@@ -29789,7 +29793,7 @@ items:
                     backgroundColor: certStatus === null ? "#d97706" : certStatus.loaded ? "#16a34a" : "#dc2626"
                   }
                 }),
-                React.createElement(
+                React2.createElement(
                   "span",
                   {
                     title: certStatus === null ? "Checking certificate\u2026" : certStatus.loaded ? "Certificate loaded" : "No certificate",
@@ -29805,7 +29809,7 @@ items:
                   certStatus === null ? "Checking\u2026" : certStatus.loaded ? "Loaded" : "Missing"
                 )
               ),
-              React.createElement(
+              React2.createElement(
                 "span",
                 {
                   title: showAdvanced ? "Collapse" : "Upload / replace .p12",
@@ -29819,13 +29823,13 @@ items:
                     gap: "4px"
                   }
                 },
-                React.createElement(Icon, { name: showAdvanced ? "chevron-up" : "chevron-down", size: 12 }),
+                React2.createElement(Icon, { name: showAdvanced ? "chevron-up" : "chevron-down", size: 12 }),
                 showAdvanced ? "" : "Manage"
               )
             ),
             // Compact always-visible warning. One line, wraps on narrow widths.
             // Hover reveals the full message via title attribute.
-            React.createElement(
+            React2.createElement(
               "div",
               {
                 title: "Each .p12 corresponds to one AosCloud account. Uploading switches this broadcaster\u2019s signing identity to that account, replacing whatever cert was loaded before.",
@@ -29838,13 +29842,13 @@ items:
                   lineHeight: 1.45
                 }
               },
-              React.createElement(Icon, { name: "triangle-alert", size: 12, color: "#d97706", style: { verticalAlign: "-1px", marginRight: "4px" } }),
+              React2.createElement(Icon, { name: "triangle-alert", size: 12, color: "#d97706", style: { verticalAlign: "-1px", marginRight: "4px" } }),
               "Upload your own .p12 to deploy under your AosCloud account. Replaces the cert currently loaded here."
             ),
-            showAdvanced && React.createElement(
+            showAdvanced && React2.createElement(
               "div",
               { style: { padding: "0 12px 12px", borderTop: "1px solid #f3f4f6", marginTop: "8px", paddingTop: "10px" } },
-              certStatus?.loaded && certStatus.identity?.cn && React.createElement(
+              certStatus?.loaded && certStatus.identity?.cn && React2.createElement(
                 "div",
                 {
                   style: {
@@ -29860,17 +29864,17 @@ items:
                     alignItems: "baseline"
                   }
                 },
-                React.createElement("span", { style: { color: "#6b7280", flexShrink: 0 } }, "CN:"),
-                React.createElement("span", { style: { color: "#111827", overflowWrap: "anywhere", wordBreak: "break-word" } }, certStatus.identity.cn)
+                React2.createElement("span", { style: { color: "#6b7280", flexShrink: 0 } }, "CN:"),
+                React2.createElement("span", { style: { color: "#111827", overflowWrap: "anywhere", wordBreak: "break-word" } }, certStatus.identity.cn)
               ),
-              certStatus?.loaded && certStatus.identity === null && React.createElement("div", {
+              certStatus?.loaded && certStatus.identity === null && React2.createElement("div", {
                 style: { fontSize: "11px", color: "#6b7280", marginBottom: "10px", fontStyle: "italic" }
               }, "Identity unavailable (cert may be password-protected)"),
-              certError && React.createElement("div", { style: { fontSize: "12px", color: "#dc2626", marginBottom: "8px" } }, certError),
-              React.createElement(
+              certError && React2.createElement("div", { style: { fontSize: "12px", color: "#dc2626", marginBottom: "8px" } }, certError),
+              React2.createElement(
                 "div",
                 { style: { display: "flex", gap: "6px" } },
-                React.createElement(
+                React2.createElement(
                   "label",
                   {
                     style: {
@@ -29882,21 +29886,21 @@ items:
                       cursor: connectionStatus === "connected" && !isUploadingCert && !isRemovingCert ? "pointer" : "not-allowed"
                     }
                   },
-                  React.createElement("input", {
+                  React2.createElement("input", {
                     type: "file",
                     accept: ".p12,.pfx",
                     onChange: handleCertUpload,
                     disabled: connectionStatus !== "connected" || isUploadingCert || isRemovingCert,
                     style: { display: "none" }
                   }),
-                  isUploadingCert ? "Uploading..." : React.createElement(
+                  isUploadingCert ? "Uploading..." : React2.createElement(
                     "span",
                     { style: { display: "inline-flex", alignItems: "center", gap: "6px", justifyContent: "center" } },
-                    React.createElement(Icon, { name: "upload", size: 14 }),
+                    React2.createElement(Icon, { name: "upload", size: 14 }),
                     certStatus?.loaded ? "Replace .p12" : "Upload .p12"
                   )
                 ),
-                certStatus?.loaded && React.createElement(
+                certStatus?.loaded && React2.createElement(
                   "button",
                   {
                     onClick: handleCertRemove,
@@ -29915,10 +29919,10 @@ items:
                     },
                     title: "Delete the uploaded certificate from the broadcaster"
                   },
-                  isRemovingCert ? "Removing..." : React.createElement(
-                    React.Fragment,
+                  isRemovingCert ? "Removing..." : React2.createElement(
+                    React2.Fragment,
                     null,
-                    React.createElement(Icon, { name: "x", size: 14 }),
+                    React2.createElement(Icon, { name: "x", size: 14 }),
                     "Remove"
                   )
                 )
@@ -29926,19 +29930,19 @@ items:
             )
           ),
           // AosCloud Service Card
-          React.createElement(
+          React2.createElement(
             "div",
             { style: styles.card },
-            React.createElement(
+            React2.createElement(
               "div",
               { style: styles.cardHeader },
-              React.createElement(
+              React2.createElement(
                 "div",
                 { style: styles.cardTitle },
-                React.createElement(Icon, { name: "cloud", size: 16, color: "#3b82f6" }),
+                React2.createElement(Icon, { name: "cloud", size: 16, color: "#3b82f6" }),
                 "AosCloud Service"
               ),
-              React.createElement("button", {
+              React2.createElement("button", {
                 onClick: async () => {
                   await fetchAosCloudServices();
                   if (selectedServiceUuid)
@@ -29949,34 +29953,34 @@ items:
                 title: "Refresh services, versions, and units from AosCloud"
               }, isLoadingAosCloud ? "\u27F3" : "\u21BB")
             ),
-            React.createElement(
+            React2.createElement(
               "div",
               { style: { padding: "10px 12px" } },
-              React.createElement(
+              React2.createElement(
                 "select",
                 {
                   value: selectedServiceUuid,
                   onChange: (e) => handleServiceChange(e.target.value),
                   style: { ...styles.select, width: "100%", fontSize: "12px", padding: "6px 8px" }
                 },
-                React.createElement("option", { value: "" }, isLoadingAosCloud ? "Loading services..." : aosServices.length ? "\u2014 Select service \u2014" : "No services found"),
+                React2.createElement("option", { value: "" }, isLoadingAosCloud ? "Loading services..." : aosServices.length ? "\u2014 Select service \u2014" : "No services found"),
                 ...aosServices.map(
-                  (s) => React.createElement("option", { key: s.uuid, value: s.uuid }, s.title || s.uuid)
+                  (s) => React2.createElement("option", { key: s.uuid, value: s.uuid }, s.title || s.uuid)
                 )
               ),
               // Service UUID + codename display (right under the dropdown)
-              serviceName && React.createElement(
+              serviceName && React2.createElement(
                 "div",
                 {
                   style: { display: "flex", flexDirection: "column", gap: "3px", marginTop: "6px", minWidth: 0 }
                 },
                 // UUID row
-                React.createElement(
+                React2.createElement(
                   "div",
                   {
                     style: { display: "flex", alignItems: "center", gap: "4px", minWidth: 0 }
                   },
-                  React.createElement("span", {
+                  React2.createElement("span", {
                     title: selectedServiceUuid,
                     style: {
                       fontSize: "11px",
@@ -29989,7 +29993,7 @@ items:
                       textOverflow: "ellipsis"
                     }
                   }, selectedServiceUuid),
-                  React.createElement("button", {
+                  React2.createElement("button", {
                     onClick: () => {
                       navigator.clipboard.writeText(selectedServiceUuid);
                       addLog(`[Copied] Service UUID: ${selectedServiceUuid}`);
@@ -29999,12 +30003,12 @@ items:
                   }, "\u{1F4CB}")
                 ),
                 // Codename row
-                selectedServiceCodename && React.createElement(
+                selectedServiceCodename && React2.createElement(
                   "div",
                   {
                     style: { display: "flex", alignItems: "center", gap: "4px", minWidth: 0 }
                   },
-                  React.createElement("span", {
+                  React2.createElement("span", {
                     style: {
                       fontSize: "10px",
                       color: "#9ca3af",
@@ -30015,7 +30019,7 @@ items:
                       flexShrink: 0
                     }
                   }, "codename:"),
-                  React.createElement("span", {
+                  React2.createElement("span", {
                     title: selectedServiceCodename,
                     style: {
                       fontSize: "11px",
@@ -30028,7 +30032,7 @@ items:
                       textOverflow: "ellipsis"
                     }
                   }, selectedServiceCodename),
-                  React.createElement("button", {
+                  React2.createElement("button", {
                     onClick: () => {
                       navigator.clipboard.writeText(selectedServiceCodename);
                       addLog(`[Copied] Codename: ${selectedServiceCodename}`);
@@ -30041,7 +30045,7 @@ items:
               // Auto-sync service_uid checkbox (sits under the UUID — it's a
               // setting that controls what happens to that UUID when copied
               // into config.yaml)
-              React.createElement(
+              React2.createElement(
                 "label",
                 {
                   style: {
@@ -30055,7 +30059,7 @@ items:
                     userSelect: "none"
                   }
                 },
-                React.createElement("input", {
+                React2.createElement("input", {
                   type: "checkbox",
                   checked: autoSyncServiceUid,
                   onChange: (e) => setAutoSyncServiceUid(e.target.checked),
@@ -30063,13 +30067,13 @@ items:
                 }),
                 "Auto-sync codename to config.yaml"
               ),
-              serviceVersions.length > 0 && React.createElement(
+              serviceVersions.length > 0 && React2.createElement(
                 "div",
                 {
                   style: { display: "flex", gap: "4px", marginTop: "6px", flexWrap: "wrap" }
                 },
                 ...serviceVersions.slice(0, 5).map(
-                  (v) => React.createElement("span", {
+                  (v) => React2.createElement("span", {
                     key: v.version,
                     style: {
                       fontSize: "10px",
@@ -30084,7 +30088,7 @@ items:
               // Auto-increment version checkbox — placed right under the version
               // pills so it's clear what it operates on (the "next" version after
               // the latest pill).
-              serviceVersions.length > 0 && React.createElement(
+              serviceVersions.length > 0 && React2.createElement(
                 "label",
                 {
                   style: {
@@ -30099,7 +30103,7 @@ items:
                   },
                   title: 'When enabled, after a successful build the version in code (C++ #define VERSION / Python VERSION = "...") and YAML version: are bumped to the next patch (e.g. 1.0.5 \u2192 1.0.6)'
                 },
-                React.createElement("input", {
+                React2.createElement("input", {
                   type: "checkbox",
                   checked: autoIncVersion,
                   onChange: (e) => setAutoIncVersion(e.target.checked),
@@ -30110,22 +30114,22 @@ items:
             )
           ),
           // Units running this service
-          serviceUnits.length > 0 && React.createElement(
+          serviceUnits.length > 0 && React2.createElement(
             "div",
             { style: styles.card },
-            React.createElement(
+            React2.createElement(
               "div",
               { style: styles.cardHeader },
-              React.createElement(
+              React2.createElement(
                 "div",
                 { style: styles.cardTitle },
-                React.createElement(Icon, { name: "server", size: 16, color: "#6366f1" }),
+                React2.createElement(Icon, { name: "server", size: 16, color: "#6366f1" }),
                 `Units (${serviceUnits.length})`,
-                React.createElement("span", {
+                React2.createElement("span", {
                   style: { fontSize: "10px", fontWeight: 400, color: "#9ca3af", marginLeft: "4px" }
                 }, "\u2014 click for details")
               ),
-              React.createElement("button", {
+              React2.createElement("button", {
                 onClick: () => {
                   if (selectedServiceUuid)
                     loadServiceDetails(selectedServiceUuid);
@@ -30134,11 +30138,11 @@ items:
                 title: "Refresh units status"
               }, "\u21BB")
             ),
-            React.createElement(
+            React2.createElement(
               "div",
               { style: { maxHeight: "150px", overflowY: "auto" } },
               ...serviceUnits.map(
-                (u) => React.createElement(
+                (u) => React2.createElement(
                   "div",
                   {
                     key: u.uid,
@@ -30165,14 +30169,14 @@ items:
                       transition: "background-color 0.15s"
                     }
                   },
-                  React.createElement(
+                  React2.createElement(
                     "div",
                     { style: { display: "flex", alignItems: "center", gap: "6px", flex: 1, minWidth: 0 } },
-                    React.createElement("span", {
+                    React2.createElement("span", {
                       style: { width: "8px", height: "8px", borderRadius: "50%", flexShrink: 0, backgroundColor: u.online ? "#16a34a" : "#dc2626" }
                     }),
-                    React.createElement("span", { style: { fontSize: "12px", fontWeight: 500 } }, u.name),
-                    React.createElement("button", {
+                    React2.createElement("span", { style: { fontSize: "12px", fontWeight: 500 } }, u.name),
+                    React2.createElement("button", {
                       onClick: (e) => {
                         e.stopPropagation();
                         navigator.clipboard.writeText(u.systemUid || u.uid);
@@ -30182,18 +30186,18 @@ items:
                       title: u.systemUid || u.uid
                     }, "\u{1F4CB}")
                   ),
-                  React.createElement(
+                  React2.createElement(
                     "div",
                     { style: { display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 } },
-                    u.version && React.createElement("span", {
+                    u.version && React2.createElement("span", {
                       style: { fontSize: "10px", padding: "1px 5px", borderRadius: "6px", backgroundColor: "#e7f3ff", color: "#2563eb" }
                     }, `v${u.version}`),
-                    u.error && React.createElement("span", {
+                    u.error && React2.createElement("span", {
                       style: { fontSize: "10px", color: "#dc2626" },
                       title: u.error
                     }, "\u26A0"),
                     // Click affordance — chevron makes the row obviously expandable
-                    React.createElement("span", {
+                    React2.createElement("span", {
                       style: { fontSize: "12px", color: "#9ca3af", flexShrink: 0, marginLeft: "2px" },
                       title: "Click to open details"
                     }, "\u203A")
@@ -30207,18 +30211,18 @@ items:
         ),
         // End of dockerColumn
         // Middle Column - Tabbed Code Editor
-        React.createElement(
+        React2.createElement(
           "div",
           { style: styles.editorsColumn },
           // Editor with tabs
-          React.createElement(
+          React2.createElement(
             "div",
             { style: { ...styles.card, ...styles.editorCard, flex: 1, display: "flex", flexDirection: "column" } },
             // Tab bar — hide C++/Python tabs when language is forced
-            React.createElement(
+            React2.createElement(
               "div",
               { style: { display: "flex", borderBottom: "1px solid #e5e7eb", background: "#f9fafb" } },
-              forcedLanguage !== "python" ? React.createElement(
+              forcedLanguage !== "python" ? React2.createElement(
                 "button",
                 {
                   onClick: () => {
@@ -30239,10 +30243,10 @@ items:
                     gap: "6px"
                   }
                 },
-                React.createElement(Icon, { name: "file-code", size: 14 }),
+                React2.createElement(Icon, { name: "file-code", size: 14 }),
                 "main.cpp"
               ) : null,
-              forcedLanguage !== "cpp" ? React.createElement(
+              forcedLanguage !== "cpp" ? React2.createElement(
                 "button",
                 {
                   onClick: () => {
@@ -30263,10 +30267,10 @@ items:
                     gap: "6px"
                   }
                 },
-                React.createElement(Icon, { name: "file-code", size: 14 }),
+                React2.createElement(Icon, { name: "file-code", size: 14 }),
                 "main.py"
               ) : null,
-              React.createElement(
+              React2.createElement(
                 "button",
                 {
                   onClick: () => setActiveEditorTab("yaml"),
@@ -30284,20 +30288,20 @@ items:
                     gap: "6px"
                   }
                 },
-                React.createElement(Icon, { name: "settings", size: 14 }),
+                React2.createElement(Icon, { name: "settings", size: 14 }),
                 "config.yaml"
               )
             ),
             // Active editor with line numbers
-            React.createElement(
+            React2.createElement(
               "div",
               { style: styles.editorContainer },
-              React.createElement(
+              React2.createElement(
                 "pre",
                 { style: styles.lineNumbers },
                 (activeEditorTab === "cpp" ? cppCode : activeEditorTab === "python" ? pythonCode : yamlConfig).split("\n").map((_, i) => `${i + 1}`).join("\n")
               ),
-              React.createElement("textarea", {
+              React2.createElement("textarea", {
                 style: { ...styles.textarea, flex: 1 },
                 value: activeEditorTab === "cpp" ? cppCode : activeEditorTab === "python" ? pythonCode : yamlConfig,
                 onChange: (e) => activeEditorTab === "cpp" ? setCppCode(e.target.value) : activeEditorTab === "python" ? setPythonCode(e.target.value) : setYamlConfig(e.target.value),
@@ -30307,10 +30311,10 @@ items:
             )
           ),
           // Action Buttons
-          React.createElement(
+          React2.createElement(
             "div",
             { style: styles.actions },
-            React.createElement(
+            React2.createElement(
               "button",
               {
                 onClick: handleBuildDeploy,
@@ -30318,20 +30322,20 @@ items:
                 style: { ...styles.button, ...styles.buttonPrimary, ...isBuilding || connectionStatus !== "connected" || !selectedInstance ? styles.buttonDisabled : {} },
                 title: !selectedInstance ? "Select a Docker instance first" : ""
               },
-              isBuilding ? React.createElement(
-                React.Fragment,
+              isBuilding ? React2.createElement(
+                React2.Fragment,
                 null,
-                React.createElement("span", { style: styles.spinner }),
+                React2.createElement("span", { style: styles.spinner }),
                 " Building..."
-              ) : React.createElement(
-                React.Fragment,
+              ) : React2.createElement(
+                React2.Fragment,
                 null,
-                React.createElement("span", null, "\u26A1"),
+                React2.createElement("span", null, "\u26A1"),
                 " Build & Deploy"
               )
             ),
             // Warning hint when no instance selected
-            !selectedInstance && React.createElement(
+            !selectedInstance && React2.createElement(
               "div",
               {
                 style: {
@@ -30347,17 +30351,17 @@ items:
                   gap: "6px"
                 }
               },
-              React.createElement(Icon, { name: "triangle-alert", size: 14, color: "#d97706" }),
-              React.createElement("span", null, "Select a Docker instance from the list to build & deploy")
+              React2.createElement(Icon, { name: "triangle-alert", size: 14, color: "#d97706" }),
+              React2.createElement("span", null, "Select a Docker instance from the list to build & deploy")
             )
           )
         ),
         // Right Column - Status & Logs
-        React.createElement(
+        React2.createElement(
           "div",
           { style: styles.statusColumn },
           // Build Status Banner
-          buildStatus && React.createElement(
+          buildStatus && React2.createElement(
             "div",
             {
               style: {
@@ -30374,59 +30378,59 @@ items:
                 ...isBuilding ? { animation: "aos-pulse 1.6s ease-in-out infinite" } : {}
               }
             },
-            React.createElement(
+            React2.createElement(
               "span",
               {
                 style: { display: "inline-flex", alignItems: "center", ...isBuilding ? { animation: "aos-spin 1s linear infinite" } : {} }
               },
-              buildStatus.includes("successfully") ? React.createElement(Icon, { name: "check", size: 14 }) : buildStatus.includes("failed") || buildStatus.includes("Error") ? React.createElement(Icon, { name: "x", size: 14 }) : isBuilding ? React.createElement(Icon, { name: "refresh", size: 14 }) : "\u25CF"
+              buildStatus.includes("successfully") ? React2.createElement(Icon, { name: "check", size: 14 }) : buildStatus.includes("failed") || buildStatus.includes("Error") ? React2.createElement(Icon, { name: "x", size: 14 }) : isBuilding ? React2.createElement(Icon, { name: "refresh", size: 14 }) : "\u25CF"
             ),
             buildStatus
           ),
           // Deployed Apps Card (hide when empty)
-          deployedApps.length > 0 && React.createElement(
+          deployedApps.length > 0 && React2.createElement(
             "div",
             { style: styles.card },
-            React.createElement(
+            React2.createElement(
               "div",
               { style: styles.cardHeader },
-              React.createElement(
+              React2.createElement(
                 "div",
                 { style: styles.cardTitle },
-                React.createElement(Icon, { name: "rocket", size: 16, color: "#dc2626" }),
+                React2.createElement(Icon, { name: "rocket", size: 16, color: "#dc2626" }),
                 "Deployed Apps"
               ),
-              React.createElement("button", {
+              React2.createElement("button", {
                 onClick: refreshApps,
                 style: styles.iconButton,
                 title: "Refresh"
               }, "\u21BB")
             ),
-            React.createElement(
+            React2.createElement(
               "div",
               { style: styles.appsList },
-              deployedApps.length === 0 ? React.createElement("div", { style: styles.empty }, "No applications deployed") : deployedApps.map(
-                (app) => React.createElement(
+              deployedApps.length === 0 ? React2.createElement("div", { style: styles.empty }, "No applications deployed") : deployedApps.map(
+                (app) => React2.createElement(
                   "div",
                   {
                     key: app.app_id,
                     style: styles.appItem
                   },
-                  React.createElement(
+                  React2.createElement(
                     "div",
                     { style: styles.appInfo },
-                    React.createElement("span", { style: styles.appName }, app.name),
-                    React.createElement("span", { style: { ...styles.statusBadge, ...getStatusBadgeStyle(app.status) } }, getStatusClass(app.status))
+                    React2.createElement("span", { style: styles.appName }, app.name),
+                    React2.createElement("span", { style: { ...styles.statusBadge, ...getStatusBadgeStyle(app.status) } }, getStatusClass(app.status))
                   ),
-                  React.createElement(
+                  React2.createElement(
                     "div",
                     { style: styles.appActions },
-                    (app.status === "stopped" || app.status === "deployed") && React.createElement("button", {
+                    (app.status === "stopped" || app.status === "deployed") && React2.createElement("button", {
                       onClick: () => handleStartApp(app.app_id),
                       style: { ...styles.actionBtn, ...styles.actionStart },
                       title: "Start"
                     }, "\u25B6"),
-                    app.status === "running" && React.createElement("button", {
+                    app.status === "running" && React2.createElement("button", {
                       onClick: () => handleStopApp(app.app_id),
                       style: { ...styles.actionBtn, ...styles.actionStop },
                       title: "Stop"
@@ -30437,12 +30441,12 @@ items:
             )
           ),
           // Build Logs Card
-          React.createElement(
+          React2.createElement(
             "div",
             { style: { ...styles.card, ...styles.logsCard, position: "relative" } },
             // Indeterminate progress bar — fills the gap during long silent steps
             // (uploading, signing, AosCloud round-trip). Pure CSS, GPU-painted.
-            isBuilding && React.createElement(
+            isBuilding && React2.createElement(
               "div",
               {
                 style: {
@@ -30458,7 +30462,7 @@ items:
                   pointerEvents: "none"
                 }
               },
-              React.createElement("div", {
+              React2.createElement("div", {
                 style: {
                   position: "absolute",
                   top: 0,
@@ -30470,16 +30474,16 @@ items:
                 }
               })
             ),
-            React.createElement(
+            React2.createElement(
               "div",
               { style: styles.cardHeader },
-              React.createElement(
+              React2.createElement(
                 "div",
                 { style: styles.cardTitle },
-                React.createElement(Icon, { name: "clipboard-list", size: 16, color: "#374151" }),
+                React2.createElement(Icon, { name: "clipboard-list", size: 16, color: "#374151" }),
                 "Build Logs"
               ),
-              buildLogs.length > 0 && React.createElement("button", {
+              buildLogs.length > 0 && React2.createElement("button", {
                 onClick: () => {
                   const text = buildLogs.join("\n");
                   const blob = new Blob([text], { type: "text/plain" });
@@ -30493,17 +30497,17 @@ items:
                 style: styles.iconButton,
                 title: "Download build log"
               }, "\u{1F4BE}"),
-              React.createElement("button", {
+              React2.createElement("button", {
                 onClick: () => setBuildLogs([]),
                 style: styles.iconButton,
                 title: "Clear logs"
               }, "\u2715")
             ),
-            React.createElement(
+            React2.createElement(
               "div",
               { ref: buildLogsRef, style: styles.logs },
-              buildLogs.length === 0 ? React.createElement("div", { style: styles.empty }, "No logs yet") : buildLogs.map(
-                (log, i) => React.createElement("div", {
+              buildLogs.length === 0 ? React2.createElement("div", { style: styles.empty }, "No logs yet") : buildLogs.map(
+                (log, i) => React2.createElement("div", {
                   key: i,
                   style: styles.logEntry
                 }, log)
@@ -30511,22 +30515,22 @@ items:
             )
           ),
           // Service Stdout Panel
-          React.createElement(
+          React2.createElement(
             "div",
             { style: { ...styles.card, ...styles.logsCard } },
-            React.createElement(
+            React2.createElement(
               "div",
               { style: styles.cardHeader },
-              React.createElement(
+              React2.createElement(
                 "div",
                 { style: styles.cardTitle },
-                React.createElement(Icon, { name: "activity", size: 16, color: "#374151" }),
+                React2.createElement(Icon, { name: "activity", size: 16, color: "#374151" }),
                 "Service Output"
               ),
-              React.createElement(
+              React2.createElement(
                 "div",
                 { style: { display: "flex", gap: "4px" } },
-                React.createElement("button", {
+                React2.createElement("button", {
                   onClick: async () => {
                     if (!aosServiceRef.current || !selectedMonitorUnit)
                       return;
@@ -30554,7 +30558,7 @@ items:
                   },
                   title: "Fetch service stdout from VM"
                 }, isRequestingLog ? "\u27F3 Loading..." : "\u21BB Refresh"),
-                serviceLogs.length > 0 && React.createElement("button", {
+                serviceLogs.length > 0 && React2.createElement("button", {
                   onClick: () => {
                     const text = serviceLogs.map((l) => l.text).join("\n");
                     const blob = new Blob([text], { type: "text/plain" });
@@ -30568,22 +30572,22 @@ items:
                   style: styles.iconButton,
                   title: "Download log as text file"
                 }, "\u{1F4BE}"),
-                React.createElement("button", {
+                React2.createElement("button", {
                   onClick: () => setServiceLogs([]),
                   style: styles.iconButton,
                   title: "Clear"
                 }, "\u2715")
               )
             ),
-            React.createElement(
+            React2.createElement(
               "div",
               { style: styles.logs },
-              serviceLogs.length === 0 ? React.createElement(
+              serviceLogs.length === 0 ? React2.createElement(
                 "div",
                 { style: styles.empty },
                 selectedMonitorUnit ? "Click Refresh to view service output from the VM" : "Select a unit first"
               ) : serviceLogs.map(
-                (log) => React.createElement("div", {
+                (log) => React2.createElement("div", {
                   key: log.id,
                   style: { ...styles.logEntry, fontSize: "11px", lineHeight: 1.4 }
                 }, log.text)
@@ -30633,7 +30637,7 @@ items:
   function mount(el, props) {
     constrainHostElement(el);
     const root = ReactDOM.createRoot(el);
-    root.render(React2.createElement(Page, props || {}));
+    root.render(React3.createElement(Page, props || {}));
     el.__aw_root = root;
   }
   function unmount(el) {
@@ -30652,10 +30656,10 @@ items:
 })();
 /*! Bundled license information:
 
-scheduler/cjs/scheduler.development.js:
+react/cjs/react.development.js:
   (**
    * @license React
-   * scheduler.development.js
+   * react.development.js
    *
    * Copyright (c) Meta Platforms, Inc. and affiliates.
    *
@@ -30663,10 +30667,10 @@ scheduler/cjs/scheduler.development.js:
    * LICENSE file in the root directory of this source tree.
    *)
 
-react/cjs/react.development.js:
+scheduler/cjs/scheduler.development.js:
   (**
    * @license React
-   * react.development.js
+   * scheduler.development.js
    *
    * Copyright (c) Meta Platforms, Inc. and affiliates.
    *

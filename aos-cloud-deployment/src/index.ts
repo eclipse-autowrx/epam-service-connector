@@ -6,8 +6,9 @@
 //
 // SPDX-License-Identifier: MIT
 
-import * as ReactDOM from 'react-dom/client'
+import './setup-react'
 import * as React from 'react'
+import * as ReactDOM from 'react-dom/client'
 import Page from './components/Page'
 
 export const components = { Page }
