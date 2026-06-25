@@ -6,9 +6,8 @@
 //
 // SPDX-License-Identifier: MIT
 
-import './setup-react'
-import * as React from 'react'
 import * as ReactDOM from 'react-dom/client'
+import * as React from 'react'
 import Page from './components/Page'
 
 export const components = { Page }
@@ -53,7 +52,7 @@ function restoreHostElement(el: HTMLElement) {
 export function mount(el: HTMLElement, props?: any) {
   constrainHostElement(el)
   const root = ReactDOM.createRoot(el)
-  root.render(React.createElement(Page as any, props || {}))
+  root.render(React.createElement(Page as any, { ...(props || {}), config: { ...(props?.config || {}), language: 'python' } }))
   ;(el as any).__aw_root = root
 }
 

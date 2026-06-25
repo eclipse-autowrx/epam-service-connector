@@ -1454,8 +1454,7 @@ export default function Page({ data, config }: PluginProps) {
             'The middle column has a tabbed editor. Use the preset dropdown (top-right header) to load a starting point, then edit the tabs:'
           ),
           React.createElement('ul', { style: { color: '#6b7280', marginBottom: '16px', paddingLeft: '20px' } },
-            React.createElement('li', null, React.createElement('strong', null, 'main.cpp'), ' \u2014 your C++ application source code'),
-            React.createElement('li', null, React.createElement('strong', null, 'main.py'), ' \u2014 your Python application source code (Python mode only)'),
+            React.createElement('li', null, React.createElement('strong', null, 'main.py'), ' \u2014 your Python application source code'),
             React.createElement('li', null, React.createElement('strong', null, 'config.yaml'), ' \u2014 service metadata: architecture, version, resource quotas, entry point')
           ),
 
@@ -1783,23 +1782,14 @@ export default function Page({ data, config }: PluginProps) {
           style: styles.select
         },
           React.createElement('option', { value: 'custom' }, 'Write your own code'),
-          forcedLanguage !== 'python' ? React.createElement('optgroup', { label: 'C++ Presets' },
-            React.createElement('option', { value: 'helloAos' }, 'Hello AOS — simple C++ starter'),
-            React.createElement('option', { value: 'kuksaWriter' }, 'Signal Writer — write vehicle signals'),
-            React.createElement('option', { value: 'kuksaReader' }, 'KUKSA Reader — read vehicle signals'),
-            React.createElement('option', { value: 'evRangeExtender' }, 'EV Range Extender — battery management'),
-            React.createElement('option', { value: 'batteryEnergySaver' }, 'Battery Energy Saver — HVAC/seat cutoff'),
-            React.createElement('option', { value: 'batteryEnergySaverSdvRuntime' }, 'Battery Energy Saver — sdv-runtime / VSS 4.0'),
-            React.createElement('option', { value: 'signalReporter' }, 'Signal Reporter — relay to dashboard')
-          ) : null,
-          forcedLanguage !== 'cpp' ? React.createElement('optgroup', { label: 'Python Presets' },
+          React.createElement('optgroup', { label: 'Python Presets' },
             React.createElement('option', { value: 'helloPython' }, 'Hello Python — simple Python starter'),
             React.createElement('option', { value: 'kuksaWriterPython' }, 'Signal Writer — write vehicle signals'),
             React.createElement('option', { value: 'kuksaReaderPython' }, 'KUKSA Reader — read vehicle signals'),
             React.createElement('option', { value: 'evRangeExtenderPython' }, 'EV Range Extender — battery management'),
             React.createElement('option', { value: 'batteryEnergySaverPython' }, 'Battery Energy Saver — HVAC/seat cutoff'),
             React.createElement('option', { value: 'signalReporterPython' }, 'Signal Reporter — relay to dashboard')
-          ) : null
+          )
         ),
         React.createElement('span', {
           style: { fontSize: '12px', color: '#6b7280', fontWeight: 500 },
@@ -2211,22 +2201,9 @@ export default function Page({ data, config }: PluginProps) {
 
         // Editor with tabs
         React.createElement('div', { style: { ...styles.card, ...styles.editorCard, flex: 1, display: 'flex', flexDirection: 'column' as const } },
-          // Tab bar — hide C++/Python tabs when language is forced
+          // Tab bar — Python only
           React.createElement('div', { style: { display: 'flex', borderBottom: '1px solid #e5e7eb', background: '#f9fafb' } },
-            forcedLanguage !== 'python' ? React.createElement('button', {
-              onClick: () => { setActiveEditorTab('cpp'); setLanguageMode('cpp'); },
-              style: {
-                padding: '8px 16px', fontSize: '13px', fontWeight: 500, border: 'none', cursor: 'pointer',
-                background: activeEditorTab === 'cpp' ? '#fff' : 'transparent',
-                color: activeEditorTab === 'cpp' ? '#2563eb' : '#6b7280',
-                borderBottom: activeEditorTab === 'cpp' ? '2px solid #2563eb' : '2px solid transparent',
-                display: 'inline-flex', alignItems: 'center', gap: '6px'
-              }
-            },
-              React.createElement(Icon, { name: 'file-code', size: 14 }),
-              'main.cpp'
-            ) : null,
-            forcedLanguage !== 'cpp' ? React.createElement('button', {
+            React.createElement('button', {
               onClick: () => { setActiveEditorTab('python'); setLanguageMode('python'); },
               style: {
                 padding: '8px 16px', fontSize: '13px', fontWeight: 500, border: 'none', cursor: 'pointer',
@@ -2238,7 +2215,7 @@ export default function Page({ data, config }: PluginProps) {
             },
               React.createElement(Icon, { name: 'file-code', size: 14 }),
               'main.py'
-            ) : null,
+            ),
             React.createElement('button', {
               onClick: () => setActiveEditorTab('yaml'),
               style: {

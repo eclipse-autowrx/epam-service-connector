@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "./build.sh",
-    "dev": "esbuild src/index.ts --bundle --format=iife --platform=browser --jsx=automatic --sourcemap --outfile=index.js --watch",
+    "dev": "esbuild src/index.ts --bundle --format=iife --platform=browser --jsx=automatic --external:react --external:react-dom/client --external:react/jsx-runtime --sourcemap --outfile=index.js --watch",
     "serve": "node server.js",
     "standalone": "esbuild src/standalone-python.ts --bundle --format=iife --platform=browser --jsx=automatic --sourcemap --outfile=standalone_python.js && echo 'Open standalone-python.html in a browser'",
     "standalone:dev": "esbuild src/standalone-python.ts --bundle --format=iife --platform=browser --jsx=automatic --sourcemap --outfile=standalone_python.js --servedir=. --serve=3011 --watch"

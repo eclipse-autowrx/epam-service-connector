@@ -27,6 +27,20 @@ const defaultUnitUid = process.env.UNIT_UID || '';
 const defaultSubjectId = process.env.SUBJECT_ID || '';
 const certPath = '/root/.aos/security/aos-user-sp.p12';
 const oemCertPath = process.env.OEM_CERT_PATH || '/root/.aos/security/aos-user-oem.p12';
+
+// Resolve the actual OEM cert at runtime: use dedicated OEM cert if present,
+// otherwise fall back to SP cert (most setups only have one cert).
+function resolveOemCertPath() {
+  try {
+    require('fs').accessSync(oemCertPath);
+    return oemCertPath;
+  } catch (e) { /* not found */ }
+  try {
+    require('fs').accessSync(certPath);
+    return certPath;
+  } catch (e) { /* not found */ }
+  return oemCertPath; // let curl report the error
+}
 const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || '';
 
 console.log('[Broadcaster] Starting:', instanceId);
@@ -957,7 +971,7 @@ async function handleStopApp(data) {
 }
 
 async function curlAosCloud(apiPath, useOemCert) {
-  const cert = useOemCert ? oemCertPath : certPath;
+  const cert = useOemCert ? resolveOemCertPath() : certPath;
   const { stdout } = await execAsync(
     `curl -k --http1.1 ${aoscloudUrl}/api/v11/${apiPath} ` +
     `--cert ${cert} --cert-type P12 ` +
