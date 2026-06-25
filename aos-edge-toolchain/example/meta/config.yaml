@@ -21,9 +21,13 @@ items:
       - sourceFolder: "src_amd64"
         archInfo:
           architecture: "amd64"
+        workingDir: "/"
+        cmd: "/hello-aos"
       - sourceFolder: "src_arm64"
         archInfo:
           architecture: "arm64"
+        workingDir: "/"
+        cmd: "/hello-aos"
 
     configuration:
       workingDir: "/"

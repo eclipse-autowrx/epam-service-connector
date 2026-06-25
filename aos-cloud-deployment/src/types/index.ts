@@ -99,6 +99,7 @@ export interface BuildRequest {
   cppCode?: string
   pythonCode?: string
   yamlConfig: string
+  serviceUuid?: string
 }
 
 // Build response

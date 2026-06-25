@@ -198,6 +198,9 @@ export class AosService {
       language: lang,
       vehicleId: 'default-vehicle'
     }
+    if (request.serviceUuid) {
+      data.serviceUuid = request.serviceUuid
+    }
     if (lang === 'python') {
       data.pythonCode = request.pythonCode || ''
     } else {

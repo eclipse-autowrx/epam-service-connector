@@ -12,6 +12,7 @@ const { exec } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs').promises;
 const path = require('path');
+const yaml = require('js-yaml');
 
 const execAsync = promisify(exec);
 
@@ -25,6 +26,7 @@ const defaultServiceUuid = process.env.SERVICE_UUID || '';
 const defaultUnitUid = process.env.UNIT_UID || '';
 const defaultSubjectId = process.env.SUBJECT_ID || '';
 const certPath = '/root/.aos/security/aos-user-sp.p12';
+const oemCertPath = process.env.OEM_CERT_PATH || '/root/.aos/security/aos-user-oem.p12';
 const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || '';
 
 console.log('[Broadcaster] Starting:', instanceId);
@@ -391,24 +393,66 @@ const SUPPORTED_ARCHS = {
   'aarch64': 'aarch64', 'arm64': 'aarch64',
 };
 
-function detectArch(yamlConfig) {
-  // Try new 2.x format first: archInfo.architecture
-  const newArchMatch = yamlConfig.match(/architecture:\s*['\"]?(\w+)['\"]?/);
-  if (newArchMatch) {
-    const arch = newArchMatch[1];
-    const resolved = SUPPORTED_ARCHS[arch];
-    if (resolved) return resolved;
+// Detect the host (build machine) architecture
+function detectHostArch() {
+  const arch = process.arch;  // e.g. 'x64', 'arm64'
+  if (arch === 'x64') return 'x86_64';
+  if (arch === 'arm64') return 'aarch64';
+  return 'x86_64';  // default
+}
+
+// Parse config.yaml and return all architectures declared in the config.
+// For v2: collects from items[].images[].archInfo.architecture
+// For v1: uses the single build.arch field
+function detectArchs(yamlConfig) {
+  let doc;
+  try {
+    doc = yaml.load(yamlConfig);
+  } catch (e) {
+    // Fallback to regex for malformed YAML
   }
 
-  // Fallback to old 1.x format: arch
+  if (doc && doc.schemaVersion === 2 && doc.items) {
+    const archs = new Set();
+    for (const item of doc.items) {
+      for (const img of (item.images || [])) {
+        const a = (img.archInfo && img.archInfo.architecture) ? img.archInfo.architecture : null;
+        if (a && a !== 'any') {
+          const resolved = SUPPORTED_ARCHS[a];
+          if (resolved) archs.add(resolved);
+        }
+      }
+    }
+    if (archs.size > 0) return Array.from(archs);
+  }
+
+  if (doc && doc.build && doc.build.arch) {
+    const resolved = SUPPORTED_ARCHS[doc.build.arch];
+    if (resolved) return [resolved];
+  }
+
+  // Regex fallback for unparseable YAML
+  const newArchMatch = yamlConfig.match(/architecture:\s*['"]?(\w+)['"]?/);
+  if (newArchMatch) {
+    const resolved = SUPPORTED_ARCHS[newArchMatch[1]];
+    if (resolved) return [resolved];
+  }
   const archMatch = yamlConfig.match(/arch:\s*(\S+)/);
   if (archMatch) {
-    const arch = archMatch[1];
-    const resolved = SUPPORTED_ARCHS[arch];
-    if (resolved) return resolved;
+    const resolved = SUPPORTED_ARCHS[archMatch[1]];
+    if (resolved) return [resolved];
   }
 
   throw new Error('Missing architecture field in config.yaml. Supported formats: arch: x86_64 (1.x) or archInfo.architecture: amd64 (2.x)');
+}
+
+// Pick the best architecture to build for: prefer the host arch if available
+// in the config, otherwise use the first declared arch.
+function detectArch(yamlConfig, preferredArch) {
+  const archs = detectArchs(yamlConfig);
+  const preferred = preferredArch || detectHostArch();
+  if (archs.includes(preferred)) return preferred;
+  return archs[0];
 }
 
 function compilerForArch(arch) {
@@ -458,85 +502,115 @@ const crypto = require('crypto');
 const BUILD_HISTORY_MAX = 20;
 const buildHistory = new Map();
 
-// Generate new aos-signer 2.x config format (schemaVersion: 2)
-function generateNewConfigFormat(appName, arch, oldYamlConfig) {
-  // Parse values from YAML config (supports both 1.x and 2.x formats)
-  const extractValue = (pattern) => {
-    const match = oldYamlConfig.match(pattern);
-    return match ? match[1].trim() : null;
+// Parse YAML config into a structured object (handles both v1 and v2 formats).
+// Returns a normalized config object with safe defaults for all fields.
+function parseYamlConfig(yamlConfig) {
+  let doc;
+  try {
+    doc = yaml.load(yamlConfig) || {};
+  } catch (e) {
+    doc = {};
+  }
+
+  const isV2 = doc && doc.schemaVersion === 2;
+
+  // Publisher
+  const publisher = (doc && doc.publisher) || {};
+  const author = publisher.author || 'developer@example.com';
+  const company = publisher.company || 'Example Corp';
+
+  // Version
+  const version = (isV2 && doc.items && doc.items[0] && doc.items[0].version)
+    || (doc && doc.publish && doc.publish.version)
+    || '1.0.0';
+
+  // Identity (v2 only)
+  const identity = (isV2 && doc.items && doc.items[0] && doc.items[0].identity) || {};
+  const serviceId = identity.id || null;
+  const codename = identity.codename || null;
+  const title = identity.title || null;
+  const description = identity.description || null;
+
+  // Configuration
+  const config = (isV2 && doc.items && doc.items[0] && doc.items[0].configuration)
+    || (doc && doc.configuration)
+    || {};
+  const cmd = config.cmd || null;
+  const workingDir = config.workingDir || '/';
+
+  // Environment variables
+  const env = config.env || null;
+
+  // Quotas — support both v1 (quotas.cpu, quotas.mem) and v2 (quotas.cpuLimit, quotas.ramLimit)
+  const quotas = config.quotas || {};
+  const cpuLimit = quotas.cpuLimit || quotas.cpu || 1000;
+  const ramLimit = quotas.ramLimit || quotas.mem || '10MB';
+  const storageLimit = quotas.storageLimit || quotas.storage || '5MB';
+  const stateLimit = quotas.stateLimit || quotas.state || '512KB';
+
+  return {
+    author, company, version, serviceId, codename, title, description,
+    cmd, workingDir, env, cpuLimit, ramLimit, storageLimit, stateLimit,
   };
+}
 
-  const publisher = extractValue(/author:\s*["']?([^"'\n]+)["']?/) || 'developer@example.com';
-  const company = extractValue(/company:\s*["']?([^"'\n]+)["']?/) || 'Example Corp';
-  const version = extractValue(/version:\s*["']?([^"'\n]+)["']?/) || '1.0.0';
-  const cmd = extractValue(/cmd:\s*["']?([^"'\n]+)["']?/) || `/${appName}`;
-  const workingDir = extractValue(/workingDir:\s*["']?([^"'\n]+)["']?/) || '/';
-
-  // Extract identity fields: service UUID (id) or codename, title, description
-  // Supports both: id: UUID and codename: "name" formats
-  const serviceId = extractValue(/id:\s*([a-f0-9-]+)/i);
-  const codename = extractValue(/codename:\s*["']?([^"'\n]+)["']?/);
-  const title = extractValue(/title:\s*["']([^"']+)["']/) || extractValue(/title:\s*(\S+)/) || `${appName} Service`;
-  const description = extractValue(/description:\s*["']([^"']+)["']/) || `Auto-generated service from AOS Edge Toolchain`;
-
-  // Support both old (requestedResources.cpu) and new (quotas.cpuLimit) formats
-  const cpuLimit = extractValue(/cpu:\s*(\d+)/) ||
-                   extractValue(/cpuLimit:\s*(\d+)/) ||
-                   extractValue(/cpu:\s*["']?(\d+)/) || '1000';
-  const ramLimit = extractValue(/ram:\s*["']?(\d+[A-Z]+)/) ||
-                  extractValue(/ramLimit:\s*["']?(\d+[A-Z]+)/) ||
-                  extractValue(/mem:\s*["']?(\d+[A-Z]+)/) || '10MB';
-  const storageLimit = extractValue(/storage:\s*["']?(\d+[A-Z]+)/) ||
-                       extractValue(/storageLimit:\s*["']?(\d+[A-Z]+)/) || '5MB';
-  const stateLimit = extractValue(/state:\s*["']?(\d+[A-Z]+)/) ||
-                    extractValue(/stateLimit:\s*["']?(\d+[A-Z]+)/) || '512KB';
+// Generate new aos-signer 2.x config format (schemaVersion: 2)
+function generateNewConfigFormat(appName, arch, oldYamlConfig, serviceUuid) {
+  const cfg = parseYamlConfig(oldYamlConfig);
 
   // Map arch names
   const archMap = { 'x86_64': 'amd64', 'aarch64': 'arm64' };
   const newArch = archMap[arch] || arch;
 
-  // Use id (UUID) for updating existing service, or codename for new service
-  const identityLine = serviceId
-    ? `      id: ${serviceId}`
-    : `      codename: "${codename || appName}"`;
+  // Use serviceUuid (from UI selection) first, then YAML id, then codename
+  const effectiveId = serviceUuid || cfg.serviceId;
+  const identityLine = effectiveId
+    ? `      id: ${effectiveId}`
+    : `      codename: "${cfg.codename || appName}"`;
+
+  const resolvedCmd = cfg.cmd || `/${appName}`;
+
+  // Build env lines if present
+  const envLines = (cfg.env && cfg.env.length > 0)
+    ? cfg.env.map(e => `        - "${e}"`).join('\n')
+    : '';
 
   return `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
 schemaVersion: 2
 
 publisher:
-  author: "${publisher}"
-  company: "${company}"
+  author: "${cfg.author}"
+  company: "${cfg.company}"
 
 publish:
   tlsKey: "aos-user-sp.p12"
+  domain: "aoscloud.io"
 
 items:
   - identity:
       type: service
 ${identityLine}
-      title: "${title}"
-      description: "${description}"
-    version: "${version}"
+      title: "${cfg.title || `${appName} Service`}"
+      description: "${cfg.description || `Auto-generated service from AOS Edge Toolchain`}"
+    version: "${cfg.version}"
     sourceFolder: "${appName}"
 
     images:
       - sourceFolder: "src_${arch}"
         archInfo:
           architecture: "${newArch}"
-        workingDir: "${workingDir}"
-        cmd: "${cmd}"
 
     configuration:
-      workingDir: "${workingDir}"
-      cmd: "${cmd}"
+      workingDir: "${cfg.workingDir}"
+      cmd: ${resolvedCmd}${envLines ? '\n      env:\n' + envLines : ''}
       instances:
         minInstances: 1
         priority: 10
       quotas:
-        cpuLimit: ${parseInt(cpuLimit) || 1000}
-        ramLimit: ${ramLimit}
-        storageLimit: ${storageLimit}
-        stateLimit: ${stateLimit}
+        cpuLimit: ${parseInt(String(cfg.cpuLimit)) || 1000}
+        ramLimit: ${cfg.ramLimit}
+        storageLimit: ${cfg.storageLimit}
+        stateLimit: ${cfg.stateLimit}
         tmpLimit: 256MiB
         uploadSpeedLimit: 10K
         downloadSpeedLimit: 10K
@@ -547,75 +621,60 @@ ${identityLine}
 `;
 }
 
-function generatePythonConfig(appName, oldYamlConfig) {
-  // Parse values from YAML config (supports both 1.x and 2.x formats)
-  const extractValue = (pattern) => {
-    const match = oldYamlConfig.match(pattern);
-    return match ? match[1].trim() : null;
-  };
+function generatePythonConfig(appName, pyFileName, oldYamlConfig, serviceUuid) {
+  const cfg = parseYamlConfig(oldYamlConfig);
 
-  const publisher = extractValue(/author:\s*["']?([^"'\n]+)["']?/) || 'developer@example.com';
-  const company = extractValue(/company:\s*["']?([^"'\n]+)["']?/) || 'Example Corp';
-  const version = extractValue(/version:\s*["']?([^"'\n]+)["']?/) || '1.0.0';
-  const workingDir = extractValue(/workingDir:\s*["']?([^"'\n]+)["']?/) || '/';
+  // Use serviceUuid (from UI selection) first, then YAML id, then codename
+  const effectiveId = serviceUuid || cfg.serviceId;
+  const identityLine = effectiveId
+    ? `      id: ${effectiveId}`
+    : `      codename: "${cfg.codename || appName}"`;
 
-  // Extract identity fields
-  const serviceId = extractValue(/id:\s*([a-f0-9-]+)/i);
-  const codename = extractValue(/codename:\s*["']?([^"'\n]+)["']?/);
-  const title = extractValue(/title:\s*["']([^"']+)["']/) || extractValue(/title:\s*(\S+)/) || `${appName} Service`;
-  const description = extractValue(/description:\s*["']([^"']+)["']/) || `Auto-generated Python service from AOS Edge Toolchain`;
+  // Use cmd from YAML config as-is, fallback to /usr/bin/python3 -u /main.py
+  const pythonCmd = cfg.cmd || `/usr/bin/python3 -u /${pyFileName}`;
 
-  // Quotas
-  const cpuLimit = extractValue(/cpu:\s*(\d+)/) || extractValue(/cpuLimit:\s*(\d+)/) || '5000';
-  const ramLimit = extractValue(/ram:\s*["']?(\d+[A-Z]+)/) || extractValue(/ramLimit:\s*["']?(\d+[A-Z]+)/) || extractValue(/mem:\s*["']?(\d+[A-Z]+)/) || '512MiB';
-  const storageLimit = extractValue(/storage:\s*["']?(\d+[A-Z]+)/) || extractValue(/storageLimit:\s*["']?(\d+[A-Z]+)/) || '32MiB';
-  const stateLimit = extractValue(/state:\s*["']?(\d+[A-Z]+)/) || extractValue(/stateLimit:\s*["']?(\d+[A-Z]+)/) || '1MiB';
-
-  const identityLine = serviceId
-    ? `      id: ${serviceId}`
-    : `      codename: "${codename || appName}"`;
-
-  // Python uses src_any (arch-independent) and a shell wrapper as cmd
-  const cmd = `/${appName}/run.sh`;
+  // Build env lines if present
+  const envLines = (cfg.env && cfg.env.length > 0)
+    ? cfg.env.map(e => `        - "${e}"`).join('\n')
+    : '';
 
   return `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
 # Python service — architecture-independent
 schemaVersion: 2
 
 publisher:
-  author: "${publisher}"
-  company: "${company}"
+  author: "${cfg.author}"
+  company: "${cfg.company}"
 
 publish:
   tlsKey: "aos-user-sp.p12"
+  domain: "aoscloud.io"
 
 items:
   - identity:
       type: service
 ${identityLine}
-      title: "${title}"
-      description: "${description}"
-    version: "${version}"
+      title: "${cfg.title || `${appName} Service`}"
+      description: "${cfg.description || `Auto-generated Python service from AOS Edge Toolchain`}"
+    version: "${cfg.version}"
     sourceFolder: "${appName}"
 
     images:
       - sourceFolder: "src_any"
         archInfo:
           architecture: "any"
-        workingDir: "${workingDir}"
-        cmd: "${cmd}"
 
     configuration:
-      workingDir: "${workingDir}"
-      cmd: "${cmd}"
+      workingDir: "/"
+      cmd: ${pythonCmd}${envLines ? '\n      env:\n' + envLines : ''}
       instances:
         minInstances: 1
         priority: 10
       quotas:
-        cpuLimit: ${parseInt(cpuLimit) || 5000}
-        ramLimit: ${ramLimit}
-        storageLimit: ${storageLimit}
-        stateLimit: ${stateLimit}
+        cpuLimit: ${parseInt(String(cfg.cpuLimit)) || 5000}
+        ramLimit: ${cfg.ramLimit}
+        storageLimit: ${cfg.storageLimit}
+        stateLimit: ${cfg.stateLimit}
         tmpLimit: 256MiB
         uploadSpeedLimit: 10K
         downloadSpeedLimit: 10K
@@ -654,10 +713,18 @@ function getBuildStatus(buildId) {
 
 async function handleBuildDeploy(data, buildId) {
   const appName = data.name || 'hello-aos';
-  const language = data.language || 'cpp';
+  const language = data.language || 'python';
   const cppCode = data.cppCode || '';
   const pythonCode = data.pythonCode || '';
+
+  // C++ builds are not supported in this version — reject early with a clear message
+  if (language === 'cpp') {
+    emitProgress(buildId, 'error', 'C++ builds are not supported in this version. Only Python deployments are available. Please switch to Python mode.', 0);
+    buildHistory.set(buildId, { ...buildHistory.get(buildId), status: 'error', finishedAt: Date.now() });
+    return;
+  }
   const yamlConfig = data.yamlConfig || '';
+  const serviceUuid = data.serviceUuid || '';
 
   if (!buildId) buildId = crypto.randomBytes(6).toString('hex');
   const buildDir = path.join('/workspace/builds', buildId);
@@ -676,7 +743,7 @@ async function handleBuildDeploy(data, buildId) {
   try {
     // New aos-signer 2.x format: config.yaml at root, service folder with src_<arch> structure
     const serviceFolder = path.join(buildDir, appName);
-    const srcFolder = path.join(serviceFolder, 'src_temp');
+    const srcFolder = path.join(serviceFolder, `src_temp_${buildId}`);
     await fs.mkdir(srcFolder, { recursive: true });
 
     const certSrc = '/root/.aos/security/aos-user-sp.p12';
@@ -686,8 +753,10 @@ async function handleBuildDeploy(data, buildId) {
     if (language === 'python') {
       emitProgress(buildId, 'config', 'Python deployment — skipping compilation', 10);
 
-      // Write Python source file
-      const pyFileName = 'main.py';
+      // Write Python source file — extract filename from YAML cmd, fallback to main.py
+      const cfg = parseYamlConfig(yamlConfig);
+      const cmdPath = cfg.cmd || '/usr/bin/python3 -u /main.py';
+      const pyFileName = cmdPath.split('/').pop() || 'main.py';
       await fs.writeFile(path.join(srcFolder, pyFileName), pythonCode);
 
       // Python is arch-independent — use src_any
@@ -695,18 +764,16 @@ async function handleBuildDeploy(data, buildId) {
       await fs.mkdir(srcAnyFolder, { recursive: true });
       await fs.copyFile(path.join(srcFolder, pyFileName), path.join(srcAnyFolder, pyFileName));
 
-      // Create a shell wrapper script that invokes python3
-      const wrapperScript = `#!/bin/sh\nexec /usr/bin/python3 -u /${appName}/${pyFileName} "$@"\n`;
-      await fs.writeFile(path.join(srcAnyFolder, 'run.sh'), wrapperScript);
-      await execAsync(`chmod +x ${path.join(srcAnyFolder, 'run.sh')}`);
-
       // Clean up temp src folder
       await fs.rm(srcFolder, { recursive: true, force: true });
 
-      // Generate config.yaml with Python-specific cmd
-      const pythonConfig = generatePythonConfig(appName, yamlConfig);
+      // Generate config.yaml with Python-specific cmd (direct python3 invocation, no wrapper)
+      const pythonConfig = generatePythonConfig(appName, pyFileName, yamlConfig, serviceUuid);
       await fs.writeFile(path.join(buildDir, 'config.yaml'), pythonConfig);
       emitProgress(buildId, 'config', 'Generated config.yaml (schemaVersion: 2, Python)', 65);
+
+      // Clear any stale batch.tar.gz from a previous build before signing
+      await fs.rm(path.join(buildDir, 'batch.tar.gz')).catch(() => {});
 
       emitProgress(buildId, 'sign', 'Signing deployment bundle...', 70);
       await execAsync('aos-signer sign', { cwd: buildDir, env: { ...process.env } });
@@ -801,9 +868,12 @@ async function handleBuildDeploy(data, buildId) {
     }
 
     // Generate new config.yaml format at root (schemaVersion: 2)
-    const newConfig = generateNewConfigFormat(appName, targetArch, yamlConfig);
+    const newConfig = generateNewConfigFormat(appName, targetArch, yamlConfig, serviceUuid);
     await fs.writeFile(path.join(buildDir, 'config.yaml'), newConfig);
     emitProgress(buildId, 'config', 'Generated config.yaml (schemaVersion: 2)', 65);
+
+    // Clear any stale batch.tar.gz from a previous build before signing
+    await fs.rm(path.join(buildDir, 'batch.tar.gz')).catch(() => {});
 
     emitProgress(buildId, 'sign', 'Signing deployment bundle...', 70);
     await execAsync('aos-signer sign', { cwd: buildDir, env: { ...process.env } });
@@ -886,10 +956,11 @@ async function handleStopApp(data) {
   };
 }
 
-async function curlAosCloud(apiPath) {
+async function curlAosCloud(apiPath, useOemCert) {
+  const cert = useOemCert ? oemCertPath : certPath;
   const { stdout } = await execAsync(
     `curl -k --http1.1 ${aoscloudUrl}/api/v11/${apiPath} ` +
-    `--cert ${certPath} --cert-type P12 ` +
+    `--cert ${cert} --cert-type P12 ` +
     `-H "accept: application/json"`,
     { env: { ...process.env }, timeout: 15000 }
   );
@@ -905,14 +976,19 @@ async function handleListAosCloud(data, resource) {
     let mapped;
     if (resource === 'services') {
       mapped = items.map((s) => ({
+        // v11 API uses 'id' as the canonical UUID field; 'uuid' is a legacy alias
         uuid: s.id || s.uuid,
         title: s.title || s.name,
         description: s.description || '',
-        provider: s.service_provider_title || ''
+        provider: s.service_provider_title || '',
+        codename: s.codename || ''
       }));
     } else if (resource === 'units') {
       mapped = items.map((u) => ({
-        uid: u.system_uid,
+        // v11 API uses 'id' as the canonical unit identifier for API calls;
+        // 'system_uid' is the human-readable legacy ID shown in the UI.
+        uid: u.id || u.system_uid,
+        systemUid: u.system_uid || u.id || '',
         name: u.model?.name || u.name || u.display_name || 'Unknown',
         online: u.online_status === 'Online',
         status: u.online_status,
@@ -973,7 +1049,7 @@ async function handleGetDeploymentStatus(data) {
       try {
         const units = await curlAosCloud('units/');
         const unitList = units.items || units || [];
-        unit = unitList.find((u) => u.system_uid === unitUid) || null;
+        unit = unitList.find((u) => (u.id || u.system_uid) === unitUid) || null;
       } catch (e) { console.warn('[DeploymentStatus] Could not fetch units:', e.message); }
     }
 
@@ -1199,7 +1275,7 @@ async function handleGetServiceUnits(data) {
 
     // /services/{id}/units/ returns minimal data — enrich with /units/{uid}/ detail
     const enriched = await Promise.all(items.map(async (u) => {
-      const uid = u.system_uid || u.uid;
+      const uid = u.id || u.system_uid || u.uid;
       try {
         const detail = await curlAosCloud(`units/${uid}/`);
         // Find service instance run state from the unit's services_subjects
@@ -1218,8 +1294,8 @@ async function handleGetServiceUnits(data) {
         }
         return {
           uid,
-          name: (detail.unit_sets?.[0]?.title ? detail.unit_sets[0].title + ' #' + detail.id : null)
-                || detail.name || 'Unit-' + detail.id,
+          name: (detail.unit_sets?.[0]?.title ? detail.unit_sets[0].title + ' #' + (detail.system_uid || detail.id) : null)
+                || detail.name || 'Unit-' + (detail.system_uid || detail.id),
           online: detail.online_status === 'Online',
           status: detail.online_status || 'Unknown',
           runState,
@@ -1281,10 +1357,14 @@ async function handleGetUnitMonitoring(data) {
     // Fetch monitoring AND unit detail in parallel. Unit detail provides the
     // hardware totals (CPU count, RAM total, partition sizes) that the
     // monitoring endpoint omits — without them we can't render real %.
+    console.log(`[Monitoring] Fetching data for unit: ${unitUid}`);
+    // Monitoring requires OEM cert — SP cert gets "forbidden"
     const [result, unitDetail] = await Promise.all([
-      curlAosCloud(`units/${unitUid}/monitoring/`),
-      curlAosCloud(`units/${unitUid}/`).catch(() => null)
+      curlAosCloud(`units/${unitUid}/monitoring/`, true),
+      curlAosCloud(`units/${unitUid}/`, true).catch(() => null)
     ]);
+    console.log(`[Monitoring] Unit detail:`, unitDetail ? `got ${JSON.stringify(unitDetail).length} bytes` : 'null');
+    console.log(`[Monitoring] Monitoring result type:`, Array.isArray(result) ? 'array' : typeof result, 'keys:', result ? Object.keys(result).join(',') : 'null');
 
     // Detect explicit error envelope (rare; usually the call either 200s with an
     // array of nodes, or curlAosCloud throws).

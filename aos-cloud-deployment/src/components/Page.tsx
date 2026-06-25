@@ -25,11 +25,14 @@ interface DockerInstance {
 
 export default function Page({ data, config }: PluginProps) {
 
-  const [languageMode, setLanguageMode] = React.useState<'cpp' | 'python'>('cpp')
-  const [cppCode, setCppCode] = React.useState(PRESETS.helloAos.cpp)
-  const [pythonCode, setPythonCode] = React.useState((PRESETS as any).helloPython?.python || '')
-  const [yamlConfig, setYamlConfig] = React.useState(PRESETS.helloAos.yaml)
-  const [appName, setAppName] = React.useState('hello-aos')
+  // If config.language is set, lock to that language (e.g. standalone-python mode)
+  const forcedLanguage = (config as any)?.language as 'cpp' | 'python' | undefined
+
+  const [languageMode, setLanguageMode] = React.useState<'cpp' | 'python'>(forcedLanguage || 'python')
+  const [cppCode, setCppCode] = React.useState(forcedLanguage === 'cpp' ? PRESETS.helloAos.cpp : '')
+  const [pythonCode, setPythonCode] = React.useState(forcedLanguage === 'cpp' ? '' : ((PRESETS as any).helloPython?.python || ''))
+  const [yamlConfig, setYamlConfig] = React.useState(forcedLanguage === 'cpp' ? PRESETS.helloAos.yaml : ((PRESETS as any).helloPython?.yaml || PRESETS.helloAos.yaml))
+  const [appName, setAppName] = React.useState(forcedLanguage === 'cpp' ? 'hello-aos' : 'hello-python')
   const [isBuilding, setIsBuilding] = React.useState(false)
   const [buildStatus, setBuildStatus] = React.useState<string>('')
   const [buildLogs, setBuildLogs] = React.useState<string[]>([])
@@ -38,7 +41,7 @@ export default function Page({ data, config }: PluginProps) {
   const [selectedPreset, setSelectedPreset] = React.useState('custom')
   const [autoIncVersion, setAutoIncVersion] = React.useState(true)
   const [autoSyncServiceUid, setAutoSyncServiceUid] = React.useState(true)
-  const [activeEditorTab, setActiveEditorTab] = React.useState<'cpp' | 'python' | 'yaml'>('cpp')
+  const [activeEditorTab, setActiveEditorTab] = React.useState<'cpp' | 'python' | 'yaml'>(forcedLanguage === 'cpp' ? 'cpp' : 'python')
   const cppCodeRef = React.useRef(cppCode)
   const pythonCodeRef = React.useRef(pythonCode)
   const yamlConfigRef = React.useRef(yamlConfig)
@@ -80,6 +83,7 @@ export default function Page({ data, config }: PluginProps) {
   // AosCloud state
   const [aosServices, setAosServices] = React.useState<any[]>([])
   const [selectedServiceUuid, setSelectedServiceUuid] = React.useState<string>('')
+  const [selectedServiceCodename, setSelectedServiceCodename] = React.useState<string>('')
   const [serviceUnits, setServiceUnits] = React.useState<any[]>([])
   const [serviceVersions, setServiceVersions] = React.useState<any[]>([])
   const [serviceName, setServiceName] = React.useState<string>('')
@@ -862,6 +866,7 @@ export default function Page({ data, config }: PluginProps) {
     // cert and therefore its own AosCloud view.
     setAosServices([])
     setSelectedServiceUuid('')
+    setSelectedServiceCodename('')
     setServiceUnits([])
     setServiceVersions([])
     setServiceName('')
@@ -948,15 +953,19 @@ export default function Page({ data, config }: PluginProps) {
     try {
       const res = await aosServiceRef.current.listServices()
       if (res.status === 'success') {
-        setAosServices(res.items || [])
+        const items = res.items || []
+        setAosServices(items)
         if (!selectedServiceUuid && res.defaults?.serviceUuid) {
           setSelectedServiceUuid(res.defaults.serviceUuid)
+          const svc = items.find((s: any) => s.uuid === res.defaults.serviceUuid)
+          if (svc?.codename) setSelectedServiceCodename(svc.codename)
           loadServiceDetails(res.defaults.serviceUuid)
-        } else if (!selectedServiceUuid && res.items?.length) {
-          setSelectedServiceUuid(res.items[0].uuid)
-          loadServiceDetails(res.items[0].uuid)
+        } else if (!selectedServiceUuid && items.length) {
+          setSelectedServiceUuid(items[0].uuid)
+          if (items[0].codename) setSelectedServiceCodename(items[0].codename)
+          loadServiceDetails(items[0].uuid)
         }
-        addLog(`[AosCloud] Loaded ${res.items?.length || 0} services`)
+        addLog(`[AosCloud] Loaded ${items.length} services`)
       }
       // Also fetch alerts
       try {
@@ -997,7 +1006,12 @@ export default function Page({ data, config }: PluginProps) {
           const parts = latest.split('.')
           parts[parts.length - 1] = String(Number(parts[parts.length - 1]) + 1)
           const next = parts.join('.')
-          setCppCode(prev => prev.replace(/#define\s+VERSION\s+"[^"]+"/, `#define VERSION "${next}"`))
+          // Update version in code (C++ or Python) and YAML
+          if (languageMode === 'python') {
+            setPythonCode(prev => prev.replace(/VERSION\s*=\s*"[^"]+"/, `VERSION = "${next}"`))
+          } else {
+            setCppCode(prev => prev.replace(/#define\s+VERSION\s+"[^"]+"/, `#define VERSION "${next}"`))
+          }
           setYamlConfig(prev => prev.replace(/version:\s*"[^"]+"/, `version: "${next}"`))
           addLog(`[Version] Next: ${latest} → ${next}`)
         }
@@ -1031,14 +1045,51 @@ export default function Page({ data, config }: PluginProps) {
     setServiceVersions([])
     setUnitMonitoring(null)
 
-    // Auto-sync service_uid to config.yaml if enabled
+    // Look up the codename from the services list
+    const svc = aosServices.find((s: any) => s.uuid === uuid)
+    const codename = svc?.codename || ''
+    setSelectedServiceCodename(codename)
+
+    // Auto-sync: replace UUID-based identity with codename in config.yaml.
+    // When a service is selected, its codename replaces any id:/service_uid:
+    // field so the YAML uses the human-readable codename as the primary identity.
     if (uuid && autoSyncServiceUid) {
       setYamlConfig(prev => {
-        const next = prev.replace(/service_uid:\s*["']?[a-f0-9-]+["']?/i, `service_uid: ${uuid}`)
-        if (next === prev) {
-          addLog(`[Config] service_uid line not found in config.yaml — not synced`)
+        let next = prev
+        let synced = false
+
+        if (codename) {
+          // Replace v2 id: <uuid> with codename: "<codename>"
+          if (/(\s+)id:\s*["']?[a-f0-9-]+["']?/i.test(next)) {
+            next = next.replace(/(\s+)id:\s*["']?[a-f0-9-]+["']?/i, `$1codename: "${codename}"`)
+            synced = true
+          }
+          // Replace v1 service_uid: <uuid> with codename: "<codename>"
+          if (/service_uid:\s*["']?[a-f0-9-]+["']?/i.test(next)) {
+            next = next.replace(/service_uid:\s*["']?[a-f0-9-]+["']?/i, `codename: "${codename}"`)
+            synced = true
+          }
+          // Update existing codename if present
+          if (/codename:\s*["']?[^"'\n]+["']?/.test(next)) {
+            next = next.replace(/codename:\s*["']?[^"'\n]+["']?/, `codename: "${codename}"`)
+            synced = true
+          }
         } else {
-          addLog(`[Config] Auto-synced service_uid: ${uuid}`)
+          // No codename — fall back to UUID sync
+          if (/(\s+)id:\s*["']?[a-f0-9-]+["']?/i.test(next)) {
+            next = next.replace(/(\s+)id:\s*["']?[a-f0-9-]+["']?/i, `$1id: ${uuid}`)
+            synced = true
+          }
+          if (/service_uid:\s*["']?[a-f0-9-]+["']?/i.test(next)) {
+            next = next.replace(/service_uid:\s*["']?[a-f0-9-]+["']?/i, `service_uid: ${uuid}`)
+            synced = true
+          }
+        }
+
+        if (synced) {
+          addLog(`[Config] Auto-synced codename: ${codename || uuid}`)
+        } else {
+          addLog(`[Config] No id, service_uid, or codename field found in config.yaml — not synced`)
         }
         return next
       })
@@ -1183,7 +1234,8 @@ export default function Page({ data, config }: PluginProps) {
         language: languageMode,
         cppCode: languageMode === 'cpp' ? finalCode : undefined,
         pythonCode: languageMode === 'python' ? finalCode : undefined,
-        yamlConfig: finalYaml
+        yamlConfig: finalYaml,
+        serviceUuid: selectedServiceUuid || undefined
       })
 
       if (response.message && response.message.includes('\n')) {
@@ -1392,17 +1444,18 @@ export default function Page({ data, config }: PluginProps) {
           React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px' } },
             'Pick a service from the AosCloud Service dropdown. The chosen service\u2019s UUID is automatically written into ',
             React.createElement('code', null, 'config.yaml'), ' (toggle ',
-            React.createElement('strong', null, 'Auto-sync service_uid'), ' to disable). ',
+            React.createElement('strong', null, 'Auto-sync codename'), ' to disable). ',
             'The version pills below the dropdown show the latest versions deployed; with ',
             React.createElement('strong', null, 'Auto-increment version after build'), ' enabled, the editor bumps to the next patch number after each successful build.'
           ),
 
           React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '4. Edit your code'),
           React.createElement('p', { style: { color: '#6b7280', marginBottom: '4px' } },
-            'The middle column has a tabbed editor. Use the preset dropdown (top-right header) to load a starting point, then edit the two tabs:'
+            'The middle column has a tabbed editor. Use the preset dropdown (top-right header) to load a starting point, then edit the tabs:'
           ),
           React.createElement('ul', { style: { color: '#6b7280', marginBottom: '16px', paddingLeft: '20px' } },
             React.createElement('li', null, React.createElement('strong', null, 'main.cpp'), ' \u2014 your C++ application source code'),
+            React.createElement('li', null, React.createElement('strong', null, 'main.py'), ' \u2014 your Python application source code (Python mode only)'),
             React.createElement('li', null, React.createElement('strong', null, 'config.yaml'), ' \u2014 service metadata: architecture, version, resource quotas, entry point')
           ),
 
@@ -1421,11 +1474,13 @@ export default function Page({ data, config }: PluginProps) {
 
           React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, 'Available Presets'),
           React.createElement('ul', { style: { color: '#6b7280', paddingLeft: '20px', marginBottom: 0 } },
-            React.createElement('li', null, React.createElement('strong', null, 'Hello AOS'), ' \u2014 simple hello world service'),
-            React.createElement('li', null, React.createElement('strong', null, 'Signal Writer'), ' \u2014 writes vehicle signals to KUKSA Databroker'),
-            React.createElement('li', null, React.createElement('strong', null, 'EV Range Extender'), ' \u2014 battery management with power-save mode'),
-            React.createElement('li', null, React.createElement('strong', null, 'Battery Energy Saver'), ' \u2014 forces HVAC/seat off below SoC thresholds, blocks re-activation'),
-            React.createElement('li', null, React.createElement('strong', null, 'Signal Reporter'), ' \u2014 relays signals to the live dashboard')
+            React.createElement('li', null, React.createElement('strong', null, 'Hello AOS'), ' \u2014 simple C++ hello world service'),
+            React.createElement('li', null, React.createElement('strong', null, 'Hello Python'), ' \u2014 simple Python hello world service'),
+            React.createElement('li', null, React.createElement('strong', null, 'Signal Writer'), ' \u2014 writes vehicle signals to KUKSA Databroker (C++ and Python)'),
+            React.createElement('li', null, React.createElement('strong', null, 'KUKSA Reader'), ' \u2014 subscribes to vehicle signals (C++ and Python)'),
+            React.createElement('li', null, React.createElement('strong', null, 'EV Range Extender'), ' \u2014 battery management with power-save mode (C++ and Python)'),
+            React.createElement('li', null, React.createElement('strong', null, 'Battery Energy Saver'), ' \u2014 forces HVAC/seat off below SoC thresholds (C++ and Python)'),
+            React.createElement('li', null, React.createElement('strong', null, 'Signal Reporter'), ' \u2014 relays signals to the live dashboard (C++ and Python)')
           )
         )
       )
@@ -1463,7 +1518,8 @@ export default function Page({ data, config }: PluginProps) {
         },
           (() => {
             const u = serviceUnits.find((x: any) => x.uid === detailUnitUid)
-            const shortUid = (detailUnitUid || '').length > 12 ? (detailUnitUid || '').substring(0, 8) + '…' : (detailUnitUid || '')
+            const displayUid = u?.systemUid || detailUnitUid || ''
+            const shortUid = displayUid.length > 12 ? displayUid.substring(0, 8) + '…' : displayUid
             const chip = (bg: string, fg: string, text: string, title?: string) =>
               React.createElement('span', {
                 title,
@@ -1488,11 +1544,11 @@ export default function Page({ data, config }: PluginProps) {
                       padding: '2px 8px', borderRadius: '10px',
                       display: 'inline-flex', alignItems: 'center', gap: '4px'
                     },
-                    title: detailUnitUid || ''
+                    title: displayUid
                   },
                     shortUid,
                     React.createElement('button', {
-                      onClick: () => { if (detailUnitUid) { navigator.clipboard.writeText(detailUnitUid); addLog(`[Copied] Unit UID: ${detailUnitUid}`) } },
+                      onClick: () => { if (displayUid) { navigator.clipboard.writeText(displayUid); addLog(`[Copied] Unit UID: ${displayUid}`) } },
                       style: { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '11px', padding: 0 },
                       title: 'Copy full UID'
                     }, '📋')
@@ -1727,7 +1783,7 @@ export default function Page({ data, config }: PluginProps) {
           style: styles.select
         },
           React.createElement('option', { value: 'custom' }, 'Write your own code'),
-          React.createElement('optgroup', { label: 'C++ Presets' },
+          forcedLanguage !== 'python' ? React.createElement('optgroup', { label: 'C++ Presets' },
             React.createElement('option', { value: 'helloAos' }, 'Hello AOS — simple C++ starter'),
             React.createElement('option', { value: 'kuksaWriter' }, 'Signal Writer — write vehicle signals'),
             React.createElement('option', { value: 'kuksaReader' }, 'KUKSA Reader — read vehicle signals'),
@@ -1735,10 +1791,15 @@ export default function Page({ data, config }: PluginProps) {
             React.createElement('option', { value: 'batteryEnergySaver' }, 'Battery Energy Saver — HVAC/seat cutoff'),
             React.createElement('option', { value: 'batteryEnergySaverSdvRuntime' }, 'Battery Energy Saver — sdv-runtime / VSS 4.0'),
             React.createElement('option', { value: 'signalReporter' }, 'Signal Reporter — relay to dashboard')
-          ),
-          React.createElement('optgroup', { label: 'Python Presets' },
-            React.createElement('option', { value: 'helloPython' }, 'Hello Python — simple Python starter')
-          )
+          ) : null,
+          forcedLanguage !== 'cpp' ? React.createElement('optgroup', { label: 'Python Presets' },
+            React.createElement('option', { value: 'helloPython' }, 'Hello Python — simple Python starter'),
+            React.createElement('option', { value: 'kuksaWriterPython' }, 'Signal Writer — write vehicle signals'),
+            React.createElement('option', { value: 'kuksaReaderPython' }, 'KUKSA Reader — read vehicle signals'),
+            React.createElement('option', { value: 'evRangeExtenderPython' }, 'EV Range Extender — battery management'),
+            React.createElement('option', { value: 'batteryEnergySaverPython' }, 'Battery Energy Saver — HVAC/seat cutoff'),
+            React.createElement('option', { value: 'signalReporterPython' }, 'Signal Reporter — relay to dashboard')
+          ) : null
         ),
         React.createElement('span', {
           style: { fontSize: '12px', color: '#6b7280', fontWeight: 500 },
@@ -1972,25 +2033,57 @@ export default function Page({ data, config }: PluginProps) {
                 React.createElement('option', { key: s.uuid, value: s.uuid }, s.title || s.uuid)
               )
             ),
-            // Service UUID display (right under the dropdown so the link is obvious)
+            // Service UUID + codename display (right under the dropdown)
             serviceName && React.createElement('div', {
-              style: { display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px', minWidth: 0 }
+              style: { display: 'flex', flexDirection: 'column' as const, gap: '3px', marginTop: '6px', minWidth: 0 }
             },
-              React.createElement('span', {
-                title: selectedServiceUuid,
-                style: {
-                  fontSize: '11px', color: '#6c757d', fontFamily: 'monospace',
-                  flex: 1, minWidth: 0,
-                  whiteSpace: 'nowrap' as const,
-                  overflow: 'hidden' as const,
-                  textOverflow: 'ellipsis' as const
-                }
-              }, selectedServiceUuid),
-              React.createElement('button', {
-                onClick: () => { navigator.clipboard.writeText(selectedServiceUuid); addLog(`[Copied] Service UUID: ${selectedServiceUuid}`) },
-                style: { ...styles.iconButton, width: '20px', height: '20px', fontSize: '11px', flexShrink: 0 },
-                title: selectedServiceUuid
-              }, '📋')
+              // UUID row
+              React.createElement('div', {
+                style: { display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0 }
+              },
+                React.createElement('span', {
+                  title: selectedServiceUuid,
+                  style: {
+                    fontSize: '11px', color: '#6c757d', fontFamily: 'monospace',
+                    flex: 1, minWidth: 0,
+                    whiteSpace: 'nowrap' as const,
+                    overflow: 'hidden' as const,
+                    textOverflow: 'ellipsis' as const
+                  }
+                }, selectedServiceUuid),
+                React.createElement('button', {
+                  onClick: () => { navigator.clipboard.writeText(selectedServiceUuid); addLog(`[Copied] Service UUID: ${selectedServiceUuid}`) },
+                  style: { ...styles.iconButton, width: '20px', height: '20px', fontSize: '11px', flexShrink: 0 },
+                  title: selectedServiceUuid
+                }, '📋')
+              ),
+              // Codename row
+              selectedServiceCodename && React.createElement('div', {
+                style: { display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0 }
+              },
+                React.createElement('span', {
+                  style: {
+                    fontSize: '10px', color: '#9ca3af', fontFamily: 'monospace',
+                    backgroundColor: '#f3f4f6', padding: '1px 6px', borderRadius: '4px',
+                    flexShrink: 0
+                  }
+                }, 'codename:'),
+                React.createElement('span', {
+                  title: selectedServiceCodename,
+                  style: {
+                    fontSize: '11px', color: '#374151', fontFamily: 'monospace',
+                    flex: 1, minWidth: 0,
+                    whiteSpace: 'nowrap' as const,
+                    overflow: 'hidden' as const,
+                    textOverflow: 'ellipsis' as const
+                  }
+                }, selectedServiceCodename),
+                React.createElement('button', {
+                  onClick: () => { navigator.clipboard.writeText(selectedServiceCodename); addLog(`[Copied] Codename: ${selectedServiceCodename}`) },
+                  style: { ...styles.iconButton, width: '20px', height: '20px', fontSize: '11px', flexShrink: 0 },
+                  title: selectedServiceCodename
+                }, '📋')
+              )
             ),
             // Auto-sync service_uid checkbox (sits under the UUID — it's a
             // setting that controls what happens to that UUID when copied
@@ -2007,7 +2100,7 @@ export default function Page({ data, config }: PluginProps) {
                 onChange: (e: any) => setAutoSyncServiceUid(e.target.checked),
                 style: { cursor: 'pointer' }
               }),
-              'Auto-sync service_uid to config.yaml'
+              'Auto-sync codename to config.yaml'
             ),
             serviceVersions.length > 0 && React.createElement('div', {
               style: { display: 'flex', gap: '4px', marginTop: '6px', flexWrap: 'wrap' }
@@ -2031,7 +2124,7 @@ export default function Page({ data, config }: PluginProps) {
                 display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px',
                 fontSize: '11px', color: '#6b7280', cursor: 'pointer', userSelect: 'none'
               },
-              title: 'When enabled, after a successful build the C++ #define VERSION and YAML version: are bumped to the next patch (e.g. 1.0.5 → 1.0.6)'
+              title: 'When enabled, after a successful build the version in code (C++ #define VERSION / Python VERSION = "...") and YAML version: are bumped to the next patch (e.g. 1.0.5 → 1.0.6)'
             },
               React.createElement('input', {
                 type: 'checkbox',
@@ -2085,9 +2178,9 @@ export default function Page({ data, config }: PluginProps) {
                   }),
                   React.createElement('span', { style: { fontSize: '12px', fontWeight: 500 } }, u.name),
                   React.createElement('button', {
-                    onClick: (e: any) => { e.stopPropagation(); navigator.clipboard.writeText(u.uid); addLog(`[Copied] Unit UID: ${u.uid}`) },
+                    onClick: (e: any) => { e.stopPropagation(); navigator.clipboard.writeText(u.systemUid || u.uid); addLog(`[Copied] Unit UID: ${u.systemUid || u.uid}`) },
                     style: { ...styles.iconButton, width: '18px', height: '18px', fontSize: '10px', flexShrink: 0 },
-                    title: u.uid
+                    title: u.systemUid || u.uid
                   }, '📋')
                 ),
                 React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 } },
@@ -2118,9 +2211,9 @@ export default function Page({ data, config }: PluginProps) {
 
         // Editor with tabs
         React.createElement('div', { style: { ...styles.card, ...styles.editorCard, flex: 1, display: 'flex', flexDirection: 'column' as const } },
-          // Tab bar
+          // Tab bar — hide C++/Python tabs when language is forced
           React.createElement('div', { style: { display: 'flex', borderBottom: '1px solid #e5e7eb', background: '#f9fafb' } },
-            React.createElement('button', {
+            forcedLanguage !== 'python' ? React.createElement('button', {
               onClick: () => { setActiveEditorTab('cpp'); setLanguageMode('cpp'); },
               style: {
                 padding: '8px 16px', fontSize: '13px', fontWeight: 500, border: 'none', cursor: 'pointer',
@@ -2132,8 +2225,8 @@ export default function Page({ data, config }: PluginProps) {
             },
               React.createElement(Icon, { name: 'file-code', size: 14 }),
               'main.cpp'
-            ),
-            React.createElement('button', {
+            ) : null,
+            forcedLanguage !== 'cpp' ? React.createElement('button', {
               onClick: () => { setActiveEditorTab('python'); setLanguageMode('python'); },
               style: {
                 padding: '8px 16px', fontSize: '13px', fontWeight: 500, border: 'none', cursor: 'pointer',
@@ -2145,7 +2238,7 @@ export default function Page({ data, config }: PluginProps) {
             },
               React.createElement(Icon, { name: 'file-code', size: 14 }),
               'main.py'
-            ),
+            ) : null,
             React.createElement('button', {
               onClick: () => setActiveEditorTab('yaml'),
               style: {
