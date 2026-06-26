@@ -4650,7 +4650,6 @@ items:
     pythonCodeRef.current = pythonCode;
     yamlConfigRef.current = yamlConfig;
     const [dockerInstances, setDockerInstances] = React.useState([]);
-    const [filterOnline, setFilterOnline] = React.useState(true);
     const [selectedInstance, setSelectedInstance] = React.useState("");
     const [showDockerPanel, setShowDockerPanel] = React.useState(true);
     const [deploymentStatus, setDeploymentStatus] = React.useState(null);
@@ -4660,7 +4659,6 @@ items:
     const [isUploadingCert, setIsUploadingCert] = React.useState(false);
     const [isRemovingCert, setIsRemovingCert] = React.useState(false);
     const [certError, setCertError] = React.useState("");
-    const [showAdvanced, setShowAdvanced] = React.useState(false);
     const [aosServices, setAosServices] = React.useState([]);
     const [selectedServiceUuid, setSelectedServiceUuid] = React.useState("");
     const [selectedServiceCodename, setSelectedServiceCodename] = React.useState("");
@@ -4809,7 +4807,7 @@ items:
         flexDirection: "column",
         gap: "16px",
         minWidth: 0,
-        overflowY: "auto"
+        overflow: "hidden"
       },
       dockerColumn: {
         width: "280px",
@@ -4879,13 +4877,12 @@ items:
         resize: "none",
         backgroundColor: "#ffffff",
         color: "#1f2937",
-        outline: "none",
-        minHeight: "220px"
+        outline: "none"
       },
       editorContainer: {
         display: "flex",
         flex: 1,
-        overflow: "auto",
+        overflow: "hidden",
         backgroundColor: "#ffffff"
       },
       lineNumbers: {
@@ -5187,7 +5184,7 @@ items:
     };
     React.useEffect(() => {
       const serviceUrl = config?.aosServiceUrl || config?.runtimeUrl || "https://kit.digitalauto.tech";
-      const service = new AosService(serviceUrl, selectedInstance || "default-aos-target");
+      const service = new AosService(serviceUrl, selectedInstance || "AET-ORCHESTRATOR");
       aosServiceRef.current = service;
       const stageLabels = {
         init: "Init",
@@ -5308,87 +5305,18 @@ items:
       }
     };
     const fetchDockerInstances = async () => {
-      try {
-        const kitManagerUrl = config?.aosServiceUrl || config?.runtimeUrl || "https://kit.digitalauto.tech";
-        const listUrl = kitManagerUrl.replace(/\/$/, "") + "/listAllKits";
-        const response = await fetch(listUrl);
-        if (response.ok) {
-          const data2 = await response.json();
-          const kitsList = data2.kits || data2.content || [];
-          if (Array.isArray(kitsList)) {
-            const instances = kitsList.filter((kit) => {
-              const instanceId = kit.kit_id || kit.instance_id || "";
-              return instanceId.startsWith("AET-") || instanceId.startsWith("VEA-") || kit.name?.includes("AOS");
-            }).map((kit) => ({
-              instance_id: kit.kit_id || kit.instance_id,
-              name: kit.name || "Unknown",
-              online: kit.online !== false,
-              // Assume online unless explicitly false
-              last_seen: kit.last_seen,
-              type: kit.type,
-              suffix: kit.suffix || (kit.kit_id || kit.instance_id || "").split("-")[0]
-            }));
-            const verified = await Promise.all(instances.map(async (inst) => {
-              try {
-                const pingResult = await new Promise((resolve) => {
-                  if (!aosServiceRef.current?.isServiceConnected()) {
-                    resolve(false);
-                    return;
-                  }
-                  const timeout = setTimeout(() => resolve(false), 2e3);
-                  const pingId = "ping-" + inst.instance_id + "-" + Date.now();
-                  const s = aosServiceRef.current;
-                  if (s.socket) {
-                    s.socket.emit("messageToKit", {
-                      id: pingId,
-                      cmd: "aos_list_apps",
-                      to_kit_id: inst.instance_id,
-                      type: "aos_list_apps"
-                    });
-                    const handler = (msg) => {
-                      if (msg.id === pingId || msg.kit_id === inst.instance_id) {
-                        clearTimeout(timeout);
-                        s.socket.off("messageToKit-kitReply", handler);
-                        resolve(true);
-                      }
-                    };
-                    s.socket.on("messageToKit-kitReply", handler);
-                    setTimeout(() => {
-                      s.socket.off("messageToKit-kitReply", handler);
-                    }, 2500);
-                  } else {
-                    resolve(false);
-                  }
-                });
-                return { ...inst, online: pingResult };
-              } catch {
-                return { ...inst, online: false };
-              }
-            }));
-            setDockerInstances(verified);
-            if (!selectedInstance && verified.length > 0) {
-              const firstOnline = verified.find((i) => i.online);
-              if (firstOnline) {
-                setSelectedInstance(firstOnline.instance_id);
-              }
-            }
-          }
-        }
-      } catch (err) {
-        console.log("[AOS] Kit Manager API not available, using known instance");
-        const mockInstances = [
-          {
-            instance_id: "AET-TOOLCHAIN-001",
-            name: "AOS Edge Toolchain",
-            online: true,
-            last_seen: (/* @__PURE__ */ new Date()).toISOString(),
-            suffix: "AET"
-          }
-        ];
-        setDockerInstances(mockInstances);
-        if (!selectedInstance) {
-          setSelectedInstance("AET-TOOLCHAIN-001");
-        }
+      const orchestratorId = "AET-ORCHESTRATOR";
+      const orchestratorInst = {
+        instance_id: orchestratorId,
+        name: "AOS Edge Toolchain",
+        online: true,
+        last_seen: (/* @__PURE__ */ new Date()).toISOString(),
+        type: "aos-edge-toolchain",
+        suffix: "AET"
+      };
+      setDockerInstances([orchestratorInst]);
+      if (!selectedInstance) {
+        setSelectedInstance(orchestratorId);
       }
     };
     const handleDockerStatusUpdate = (message) => {
@@ -5413,44 +5341,6 @@ items:
           return updated;
         });
       }
-    };
-    const handleSelectDocker = (instance) => {
-      if (selectedInstance === instance.instance_id)
-        return;
-      setSelectedInstance(instance.instance_id);
-      addLog(`[Docker] Selected instance: ${instance.name} (${instance.instance_id})`);
-      if (aosServiceRef.current) {
-        aosServiceRef.current.setTargetId(instance.instance_id);
-      }
-      setAosServices([]);
-      setSelectedServiceUuid("");
-      setSelectedServiceCodename("");
-      setServiceUnits([]);
-      setServiceVersions([]);
-      setServiceName("");
-      setSelectedMonitorUnit("");
-      setSelectedUnitUid("");
-      setSelectedSubjectId("");
-      setUnitMonitoring(null);
-      setAlerts([]);
-      setDeployedApps([]);
-      setServiceLogs([]);
-      setDetailUnitUid(null);
-      setCertStatus(null);
-      setCertError("");
-      setDeploymentStatus(null);
-      setStatusError("");
-      aosCloudLoadedRef.current = false;
-      if (aosServiceRef.current && aosServiceRef.current.isServiceConnected()) {
-        checkCertificate();
-        fetchAosCloudServices();
-      }
-    };
-    const getFilteredInstances = () => {
-      if (filterOnline) {
-        return dockerInstances.filter((d) => d.online);
-      }
-      return dockerInstances;
     };
     const addLog = (message) => {
       const timestamp = (/* @__PURE__ */ new Date()).toLocaleTimeString();
@@ -5494,6 +5384,9 @@ items:
           message: result.message,
           identity: result.identity ?? null
         });
+        if (result.worker) {
+          setWorkerInfo(result.worker);
+        }
         setCertError("");
       } catch (err) {
         setCertError(err.message || "Failed to check certificate");
@@ -5689,6 +5582,7 @@ items:
       } catch (e) {
       }
     };
+    const [workerInfo, setWorkerInfo] = React.useState(null);
     const handleCertUpload = async (e) => {
       const file = e.target.files?.[0];
       if (!file || !aosServiceRef.current)
@@ -5711,6 +5605,10 @@ items:
           if (result.identity?.cn) {
             addLog(`[Cert] Identity: CN=${result.identity.cn}, expires ${result.identity.notAfter || "?"}`);
           }
+          if (result.worker) {
+            setWorkerInfo(result.worker);
+            addLog(`[Worker] Dedicated environment ready on port ${result.worker.port}`);
+          }
           addLog(`[AosCloud] Refreshing services...`);
           fetchAosCloudServices();
         } else {
@@ -5727,7 +5625,7 @@ items:
     const handleCertRemove = async () => {
       if (!aosServiceRef.current)
         return;
-      if (typeof window !== "undefined" && !window.confirm("Remove the uploaded certificate from this broadcaster? Builds will fail until a new certificate is uploaded.")) {
+      if (typeof window !== "undefined" && !window.confirm("Remove your certificate and shut down your build environment? Other users will not be affected.")) {
         return;
       }
       setIsRemovingCert(true);
@@ -5737,6 +5635,7 @@ items:
         if (result.status === "success") {
           addLog(`[Cert] ${result.message}`);
           setCertStatus({ loaded: false, source: "none", message: result.message, identity: null });
+          setWorkerInfo(null);
         } else {
           setCertError(result.message || "Remove failed");
         }
@@ -5915,8 +5814,6 @@ items:
           return "status-stopped";
       }
     };
-    const filteredInstances = getFilteredInstances();
-    const onlineCount = dockerInstances.filter((d) => d.online).length;
     if (!data?.prototype?.name) {
       return React.createElement(
         "div",
@@ -6519,267 +6416,283 @@ items:
       React.createElement(
         "div",
         { style: styles.content },
-        // Left Column - Docker Instances
+        // Left Column — Orchestrator + Flow
         showDockerPanel && React.createElement(
           "div",
           { style: styles.dockerColumn },
+          // ── Orchestrator Status Card ──────────────────────────────────────
           React.createElement(
             "div",
             { style: styles.card },
-            // Compact header: title + count + filter toggle + refresh, all on one row
             React.createElement(
               "div",
               { style: { ...styles.cardHeader, padding: "8px 12px" } },
               React.createElement(
                 "div",
                 { style: { ...styles.cardTitle, fontSize: "13px", gap: "6px" } },
-                React.createElement(Icon, { name: "box", size: 15, color: "#2563eb" }),
-                "Docker",
-                React.createElement("span", {
-                  style: { fontSize: "11px", fontWeight: 400, color: "#6b7280" },
-                  title: `${onlineCount} of ${dockerInstances.length} broadcasters reachable`
-                }, ` \xB7 ${onlineCount} online`)
-              ),
-              React.createElement(
-                "div",
-                { style: { display: "flex", alignItems: "center", gap: "8px" } },
-                React.createElement("button", {
-                  onClick: () => fetchDockerInstances(),
-                  style: { ...styles.iconButton, width: "22px", height: "22px", fontSize: "12px" },
-                  title: "Refresh"
-                }, "\u21BB")
-              )
-            ),
-            // Compact instance dropdown (saves vertical space vs. a list)
-            React.createElement(
-              "div",
-              { style: { padding: "8px 12px" } },
-              filteredInstances.length === 0 ? React.createElement(
-                "div",
-                { style: { ...styles.empty, padding: "6px 0", fontSize: "11px" } },
-                filterOnline ? "No online devices" : "No Docker instances found"
-              ) : React.createElement(
-                "div",
-                { style: { display: "flex", alignItems: "center", gap: "6px" } },
-                // Online status dot for the currently-selected instance
+                React.createElement(Icon, { name: "server", size: 15, color: "#2563eb" }),
+                "Orchestrator",
                 React.createElement("span", {
                   style: {
-                    width: "8px",
-                    height: "8px",
-                    borderRadius: "50%",
-                    flexShrink: 0,
-                    backgroundColor: (() => {
-                      const sel = filteredInstances.find((i) => i.instance_id === selectedInstance);
-                      if (!sel)
-                        return "#9ca3af";
-                      return sel.online ? "#16a34a" : "#dc2626";
-                    })()
-                  },
-                  title: (() => {
-                    const sel = filteredInstances.find((i) => i.instance_id === selectedInstance);
-                    if (!sel)
-                      return "No instance selected";
-                    return sel.online ? "Online" : "Offline";
-                  })()
-                }),
-                React.createElement(
-                  "select",
-                  {
-                    value: selectedInstance,
-                    onChange: (e) => {
-                      const inst = dockerInstances.find((i) => i.instance_id === e.target.value);
-                      if (inst)
-                        handleSelectDocker(inst);
-                    },
-                    style: { ...styles.select, flex: 1, minWidth: 0, fontSize: "12px", padding: "4px 6px" }
-                  },
-                  !selectedInstance && React.createElement("option", { value: "" }, "\u2014 Select instance \u2014"),
-                  ...filteredInstances.map(
-                    (instance) => React.createElement("option", {
-                      key: instance.instance_id,
-                      value: instance.instance_id
-                    }, `${instance.online ? "\u25CF" : "\u25CB"} ${instance.name} (${instance.instance_id})`)
-                  )
-                )
+                    fontSize: "11px",
+                    fontWeight: 400,
+                    color: connectionStatus === "connected" ? "#16a34a" : "#dc2626"
+                  }
+                }, connectionStatus === "connected" ? "\xB7 Online" : "\xB7 Offline")
+              )
+            ),
+            React.createElement(
+              "div",
+              { style: { padding: "6px 12px 10px", display: "flex", flexDirection: "column", gap: "4px" } },
+              React.createElement(
+                "div",
+                { style: { fontSize: "11px", color: "#6b7280", display: "flex", justifyContent: "space-between" } },
+                React.createElement("span", null, "Active workers"),
+                React.createElement("span", { style: { fontWeight: 600, color: "#374151" } }, String(dockerInstances.filter((d) => d.online).length))
+              ),
+              workerInfo && React.createElement(
+                "div",
+                { style: { fontSize: "11px", color: "#6b7280", display: "flex", justifyContent: "space-between" } },
+                React.createElement("span", null, "Your port"),
+                React.createElement("span", { style: { fontWeight: 600, color: "#374151", fontFamily: "monospace" } }, String(workerInfo.port))
               )
             )
           ),
-          // Certificate Panel (collapsible)
+          // ── Flow Steps Card ────────────────────────────────────────────────
           React.createElement(
             "div",
-            { style: { ...styles.card, padding: showAdvanced ? 0 : "8px 12px" } },
+            { style: styles.card },
             React.createElement(
               "div",
-              {
-                onClick: () => setShowAdvanced(!showAdvanced),
-                style: {
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: showAdvanced ? "8px 12px" : 0,
-                  cursor: "pointer",
-                  userSelect: "none",
-                  gap: "8px"
-                }
-              },
+              { style: { ...styles.cardHeader, padding: "8px 12px" } },
               React.createElement(
                 "div",
-                {
-                  style: {
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    fontSize: "13px",
-                    fontWeight: 500,
-                    color: "#374151",
-                    minWidth: 0,
-                    flex: 1
-                  }
-                },
-                React.createElement(Icon, { name: "shield-check", size: 15, color: "#0891b2" }),
-                React.createElement("span", { style: { flexShrink: 0 } }, "Certificate"),
-                React.createElement("span", {
-                  style: {
-                    width: "8px",
-                    height: "8px",
-                    borderRadius: "50%",
-                    flexShrink: 0,
-                    backgroundColor: certStatus === null ? "#d97706" : certStatus.loaded ? "#16a34a" : "#dc2626"
-                  }
-                }),
-                React.createElement(
-                  "span",
-                  {
-                    title: certStatus === null ? "Checking certificate\u2026" : certStatus.loaded ? "Certificate loaded" : "No certificate",
-                    style: {
-                      fontSize: "11px",
-                      fontWeight: 400,
-                      color: certStatus === null ? "#d97706" : certStatus.loaded ? "#16a34a" : "#dc2626",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis"
-                    }
-                  },
-                  certStatus === null ? "Checking\u2026" : certStatus.loaded ? "Loaded" : "Missing"
-                )
-              ),
-              React.createElement(
-                "span",
-                {
-                  title: showAdvanced ? "Collapse" : "Upload / replace .p12",
-                  style: {
-                    fontSize: "11px",
-                    color: "#6b7280",
-                    flexShrink: 0,
-                    whiteSpace: "nowrap",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "4px"
-                  }
-                },
-                React.createElement(Icon, { name: showAdvanced ? "chevron-up" : "chevron-down", size: 12 }),
-                showAdvanced ? "" : "Manage"
+                { style: { ...styles.cardTitle, fontSize: "13px", gap: "6px" } },
+                React.createElement(Icon, { name: "activity", size: 15, color: "#7c3aed" }),
+                "Setup"
               )
             ),
-            // Compact always-visible warning. One line, wraps on narrow widths.
-            // Hover reveals the full message via title attribute.
-            React.createElement(
-              "div",
-              {
-                title: "Each .p12 corresponds to one AosCloud account. Uploading switches this broadcaster\u2019s signing identity to that account, replacing whatever cert was loaded before.",
-                style: {
-                  fontSize: "11px",
-                  color: "#92400e",
-                  padding: showAdvanced ? "6px 12px 0 12px" : "6px 0 0 0",
-                  paddingLeft: showAdvanced ? "32px" : "20px",
-                  textIndent: "-16px",
-                  lineHeight: 1.45
-                }
-              },
-              React.createElement(Icon, { name: "triangle-alert", size: 12, color: "#d97706", style: { verticalAlign: "-1px", marginRight: "4px" } }),
-              "Upload your own .p12 to deploy under your AosCloud account. Replaces the cert currently loaded here."
-            ),
-            showAdvanced && React.createElement(
-              "div",
-              { style: { padding: "0 12px 12px", borderTop: "1px solid #f3f4f6", marginTop: "8px", paddingTop: "10px" } },
-              certStatus?.loaded && certStatus.identity?.cn && React.createElement(
+            // Step ① — Certificate
+            (() => {
+              const step1Done = certStatus?.loaded;
+              const step1Active = isUploadingCert;
+              const stepNum = step1Done ? "\u2713" : "\u2460";
+              const stepColor = step1Done ? "#16a34a" : step1Active ? "#d97706" : "#9ca3af";
+              const stepBg = step1Done ? "#dcfce7" : step1Active ? "#fef3c7" : "#f3f4f6";
+              return React.createElement(
                 "div",
                 {
-                  style: {
-                    fontSize: "11px",
-                    backgroundColor: "#f9fafb",
-                    border: "1px solid #e5e7eb",
-                    borderRadius: "4px",
-                    padding: "6px 10px",
-                    marginBottom: "10px",
-                    fontFamily: "ui-monospace, Menlo, Consolas, monospace",
-                    display: "flex",
-                    gap: "6px",
-                    alignItems: "baseline"
-                  }
+                  style: { padding: "6px 12px", display: "flex", alignItems: "flex-start", gap: "8px", borderBottom: "1px solid #f3f4f6" }
                 },
-                React.createElement("span", { style: { color: "#6b7280", flexShrink: 0 } }, "CN:"),
-                React.createElement("span", { style: { color: "#111827", overflowWrap: "anywhere", wordBreak: "break-word" } }, certStatus.identity.cn)
-              ),
-              certStatus?.loaded && certStatus.identity === null && React.createElement("div", {
-                style: { fontSize: "11px", color: "#6b7280", marginBottom: "10px", fontStyle: "italic" }
-              }, "Identity unavailable (cert may be password-protected)"),
-              certError && React.createElement("div", { style: { fontSize: "12px", color: "#dc2626", marginBottom: "8px" } }, certError),
-              React.createElement(
-                "div",
-                { style: { display: "flex", gap: "6px" } },
+                React.createElement("span", {
+                  style: {
+                    width: "20px",
+                    height: "20px",
+                    borderRadius: "50%",
+                    flexShrink: 0,
+                    backgroundColor: stepBg,
+                    color: stepColor,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    marginTop: "1px"
+                  }
+                }, stepNum),
                 React.createElement(
-                  "label",
-                  {
-                    style: {
-                      ...styles.button,
-                      ...styles.buttonSm,
-                      ...connectionStatus !== "connected" || isUploadingCert || isRemovingCert ? styles.buttonDisabled : {},
-                      flex: 1,
-                      textAlign: "center",
-                      cursor: connectionStatus === "connected" && !isUploadingCert && !isRemovingCert ? "pointer" : "not-allowed"
-                    }
-                  },
-                  React.createElement("input", {
-                    type: "file",
-                    accept: ".p12,.pfx",
-                    onChange: handleCertUpload,
-                    disabled: connectionStatus !== "connected" || isUploadingCert || isRemovingCert,
-                    style: { display: "none" }
-                  }),
-                  isUploadingCert ? "Uploading..." : React.createElement(
-                    "span",
-                    { style: { display: "inline-flex", alignItems: "center", gap: "6px", justifyContent: "center" } },
-                    React.createElement(Icon, { name: "upload", size: 14 }),
-                    certStatus?.loaded ? "Replace .p12" : "Upload .p12"
-                  )
-                ),
-                certStatus?.loaded && React.createElement(
-                  "button",
-                  {
-                    onClick: handleCertRemove,
-                    disabled: connectionStatus !== "connected" || isUploadingCert || isRemovingCert,
-                    style: {
-                      ...styles.button,
-                      ...styles.buttonSm,
-                      ...connectionStatus !== "connected" || isUploadingCert || isRemovingCert ? styles.buttonDisabled : {},
-                      backgroundColor: "transparent",
-                      color: "#dc2626",
-                      border: "1px solid #fca5a5",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      justifyContent: "center"
-                    },
-                    title: "Delete the uploaded certificate from the broadcaster"
-                  },
-                  isRemovingCert ? "Removing..." : React.createElement(
-                    React.Fragment,
-                    null,
-                    React.createElement(Icon, { name: "x", size: 14 }),
-                    "Remove"
+                  "div",
+                  { style: { flex: 1, minWidth: 0 } },
+                  React.createElement("div", { style: { fontSize: "12px", fontWeight: 600, color: "#374151" } }, "Certificate"),
+                  step1Done ? React.createElement(
+                    "div",
+                    { style: { fontSize: "11px", color: "#16a34a", marginTop: "2px" } },
+                    certStatus?.identity?.cn ? `Loaded \u2014 ${certStatus.identity.cn}` : "Loaded"
+                  ) : step1Active ? React.createElement("div", { style: { fontSize: "11px", color: "#d97706", marginTop: "2px" } }, "Uploading...") : React.createElement(
+                    "div",
+                    { style: { marginTop: "4px" } },
+                    React.createElement(
+                      "label",
+                      {
+                        style: {
+                          fontSize: "11px",
+                          color: "#2563eb",
+                          cursor: "pointer",
+                          padding: "3px 10px",
+                          borderRadius: "4px",
+                          border: "1px solid #bfdbfe",
+                          backgroundColor: "#eff6ff",
+                          display: "inline-block"
+                        }
+                      },
+                      React.createElement("input", {
+                        type: "file",
+                        accept: ".p12,.pfx",
+                        onChange: handleCertUpload,
+                        disabled: connectionStatus !== "connected" || isUploadingCert,
+                        style: { display: "none" }
+                      }),
+                      "Upload .p12"
+                    )
                   )
                 )
+              );
+            })(),
+            // Step ② — Environment (worker)
+            (() => {
+              const step2Done = workerInfo !== null;
+              const step2Active = certStatus?.loaded && !workerInfo;
+              const step2Waiting = !certStatus?.loaded;
+              const stepNum = step2Done ? "\u2713" : "\u2461";
+              const stepColor = step2Done ? "#16a34a" : step2Active ? "#d97706" : "#d1d5db";
+              const stepBg = step2Done ? "#dcfce7" : step2Active ? "#fef3c7" : "#f9fafb";
+              return React.createElement(
+                "div",
+                {
+                  style: { padding: "6px 12px", display: "flex", alignItems: "flex-start", gap: "8px", borderBottom: "1px solid #f3f4f6" }
+                },
+                React.createElement("span", {
+                  style: {
+                    width: "20px",
+                    height: "20px",
+                    borderRadius: "50%",
+                    flexShrink: 0,
+                    backgroundColor: stepBg,
+                    color: stepColor,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    marginTop: "1px"
+                  }
+                }, stepNum),
+                React.createElement(
+                  "div",
+                  { style: { flex: 1, minWidth: 0 } },
+                  React.createElement("div", { style: { fontSize: "12px", fontWeight: 600, color: "#374151" } }, "Environment"),
+                  step2Done ? React.createElement(
+                    "div",
+                    { style: { fontSize: "11px", color: "#16a34a", marginTop: "2px" } },
+                    `Ready \u2014 port ${workerInfo.port}`
+                  ) : step2Active ? React.createElement("div", { style: { fontSize: "11px", color: "#d97706", marginTop: "2px" } }, "Creating...") : React.createElement(
+                    "div",
+                    { style: { fontSize: "11px", color: "#9ca3af", marginTop: "2px" } },
+                    step2Waiting ? "Upload certificate first" : "Waiting..."
+                  )
+                )
+              );
+            })(),
+            // Step ③ — Build & Deploy
+            (() => {
+              const step3Ready = workerInfo !== null && connectionStatus === "connected";
+              const stepNum = step3Ready ? "\u2713" : "\u2462";
+              const stepColor = step3Ready ? "#16a34a" : "#d1d5db";
+              const stepBg = step3Ready ? "#dcfce7" : "#f9fafb";
+              return React.createElement(
+                "div",
+                {
+                  style: { padding: "6px 12px", display: "flex", alignItems: "flex-start", gap: "8px" }
+                },
+                React.createElement("span", {
+                  style: {
+                    width: "20px",
+                    height: "20px",
+                    borderRadius: "50%",
+                    flexShrink: 0,
+                    backgroundColor: stepBg,
+                    color: stepColor,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    marginTop: "1px"
+                  }
+                }, stepNum),
+                React.createElement(
+                  "div",
+                  { style: { flex: 1, minWidth: 0 } },
+                  React.createElement("div", { style: { fontSize: "12px", fontWeight: 600, color: "#374151" } }, "Build & Deploy"),
+                  React.createElement(
+                    "div",
+                    { style: { fontSize: "11px", color: step3Ready ? "#16a34a" : "#9ca3af", marginTop: "2px" } },
+                    step3Ready ? "Ready to build" : "Complete steps above"
+                  )
+                )
+              );
+            })()
+          ),
+          // ── Certificate Management (compact, below flow) ──────────────────
+          (certStatus?.loaded || certError) && React.createElement(
+            "div",
+            { style: { ...styles.card, padding: "8px 12px" } },
+            certStatus?.loaded && certStatus.identity?.cn && React.createElement(
+              "div",
+              {
+                style: {
+                  fontSize: "11px",
+                  backgroundColor: "#f9fafb",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: "4px",
+                  padding: "6px 10px",
+                  marginBottom: "8px",
+                  fontFamily: "ui-monospace, Menlo, Consolas, monospace",
+                  display: "flex",
+                  gap: "6px",
+                  alignItems: "baseline"
+                }
+              },
+              React.createElement("span", { style: { color: "#6b7280", flexShrink: 0 } }, "CN:"),
+              React.createElement("span", { style: { color: "#111827", overflowWrap: "anywhere", wordBreak: "break-word" } }, certStatus.identity.cn)
+            ),
+            certError && React.createElement("div", { style: { fontSize: "12px", color: "#dc2626", marginBottom: "8px" } }, certError),
+            React.createElement(
+              "div",
+              { style: { display: "flex", gap: "6px" } },
+              React.createElement(
+                "label",
+                {
+                  style: {
+                    ...styles.button,
+                    ...styles.buttonSm,
+                    ...connectionStatus !== "connected" || isUploadingCert || isRemovingCert ? styles.buttonDisabled : {},
+                    flex: 1,
+                    textAlign: "center",
+                    fontSize: "11px",
+                    cursor: connectionStatus === "connected" && !isUploadingCert && !isRemovingCert ? "pointer" : "not-allowed"
+                  }
+                },
+                React.createElement("input", {
+                  type: "file",
+                  accept: ".p12,.pfx",
+                  onChange: handleCertUpload,
+                  disabled: connectionStatus !== "connected" || isUploadingCert || isRemovingCert,
+                  style: { display: "none" }
+                }),
+                isUploadingCert ? "Uploading..." : "Replace .p12"
+              ),
+              certStatus?.loaded && React.createElement(
+                "button",
+                {
+                  onClick: handleCertRemove,
+                  disabled: connectionStatus !== "connected" || isUploadingCert || isRemovingCert,
+                  style: {
+                    ...styles.button,
+                    ...styles.buttonSm,
+                    fontSize: "11px",
+                    ...connectionStatus !== "connected" || isUploadingCert || isRemovingCert ? styles.buttonDisabled : {},
+                    backgroundColor: "transparent",
+                    color: "#dc2626",
+                    border: "1px solid #fca5a5",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    justifyContent: "center"
+                  },
+                  title: "Remove certificate and shut down your build environment"
+                },
+                isRemovingCert ? "Removing..." : "Remove"
               )
             )
           ),
@@ -7150,7 +7063,7 @@ items:
                 onClick: handleBuildDeploy,
                 disabled: isBuilding || connectionStatus !== "connected" || !selectedInstance,
                 style: { ...styles.button, ...styles.buttonPrimary, ...isBuilding || connectionStatus !== "connected" || !selectedInstance ? styles.buttonDisabled : {} },
-                title: !selectedInstance ? "Select a Docker instance first" : ""
+                title: !selectedInstance ? "Connecting to build service..." : ""
               },
               isBuilding ? React.createElement(
                 React.Fragment,
@@ -7182,7 +7095,7 @@ items:
                 }
               },
               React.createElement(Icon, { name: "triangle-alert", size: 14, color: "#d97706" }),
-              React.createElement("span", null, "Select a Docker instance from the list to build & deploy")
+              React.createElement("span", null, "Waiting for build service connection...")
             )
           )
         ),

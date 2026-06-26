@@ -41,10 +41,15 @@ function resolveOemCertPath() {
   } catch (e) { /* not found */ }
   return oemCertPath; // let curl report the error
 }
+const workerMode = process.env.WORKER_MODE === 'true';
+const orchestratorUrl = process.env.ORCHESTRATOR_URL || 'http://localhost:9090';
 const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || '';
 
-console.log('[Broadcaster] Starting:', instanceId);
+console.log('[Broadcaster] Starting:', instanceId, workerMode ? '(worker mode)' : '');
 console.log('[Broadcaster] Kit Manager:', kitManagerUrl);
+if (workerMode) {
+  console.log('[Broadcaster] Orchestrator URL:', orchestratorUrl);
+}
 if (proxyUrl) {
   console.log('[Broadcaster] Proxy:', proxyUrl);
 }
@@ -106,6 +111,25 @@ const signalServer = http.createServer((req, res) => {
   } else if (req.method === 'GET' && req.url === '/builds') {
     res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
     res.end(JSON.stringify(getBuildStatus()));
+  } else if (req.method === 'GET' && req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
+    res.end(JSON.stringify({ ok: true, instanceId, uptime: process.uptime(), mode: workerMode ? 'worker' : 'standalone' }));
+  } else if (req.method === 'POST' && req.url === '/api/command') {
+    // Worker mode: receive commands from coordinator via HTTP
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        console.log('[Worker] Received command:', data.cmd || data.type, 'from coordinator');
+        const response = await routeCommand(data);
+        res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
+        res.end(JSON.stringify(response));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders });
+        res.end(JSON.stringify({ status: 'error', message: e.message }));
+      }
+    });
   } else {
     res.writeHead(404, corsHeaders);
     res.end();
@@ -144,8 +168,199 @@ async function initCertFromEnv() {
   }
 }
 
+// Route a command (from HTTP or Socket.IO) to the appropriate handler.
+// Returns the response object that should be sent back to the caller.
+async function routeCommand(data) {
+  console.log('[Broadcaster] Routing command:', data.cmd || data.type);
+
+  try {
+    let response;
+
+    switch (data.cmd || data.type) {
+      case 'aos_build_deploy':
+        response = await handleBuildDeploy(data);
+        break;
+      case 'aos_list_apps':
+        response = await handleListApps(data);
+        break;
+      case 'aos_start_app':
+        response = await handleStartApp(data);
+        break;
+      case 'aos_stop_app':
+        response = await handleStopApp(data);
+        break;
+      case 'aos_get_deployment_status':
+        response = await handleGetDeploymentStatus(data);
+        break;
+      case 'aos_upload_cert':
+        response = await handleUploadCert(data);
+        break;
+      case 'aos_check_cert':
+        response = await handleCheckCert(data);
+        break;
+      case 'aos_remove_cert':
+        response = await handleRemoveCert(data);
+        break;
+      case 'aos_list_services':
+        response = await handleListAosCloud(data, 'services');
+        break;
+      case 'aos_list_units':
+        response = await handleListAosCloud(data, 'units');
+        break;
+      case 'aos_list_subjects':
+        response = await handleListAosCloud(data, 'subjects');
+        break;
+      case 'aos_get_service_units':
+        response = await handleGetServiceUnits(data);
+        break;
+      case 'aos_get_service_versions':
+        response = await handleGetServiceVersions(data);
+        break;
+      case 'aos_get_unit_monitoring':
+        response = await handleGetUnitMonitoring(data);
+        break;
+      case 'aos_get_alerts':
+        response = await handleGetAlerts(data);
+        break;
+      case 'aos_request_service_log':
+        response = await handleRequestServiceLog(data);
+        break;
+      case 'aos_get_service_log_status':
+        response = await handleGetServiceLogStatus(data);
+        break;
+      case 'aos_get_service_stdout': {
+        const sshPort = data.sshPort || 8942;
+        const lines = data.lines || 50;
+        const filter = data.filter || 'crun|aos-service|RangeExt|Reporter|Writer';
+        try {
+          await execAsync('which sshpass', { timeout: 3000 });
+          const sshCmd = `sshpass -p Password1 ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p ${sshPort} root@localhost "journalctl --no-pager -n ${lines} 2>&1 | grep -iE '${filter}'"`;
+          const { stdout } = await execAsync(sshCmd, { timeout: 15000 });
+          response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: stdout };
+        } catch (err) {
+          try {
+            const serviceUuid = data.serviceUuid;
+            const unitUid = data.unitUid;
+            const subjectId = data.subjectId;
+            if (!serviceUuid || !unitUid || !subjectId) {
+              response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: 'Select a service and unit to fetch logs from AosCloud.' };
+              break;
+            }
+            const existing = await curlAosCloud(`service-logs/?limit=10`);
+            const items = existing.items || [];
+            const ready = items.find(l => (l.state === 'ok' || l.state === 'done') && l.service === serviceUuid);
+            if (ready) {
+              try {
+                const tmpFile = `/tmp/service-log-${ready.id}.tar.gz`;
+                await execAsync(
+                  `curl -k --http1.1 -o ${tmpFile} ${aoscloudUrl}/api/v11/service-logs/${ready.id}/download-log-file/ ` +
+                  `--cert ${certPath} --cert-type P12`,
+                  { env: { ...process.env }, timeout: 30000 }
+                );
+                const { stdout: logContent } = await execAsync(
+                  `tar xzf ${tmpFile} -O 2>/dev/null || cat ${tmpFile}`,
+                  { timeout: 10000 }
+                );
+                await execAsync(`rm -f ${tmpFile}`).catch(() => {});
+                response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: logContent || 'Log file is empty.' };
+              } catch (dlErr) {
+                response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: `Log available (ID: ${ready.id}) but download/extract failed: ${dlErr.message?.slice(-100)}` };
+              }
+            } else {
+              const now = new Date();
+              const from = new Date(now.getTime() - 30 * 60000);
+              const payload = JSON.stringify({
+                unit: unitUid,
+                service: serviceUuid,
+                subject: subjectId,
+                request_type: 'log',
+                date_from: from.toISOString(),
+                date_till: now.toISOString()
+              });
+              try {
+                await execAsync(
+                  `curl -k --http1.1 -X POST ${aoscloudUrl}/api/v11/service-logs/ ` +
+                  `--cert ${certPath} --cert-type P12 ` +
+                  `-H "accept: application/json" -H "Content-Type: application/json" ` +
+                  `-d '${payload}'`,
+                  { env: { ...process.env }, timeout: 15000 }
+                );
+                response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: 'Log request sent to AosCloud.\n\nThe unit will collect and upload logs. This may take 1-2 minutes.\nClick Refresh again to check if logs are ready.' };
+              } catch (reqErr) {
+                response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: `Failed to request logs: ${reqErr.message?.slice(-100)}` };
+              }
+            }
+          } catch {
+            response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: 'Could not reach AosCloud. Check certificate and connectivity.' };
+          }
+        }
+        break;
+      }
+      case 'aos_get_build_status':
+        response = {
+          kit_id: instanceId,
+          type: 'aos_get_build_status',
+          status: 'success',
+          build: data.buildId ? getBuildStatus(data.buildId) : null,
+          builds: !data.buildId ? getBuildStatus() : undefined
+        };
+        break;
+      case 'aos_signal_stream':
+        response = {
+          kit_id: instanceId,
+          type: 'aos_signal_stream',
+          status: 'success',
+          signals: signalHistory.slice(-(data.limit || 100))
+        };
+        break;
+      default:
+        response = {
+          id: data.id,
+          kit_id: instanceId,
+          type: data.type || data.cmd,
+          status: 'error',
+          message: 'Unknown command: ' + (data.cmd || data.type)
+        };
+    }
+
+    response.id = data.id;
+    response.request_from = data.request_from;
+    return response;
+
+  } catch (error) {
+    console.error('[Broadcaster] Error handling command:', error.message);
+    return {
+      id: data.id,
+      kit_id: instanceId,
+      type: data.type || data.cmd,
+      status: 'error',
+      message: error.message
+    };
+  }
+}
+
 async function main() {
   await initCertFromEnv();
+
+  // ── Worker mode: skip Kit Manager, serve commands via HTTP ──
+  if (workerMode) {
+    console.log('[Broadcaster] Worker mode active — listening for commands via HTTP');
+    console.log('[Broadcaster] Signal relay on port', signalRelayPort);
+
+    // Health report to coordinator every 30s
+    setInterval(async () => {
+      try {
+        await execAsync(`curl -s -X POST ${orchestratorUrl}/api/worker-heartbeat -H 'Content-Type: application/json' -d '${JSON.stringify({ instanceId, port: signalRelayPort, status: 'running' })}'`, { timeout: 5000 });
+      } catch (e) { /* orchestrator may be restarting */ }
+    }, 30000);
+
+    // Keep the process alive (signalServer is already listening)
+    process.on('SIGINT', () => { process.exit(0); });
+    process.on('SIGTERM', () => { process.exit(0); });
+    return;
+  }
+
+  // ── Standalone mode: connect to Kit Manager ──
   const socketOpts = {
     transports: ['websocket', 'polling'],
     reconnection: true,
@@ -226,179 +441,12 @@ async function main() {
   socket.on('messageToKit', async (data) => {
     console.log('[Broadcaster] Received message:', data.cmd, data.type);
 
-    try {
-      let response;
+    const response = await routeCommand(data);
 
-      switch (data.cmd || data.type) {
-        case 'aos_build_deploy':
-          response = await handleBuildDeploy(data);
-          break;
-        case 'aos_list_apps':
-          response = await handleListApps(data);
-          break;
-        case 'aos_start_app':
-          response = await handleStartApp(data);
-          break;
-        case 'aos_stop_app':
-          response = await handleStopApp(data);
-          break;
-        case 'aos_get_deployment_status':
-          response = await handleGetDeploymentStatus(data);
-          break;
-        case 'aos_upload_cert':
-          response = await handleUploadCert(data);
-          break;
-        case 'aos_check_cert':
-          response = await handleCheckCert(data);
-          break;
-        case 'aos_remove_cert':
-          response = await handleRemoveCert(data);
-          break;
-        case 'aos_list_services':
-          response = await handleListAosCloud(data, 'services');
-          break;
-        case 'aos_list_units':
-          response = await handleListAosCloud(data, 'units');
-          break;
-        case 'aos_list_subjects':
-          response = await handleListAosCloud(data, 'subjects');
-          break;
-        case 'aos_get_service_units':
-          response = await handleGetServiceUnits(data);
-          break;
-        case 'aos_get_service_versions':
-          response = await handleGetServiceVersions(data);
-          break;
-        case 'aos_get_unit_monitoring':
-          response = await handleGetUnitMonitoring(data);
-          break;
-        case 'aos_get_alerts':
-          response = await handleGetAlerts(data);
-          break;
-        case 'aos_request_service_log':
-          response = await handleRequestServiceLog(data);
-          break;
-        case 'aos_get_service_log_status':
-          response = await handleGetServiceLogStatus(data);
-          break;
-        case 'aos_get_service_stdout': {
-          const sshPort = data.sshPort || 8942;
-          const lines = data.lines || 50;
-          const filter = data.filter || 'crun|aos-service|RangeExt|Reporter|Writer';
-          try {
-            // Check if sshpass is available (only works when broadcaster runs alongside VMs)
-            await execAsync('which sshpass', { timeout: 3000 });
-            const sshCmd = `sshpass -p Password1 ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p ${sshPort} root@localhost "journalctl --no-pager -n ${lines} 2>&1 | grep -iE '${filter}'"`;
-            const { stdout } = await execAsync(sshCmd, { timeout: 15000 });
-            response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: stdout };
-          } catch (err) {
-            // Fallback: request logs via AosCloud REST API
-            try {
-              const serviceUuid = data.serviceUuid;
-              const unitUid = data.unitUid;
-              const subjectId = data.subjectId;
-              if (!serviceUuid || !unitUid || !subjectId) {
-                response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: 'Select a service and unit to fetch logs from AosCloud.' };
-                break;
-              }
-
-              // Check for existing completed log requests first
-              const existing = await curlAosCloud(`service-logs/?limit=10`);
-              const items = existing.items || [];
-              const ready = items.find(l => (l.state === 'ok' || l.state === 'done') && l.service === serviceUuid);
-
-              if (ready) {
-                // Download and extract the tar.gz log file
-                try {
-                  const tmpFile = `/tmp/service-log-${ready.id}.tar.gz`;
-                  await execAsync(
-                    `curl -k --http1.1 -o ${tmpFile} ${aoscloudUrl}/api/v11/service-logs/${ready.id}/download-log-file/ ` +
-                    `--cert ${certPath} --cert-type P12`,
-                    { env: { ...process.env }, timeout: 30000 }
-                  );
-                  // Extract and read the log content
-                  const { stdout: logContent } = await execAsync(
-                    `tar xzf ${tmpFile} -O 2>/dev/null || cat ${tmpFile}`,
-                    { timeout: 10000 }
-                  );
-                  await execAsync(`rm -f ${tmpFile}`).catch(() => {});
-                  response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: logContent || 'Log file is empty.' };
-                } catch (dlErr) {
-                  response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: `Log available (ID: ${ready.id}) but download/extract failed: ${dlErr.message?.slice(-100)}` };
-                }
-              } else {
-                // Create a new log request
-                const now = new Date();
-                const from = new Date(now.getTime() - 30 * 60000);
-                const payload = JSON.stringify({
-                  unit: unitUid,
-                  service: serviceUuid,
-                  subject: subjectId,
-                  request_type: 'log',
-                  date_from: from.toISOString(),
-                  date_till: now.toISOString()
-                });
-                try {
-                  await execAsync(
-                    `curl -k --http1.1 -X POST ${aoscloudUrl}/api/v11/service-logs/ ` +
-                    `--cert ${certPath} --cert-type P12 ` +
-                    `-H "accept: application/json" -H "Content-Type: application/json" ` +
-                    `-d '${payload}'`,
-                    { env: { ...process.env }, timeout: 15000 }
-                  );
-                  response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: 'Log request sent to AosCloud.\n\nThe unit will collect and upload logs. This may take 1-2 minutes.\nClick Refresh again to check if logs are ready.' };
-                } catch (reqErr) {
-                  response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: `Failed to request logs: ${reqErr.message?.slice(-100)}` };
-                }
-              }
-            } catch {
-              response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: 'Could not reach AosCloud. Check certificate and connectivity.' };
-            }
-          }
-          break;
-        }
-        case 'aos_get_build_status':
-          response = {
-            kit_id: instanceId,
-            type: 'aos_get_build_status',
-            status: 'success',
-            build: data.buildId ? getBuildStatus(data.buildId) : null,
-            builds: !data.buildId ? getBuildStatus() : undefined
-          };
-          break;
-        case 'aos_signal_stream':
-          response = {
-            kit_id: instanceId,
-            type: 'aos_signal_stream',
-            status: 'success',
-            signals: signalHistory.slice(-(data.limit || 100))
-          };
-          break;
-        default:
-          response = {
-            id: data.id,
-            kit_id: instanceId,
-            type: data.type || data.cmd,
-            status: 'error',
-            message: 'Unknown command: ' + (data.cmd || data.type)
-          };
-      }
-
-      response.id = data.id;
-      response.request_from = data.request_from;
-      socket.emit('messageToKit-kitReply', response);
-      console.log('[Broadcaster] Response sent:', response.status);
-
-    } catch (error) {
-      console.error('[Broadcaster] Error handling message:', error.message);
-      socket.emit('messageToKit-kitReply', {
-        id: data.id,
-        kit_id: instanceId,
-        type: data.type || data.cmd,
-        status: 'error',
-        message: error.message
-      });
-    }
+    response.id = data.id;
+    response.request_from = data.request_from;
+    socket.emit('messageToKit-kitReply', response);
+    console.log('[Broadcaster] Response sent:', response.status);
   });
 }
 

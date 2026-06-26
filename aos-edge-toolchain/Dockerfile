@@ -28,15 +28,17 @@ RUN apt-get update && apt-get install -y \
     openssl \
     libnss3-tools \
     ca-certificates \
+    docker.io \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Socket.IO tooling
+# Install Socket.IO tooling + dockerode for coordinator
 RUN npm install --global --prefix=/usr/local \
     socket.io-client \
     socket.io \
     https-proxy-agent \
     js-yaml \
+    dockerode \
     && npm cache clean --force
 
 # Install AOS CLI tools
