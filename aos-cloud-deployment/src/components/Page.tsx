@@ -1677,11 +1677,10 @@ export default function Page({ data, config }: PluginProps) {
           React.createElement('option', { value: 'custom' }, 'Write your own code'),
           React.createElement('optgroup', { label: 'Python Presets' },
             React.createElement('option', { value: 'helloPython' }, 'Hello Python — simple Python starter'),
-            React.createElement('option', { value: 'kuksaWriterPython' }, 'Signal Writer — write vehicle signals'),
-            React.createElement('option', { value: 'kuksaReaderPython' }, 'KUKSA Reader — read vehicle signals'),
-            React.createElement('option', { value: 'evRangeExtenderPython' }, 'EV Range Extender — battery management'),
-            React.createElement('option', { value: 'batteryEnergySaverPython' }, 'Battery Energy Saver — HVAC/seat cutoff'),
-            React.createElement('option', { value: 'signalReporterPython' }, 'Signal Reporter — relay to dashboard')
+            React.createElement('option', { value: 'seatEcu' }, 'Seat ECU — seat heating/cooling control'),
+            React.createElement('option', { value: 'hvacEcu' }, 'HVAC ECU — fan speed / climate control'),
+            React.createElement('option', { value: 'bms' }, 'BMS — battery monitoring system'),
+            React.createElement('option', { value: 'rangeAi' }, 'Range AI — driving range computation')
           )
         ),
         React.createElement('span', {
