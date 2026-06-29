@@ -93,13 +93,10 @@ export interface AosAppConfig {
 
 // Build request
 export interface BuildRequest {
-  name: string
-  displayName?: string
   language?: 'cpp' | 'python'
   cppCode?: string
   pythonCode?: string
   yamlConfig: string
-  serviceUuid?: string
 }
 
 // Build response

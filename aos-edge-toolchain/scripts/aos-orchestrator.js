@@ -290,11 +290,33 @@ async function stopWorker(userCN) {
   console.log(`[Orchestrator] Worker stopped: ${info.containerName} (port ${info.port} released)`);
 }
 
+async function updateWorkerCert(containerName, userCN, p12Base64) {
+  const hash = shortHash(userCN);
+  const tmpCertPath = `/tmp/orchestrator-cert-${hash}.p12`;
+  const certBytes = Buffer.from(p12Base64, 'base64');
+  await fs.writeFile(tmpCertPath, certBytes);
+
+  try {
+    // Copy new cert into existing container, overwriting the old one
+    await execAsync(`docker cp ${tmpCertPath} ${containerName}:/root/.aos/security/aos-user-sp.p12`, { timeout: 10000 });
+    await execAsync(`docker exec ${containerName} chmod 600 /root/.aos/security/aos-user-sp.p12`, { timeout: 5000 });
+    // Regenerate PEM from the new cert
+    await execAsync(
+      `docker exec ${containerName} sh -c 'openssl pkcs12 -in /root/.aos/security/aos-user-sp.p12 -out /root/.aos/security/aos-user-sp.pem -nodes -passin pass: 2>/dev/null || true'`,
+      { timeout: 10000 }
+    ).catch(() => {});
+    console.log(`[Orchestrator] Cert updated in existing worker ${containerName} for CN="${userCN}"`);
+  } finally {
+    await fs.unlink(tmpCertPath).catch(() => {});
+  }
+}
+
 async function getOrCreateWorker(userCN, p12Base64) {
-  // Return existing worker if running
+  // Return existing worker if running, but always update the cert
   const existing = userMap.get(userCN);
   if (existing && existing.status === 'running') {
     existing.lastActivity = Date.now();
+    await updateWorkerCert(existing.containerName, userCN, p12Base64);
     return existing;
   }
 

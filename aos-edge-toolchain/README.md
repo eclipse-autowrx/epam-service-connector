@@ -5,7 +5,7 @@ Docker toolkit for AosEdge Python service development: build, sign, upload, and 
 ## Quick Start
 
 ```bash
-# 1. Build the image
+# 1. Build the image (skip if already built)
 docker build -t aos-edge-toolchain:latest .
 
 # 2. Start the orchestrator (multi-tenant mode)
@@ -20,11 +20,17 @@ docker run -d --network host --restart unless-stopped \
   -e IDLE_TIMEOUT_MINUTES=30 \
   -e AOSCLOUD_URL=https://aoscloud.io:10000 \
   -e NODE_TLS_REJECT_UNAUTHORIZED=0 \
+  -e BROADCASTER_SCRIPT_HOST=/usr/local/bin/aos-broadcaster.js \
   --entrypoint sh \
   aos-edge-toolchain:latest \
   -c 'unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && exec node /usr/local/bin/aos-orchestrator.js'
 
-# 3. Open the standalone UI, upload your .p12, and deploy
+# 3. Start the standalone dev UI (local development)
+cd ../aos-cloud-deployment
+npm run standalone:dev
+# Open http://localhost:3011/standalone-python.html
+
+# 4. Upload your .p12 certificate via the UI, select a preset, and deploy
 ```
 
 ---
@@ -86,6 +92,48 @@ digital.auto (Kit Manager)
 
 ---
 
+## Development Workflow
+
+### Standalone UI (local dev)
+
+```bash
+cd aos-cloud-deployment
+npm install
+npm run standalone:dev
+# → http://localhost:3011/standalone-python.html
+```
+
+The UI has a preset dropdown with ready-to-deploy services. Select a preset, upload your `.p12` certificate, and click Deploy.
+
+### How deployment works
+
+1. **YAML is the single source of truth** — the preset's YAML config contains everything: codename, title, version, quotas, cmd, env, dependencies
+2. The UI sends only `{ language, pythonCode, yamlConfig }` to the orchestrator
+3. The broadcaster parses the codename from the YAML, builds the package, signs it with `aos-signer`, and uploads via `aos-signer upload`
+4. AosCloud reads the codename from the uploaded package's embedded YAML and routes it to the correct service — no separate service creation API call needed
+
+### Adding new presets
+
+Edit `aos-cloud-deployment/src/presets/index.ts`:
+
+```ts
+export const PRESETS = {
+  myService: {
+    name: 'My Service',
+    appName: 'my-service-codename',
+    description: 'What it does',
+    language: 'python' as const,
+    python: `# Python source code here`,
+    yaml: `# YAML config here (schemaVersion: 2)`
+  },
+  // ...
+}
+```
+
+Then update the dropdown in `aos-cloud-deployment/src/components/Page.tsx`.
+
+---
+
 ## Certificate Management
 
 Certificates are **not stored** in the Docker image or source repo. They are
@@ -100,8 +148,6 @@ Each user uploads their own .p12 via the UI. The orchestrator:
 4. Routes all subsequent requests from that user to their worker
 
 ### Single-user (Standalone Broadcaster)
-
-Mount your `.p12` file and set `CERT_FILE`:
 
 ```bash
 docker run -d --network host \
@@ -120,17 +166,11 @@ docker run -d --network host \
 docker run -e AZURE_KEY_VAULT_NAME=<your-vault-name> ...
 ```
 
-### Environment Variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `CERT_FILE` | For sign/upload (local) | _(unset)_ | Path to a mounted `.p12` file |
-| `AZURE_KEY_VAULT_NAME` | For sign/upload (cloud) | _(unset)_ | Azure Key Vault name |
-| `CERT_NAME` | No | `aos-user-sp` | Certificate name in Key Vault |
-
 ---
 
-## Orchestrator Configuration
+## Configuration Reference
+
+### Orchestrator
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -143,11 +183,11 @@ docker run -e AZURE_KEY_VAULT_NAME=<your-vault-name> ...
 | `WORKER_PORT_START` | `9101` | Start of worker port pool |
 | `WORKER_PORT_END` | `9199` | End of worker port pool |
 | `WORKER_IMAGE` | `aos-edge-toolchain:latest` | Image for worker containers |
-| `BROADCASTER_SCRIPT_HOST` | _(unset)_ | Host path to bind-mount broadcaster script |
+| `BROADCASTER_SCRIPT_HOST` | _(unset)_ | Host path to bind-mount broadcaster script into workers (keeps workers in sync with host edits) |
 | `AOSCLOUD_URL` | `https://aoscloud.io:10000` | AosCloud API URL |
 | `NODE_TLS_REJECT_UNAUTHORIZED` | `1` | Set to `0` for corporate proxy |
 
-## Worker Configuration
+### Worker
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -159,7 +199,7 @@ docker run -e AZURE_KEY_VAULT_NAME=<your-vault-name> ...
 
 ---
 
-## Commands (CLI Mode)
+## CLI Commands
 
 ### Build
 
@@ -204,6 +244,7 @@ docker run --rm \
 |----------|--------|-------------|
 | `/api/v11/services/` | GET, POST | List or create services |
 | `/api/v11/services/{id}/` | GET | Get service details (versions, status) |
+| `/api/v11/services/versions/` | POST | Upload a new service version (multipart `batch.tar.gz`) |
 | `/api/v11/units/` | GET | List all units |
 | `/api/v11/units/{id}/` | GET | Get unit status with services |
 | `/api/v11/subjects/` | GET, POST | List or create subjects |
@@ -211,6 +252,11 @@ docker run --rm \
 | `/api/v11/subjects/{id}/units/` | POST | Add unit to subject |
 
 All endpoints use `https://aoscloud.io:10000` with TLS client certificate authentication.
+
+### Service creation vs upload
+
+- **`POST /api/v11/services/`** — creates a service record (codename, title, quotas). Only needed if the service doesn't exist yet.
+- **`POST /api/v11/services/versions/`** — uploads the signed `batch.tar.gz`. AosCloud reads the codename from the embedded YAML to route to the correct service. This is what `aos-signer upload` does.
 
 ---
 
@@ -254,17 +300,6 @@ docker run -d --network host \
 | Socket.IO (orchestrator) | Uses `https-proxy-agent` when `HTTPS_PROXY` is set |
 | Socket.IO (worker) | Uses `https-proxy-agent` when `HTTPS_PROXY` is set |
 | Azure Key Vault SDK | Python `requests` respects `HTTPS_PROXY` |
-
----
-
-## Building the Docker Image
-
-```bash
-docker build -t aos-edge-toolchain .
-```
-
-**Note:** The image does **not** contain certificates. They are uploaded by users
-at runtime or fetched from Azure Key Vault.
 
 ---
 

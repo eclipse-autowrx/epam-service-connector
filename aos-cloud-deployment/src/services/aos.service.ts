@@ -190,16 +190,10 @@ export class AosService {
 
   // Build and deploy AOS application
   async buildAndDeploy(request: BuildRequest): Promise<BuildResponse> {
-    const lang = request.language || 'cpp'
+    const lang = request.language || 'python'
     const data: any = {
-      name: request.name,
-      displayName: request.displayName || request.name,
       yamlConfig: request.yamlConfig,
       language: lang,
-      vehicleId: 'default-vehicle'
-    }
-    if (request.serviceUuid) {
-      data.serviceUuid = request.serviceUuid
     }
     if (lang === 'python') {
       data.pythonCode = request.pythonCode || ''

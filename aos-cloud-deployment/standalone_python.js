@@ -25269,17 +25269,11 @@
     }
     // Build and deploy AOS application
     async buildAndDeploy(request) {
-      const lang = request.language || "cpp";
+      const lang = request.language || "python";
       const data = {
-        name: request.name,
-        displayName: request.displayName || request.name,
         yamlConfig: request.yamlConfig,
-        language: lang,
-        vehicleId: "default-vehicle"
+        language: lang
       };
-      if (request.serviceUuid) {
-        data.serviceUuid = request.serviceUuid;
-      }
       if (lang === "python") {
         data.pythonCode = request.pythonCode || "";
       } else {
@@ -28025,13 +28019,10 @@ items:
       };
       try {
         const response = await aosServiceRef.current.buildAndDeploy({
-          name: appName,
-          displayName: appName,
           language: languageMode,
           cppCode: languageMode === "cpp" ? finalCode : void 0,
           pythonCode: languageMode === "python" ? finalCode : void 0,
-          yamlConfig: finalYaml,
-          serviceUuid: selectedServiceUuid || void 0
+          yamlConfig: finalYaml
         });
         if (response.message && response.message.includes("\n")) {
           const lines = response.message.split("\n").filter((l) => l.trim());

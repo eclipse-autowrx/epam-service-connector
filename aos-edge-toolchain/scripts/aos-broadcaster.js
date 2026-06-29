@@ -683,14 +683,11 @@ ${identityLine}
 `;
 }
 
-function generatePythonConfig(appName, pyFileName, oldYamlConfig, serviceUuid) {
+function generatePythonConfig(appName, pyFileName, oldYamlConfig) {
   const cfg = parseYamlConfig(oldYamlConfig);
 
-  // Use serviceUuid (from UI selection) first, then YAML id, then codename
-  const effectiveId = serviceUuid || cfg.serviceId;
-  const identityLine = effectiveId
-    ? `      id: ${effectiveId}`
-    : `      codename: "${cfg.codename || appName}"`;
+  // Use codename from YAML — aos-signer resolves the service by codename on AosCloud
+  const identityLine = `      codename: "${cfg.codename || appName}"`;
 
   // Use cmd from YAML config as-is, fallback to /usr/bin/python3 -u /main.py
   const pythonCmd = cfg.cmd || `/usr/bin/python3 -u /${pyFileName}`;
@@ -774,7 +771,6 @@ function getBuildStatus(buildId) {
 }
 
 async function handleBuildDeploy(data, buildId) {
-  const appName = data.name || 'hello-aos';
   const language = data.language || 'python';
   const cppCode = data.cppCode || '';
   const pythonCode = data.pythonCode || '';
@@ -786,7 +782,10 @@ async function handleBuildDeploy(data, buildId) {
     return;
   }
   const yamlConfig = data.yamlConfig || '';
-  const serviceUuid = data.serviceUuid || '';
+
+  // Parse appName from YAML codename — the YAML is the single source of truth
+  const cfg = parseYamlConfig(yamlConfig);
+  const appName = cfg.codename || 'hello-python';
 
   if (!buildId) buildId = crypto.randomBytes(6).toString('hex');
   const buildDir = path.join('/workspace/builds', buildId);
@@ -830,7 +829,7 @@ async function handleBuildDeploy(data, buildId) {
       await fs.rm(srcFolder, { recursive: true, force: true });
 
       // Generate config.yaml with Python-specific cmd (direct python3 invocation, no wrapper)
-      const pythonConfig = generatePythonConfig(appName, pyFileName, yamlConfig, serviceUuid);
+      const pythonConfig = generatePythonConfig(appName, pyFileName, yamlConfig);
       await fs.writeFile(path.join(buildDir, 'config.yaml'), pythonConfig);
       emitProgress(buildId, 'config', 'Generated config.yaml (schemaVersion: 2, Python)', 65);
 

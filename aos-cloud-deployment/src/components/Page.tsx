@@ -1125,13 +1125,10 @@ export default function Page({ data, config }: PluginProps) {
 
     try {
       const response = await aosServiceRef.current.buildAndDeploy({
-        name: appName,
-        displayName: appName,
         language: languageMode,
         cppCode: languageMode === 'cpp' ? finalCode : undefined,
         pythonCode: languageMode === 'python' ? finalCode : undefined,
         yamlConfig: finalYaml,
-        serviceUuid: selectedServiceUuid || undefined
       })
 
       if (response.message && response.message.includes('\n')) {
