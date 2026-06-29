@@ -1123,6 +1123,10 @@ export default function Page({ data, config }: PluginProps) {
       sign: 'Sign', upload: 'Publish', error: 'Error'
     }
 
+    // Capture the build ID in a closure-level variable so the timeout
+    // recovery path can query the specific build, not just the latest.
+    let activeExecutionId: string | undefined
+
     try {
       const response = await aosServiceRef.current.buildAndDeploy({
         language: languageMode,
@@ -1130,6 +1134,12 @@ export default function Page({ data, config }: PluginProps) {
         pythonCode: languageMode === 'python' ? finalCode : undefined,
         yamlConfig: finalYaml,
       })
+
+      // Save build ID for recovery across page reloads
+      if (response.executionId) {
+        activeExecutionId = response.executionId
+        localStorage.setItem('aos_build_id', response.executionId)
+      }
 
       if (response.message && response.message.includes('\n')) {
         const lines = response.message.split('\n').filter((l: string) => l.trim())
@@ -1147,6 +1157,7 @@ export default function Page({ data, config }: PluginProps) {
       if (response.status === 'success') {
         setBuildStatus('Build completed successfully!')
         setIsBuilding(false)
+        localStorage.removeItem('aos_build_id')
         refreshApps()
         // Refresh the AosCloud Service card so the new version shows up
         // (and, if auto-inc is on, the editor bumps to the next version
@@ -1162,9 +1173,11 @@ export default function Page({ data, config }: PluginProps) {
         const lastLog = (response.message || '').split('\n').filter((l: string) => l.trim()).pop() || 'Unknown error'
         setBuildStatus(`Build failed: ${lastLog.replace(/^\[.*?\]\s*/, '').slice(0, 80)}`)
         setIsBuilding(false)
+        localStorage.removeItem('aos_build_id')
       } else {
         setBuildStatus('Build completed')
         setIsBuilding(false)
+        localStorage.removeItem('aos_build_id')
       }
     } catch (err: any) {
       const msg = err.message || 'Unknown error'
@@ -1173,8 +1186,73 @@ export default function Page({ data, config }: PluginProps) {
       } else {
         addLog(`[Error] ${msg}`)
       }
+
+      // If the request timed out, the build may still be running on the worker.
+      // Try to recover by polling build status for the specific execution.
+      if (msg.includes('timeout') || msg.includes('Timeout')) {
+        addLog('[Build] Request timed out — the build may still be running. Checking status...')
+        setBuildStatus('Build timed out — checking if build is still running...')
+        try {
+          const statusRes = await aosServiceRef.current.getBuildStatus(activeExecutionId)
+          // When an executionId is passed, the response has a singular "build" field;
+          // without one it returns a "builds" array.
+          const build = statusRes.build || (statusRes.builds && statusRes.builds.length > 0
+            ? statusRes.builds[statusRes.builds.length - 1]
+            : null)
+
+          if (build) {
+            if (build.status === 'success') {
+              addLog('[Build] Build completed successfully on the server!')
+              setBuildStatus('Build completed successfully!')
+              setIsBuilding(false)
+              localStorage.removeItem('aos_build_id')
+              refreshApps()
+              if (selectedServiceUuid) {
+                setTimeout(() => {
+                  loadServiceDetails(selectedServiceUuid)
+                  addLog('[AosCloud] Refreshed service versions and units')
+                }, 1000)
+              }
+              return  // Don't fall through to the error display below
+            } else if (build.status === 'building' || build.status === 'running') {
+              addLog('[Build] Build is still in progress on the server. It will complete shortly.')
+              setBuildStatus('Build still running on server — check back soon')
+              // Keep isBuilding=true so the spinner stays visible while the
+              // build is still in progress. The user can refresh the page to
+              // trigger the localStorage-based recovery path.
+              localStorage.removeItem('aos_build_id')
+              return
+            } else if (build.status === 'error') {
+              addLog(`[Build] Build failed on server: ${build.message || 'Unknown error'}`)
+              setBuildStatus('Build failed on server')
+            } else {
+              addLog(`[Build] Unexpected build status: ${build.status}`)
+              setBuildStatus(`Build status: ${build.status}`)
+            }
+          } else {
+            addLog('[Build] No build status available — the build may not have started.')
+            setBuildStatus('Build timed out — no status available')
+          }
+        } catch (statusErr: any) {
+          addLog(`[Build] Could not check build status: ${statusErr.message}`)
+          setBuildStatus('Build timed out — could not check status')
+        }
+        setIsBuilding(false)
+        localStorage.removeItem('aos_build_id')
+        return
+      }
+
       const lastLine = msg.split('\n').filter((l: string) => l.trim()).pop() || msg
-      setBuildStatus(`Build failed: ${lastLine.replace(/^\[.*?\]\s*/, '').slice(0, 80)}`)
+      let statusText = `Build failed: ${lastLine.replace(/^\[.*?\]\s*/, '').slice(0, 80)}`
+
+      // Append recovery hints for known error patterns
+      if (msg.includes('re-upload')) {
+        statusText += ' → Go to Setup panel and upload your .p12 again'
+      } else if (msg.includes('No certificate uploaded')) {
+        statusText += ' → Go to Setup panel and upload your .p12 first'
+      }
+
+      setBuildStatus(statusText)
       setIsBuilding(false)
     }
   }

@@ -240,7 +240,22 @@ async function createWorker(userCN, p12Base64) {
     ).catch(() => {});
     console.log(`[Orchestrator] Cert written to worker ${containerName}`);
   } catch (certErr) {
-    console.warn(`[Orchestrator] Failed to write cert to worker: ${certErr.message}`);
+    // Cert write failed — the worker is useless without a valid certificate.
+    // Clean up everything and throw so the user gets a clear error.
+    console.error(`[Orchestrator] Failed to write cert to worker ${containerName}: ${certErr.message}`);
+    try {
+      const container = docker.getContainer(containerName);
+      await container.stop({ t: 5 }).catch(() => {});
+      await container.remove({ force: true }).catch(() => {});
+    } catch (cleanupErr) {
+      console.warn(`[Orchestrator] Cleanup after cert failure error: ${cleanupErr.message}`);
+    }
+    try {
+      const vol = docker.getVolume(volumeName);
+      await vol.remove().catch(() => {});
+    } catch (e) { /* ok */ }
+    releasePort(port);
+    throw new Error(`Failed to write certificate to build environment: ${certErr.message}`);
   }
 
   const workerInfo = {
@@ -492,11 +507,62 @@ httpServer.listen(signalRelayPort, '0.0.0.0', () => {
   console.log('[Orchestrator] HTTP + Signal relay on port', signalRelayPort);
 });
 
+// ── Startup Reconciliation ──────────────────────────────────────────────────
+
+async function reconcileOrphans() {
+  console.log('[Orchestrator] Checking for orphaned workers from previous run...');
+  try {
+    const containers = await docker.listContainers({ all: true });
+    const orphaned = containers.filter(c =>
+      c.Names && c.Names.some(n => n.startsWith('/aos-worker-'))
+    );
+
+    for (const c of orphaned) {
+      const name = (c.Names[0] || '').replace(/^\//, '');
+      console.log(`[Orchestrator] Cleaning up orphaned container: ${name}`);
+      try {
+        const container = docker.getContainer(c.Id);
+        await container.stop({ t: 5 }).catch(() => {});
+        await container.remove({ force: true }).catch(() => {});
+      } catch (e) {
+        console.warn(`[Orchestrator] Failed to remove orphaned container ${name}:`, e.message);
+      }
+    }
+
+    // Clean up orphaned volumes
+    const volumes = await docker.listVolumes({});
+    const orphanedVols = (volumes.Volumes || []).filter(v =>
+      v.Name && v.Name.startsWith('aos-worker-') && v.Name.endsWith('-certs')
+    );
+    for (const v of orphanedVols) {
+      console.log(`[Orchestrator] Cleaning up orphaned volume: ${v.Name}`);
+      try {
+        const vol = docker.getVolume(v.Name);
+        await vol.remove().catch(() => {});
+      } catch (e) {
+        console.warn(`[Orchestrator] Failed to remove orphaned volume ${v.Name}:`, e.message);
+      }
+    }
+
+    if (orphaned.length > 0 || orphanedVols.length > 0) {
+      console.log(`[Orchestrator] Cleaned up ${orphaned.length} orphaned container(s) and ${orphanedVols.length} volume(s)`);
+    } else {
+      console.log('[Orchestrator] No orphaned workers found');
+    }
+  } catch (e) {
+    console.warn('[Orchestrator] Orphan reconciliation error (non-fatal):', e.message);
+  }
+}
+
 // ── Kit Manager Connection ─────────────────────────────────────────────────
 
 let socket;
 
 async function main() {
+  // Clean up any orphaned workers from a previous orchestrator run before
+  // connecting to Kit Manager. This prevents port conflicts and container
+  // name collisions when users re-upload certificates.
+  await reconcileOrphans();
   const socketOpts = {
     transports: ['websocket', 'polling'],
     reconnection: true,
@@ -628,13 +694,29 @@ async function main() {
               response.kit_id = instanceId;
             } catch (fwErr) {
               console.error(`[Orchestrator] Forward error to ${worker.containerName}:`, fwErr.message);
-              response = {
-                id: data.id,
-                kit_id: instanceId,
-                type: cmd,
-                status: 'error',
-                message: `Worker unreachable: ${fwErr.message}`
-              };
+              // Check whether the worker is truly dead or just temporarily slow
+              const workerAlive = await healthCheck(worker.port);
+              if (!workerAlive) {
+                // Worker is gone — clean up stale state so the user can recover
+                console.log(`[Orchestrator] Worker ${worker.containerName} is dead — cleaning up`);
+                await stopWorker(userCN);
+                response = {
+                  id: data.id,
+                  kit_id: instanceId,
+                  type: cmd,
+                  status: 'error',
+                  message: 'Build environment was lost (worker crashed or was stopped). Please re-upload your certificate to create a new one.'
+                };
+              } else {
+                // Worker is alive but didn't respond in time — keep it, return the error
+                response = {
+                  id: data.id,
+                  kit_id: instanceId,
+                  type: cmd,
+                  status: 'error',
+                  message: `Worker did not respond in time: ${fwErr.message}`
+                };
+              }
             }
           }
         }
