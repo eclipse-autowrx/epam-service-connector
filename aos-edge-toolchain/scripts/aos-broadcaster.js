@@ -926,20 +926,19 @@ async function handleBuildDeploy(data, buildId) {
       }
       emitProgress(buildId, 'proto', 'Proto stubs generated', 20);
 
+      // Always build static — AosCloud rejects dynamically linked bundles
       const grpcFlags = targetArch === 'x86_64'
-        ? '$(pkg-config --cflags --libs grpc++ protobuf) -lpthread'
-        : '-I/opt/grpc-aarch64/include -L/opt/grpc-aarch64/lib -lgrpc++ -lprotobuf -lpthread';
-      const staticFlag = targetArch === 'x86_64' ? '' : '-static';
-      const compileCmd = `${cxx} -std=c++17 -O2 ${staticFlag} -I${genDir} ` +
+        ? '-lgrpc++ -lgrpc -lprotobuf -lpthread -lz -lcares -lssl -lcrypto -lre2 -lupb -laddress_sorting'
+        : '-I/opt/grpc-aarch64/include -L/opt/grpc-aarch64/lib -lgrpc++ -lgrpc -lprotobuf -lpthread';
+      const compileCmd = `${cxx} -static -std=c++17 -O2 -I${genDir} ` +
         `${srcFolder}/main.cpp ` +
         `${genDir}/kuksa/val/v1/types.pb.cc ${genDir}/kuksa/val/v1/types.grpc.pb.cc ` +
         `${genDir}/kuksa/val/v1/val.pb.cc ${genDir}/kuksa/val/v1/val.grpc.pb.cc ` +
         `${grpcFlags} -o ${builtBinary}`;
-      emitProgress(buildId, 'compile', 'Compiling gRPC application...', 25);
+      emitProgress(buildId, 'compile', 'Compiling gRPC application (static)...', 25);
       await execAsync(compileCmd, { cwd: buildDir, env: { ...process.env }, timeout: 300000 });
     } else {
-      const staticFlag = '-static';
-      const compileCmd = `${cxx} ${staticFlag} -std=c++17 -O2 ${srcFolder}/main.cpp -o ${builtBinary}`;
+      const compileCmd = `${cxx} -static -std=c++17 -O2 ${srcFolder}/main.cpp -o ${builtBinary}`;
       emitProgress(buildId, 'compile', 'Compiling application...', 25);
       await execAsync(compileCmd, { cwd: buildDir, timeout: 60000 });
     }
@@ -958,11 +957,6 @@ async function handleBuildDeploy(data, buildId) {
 
     // Clean up temp src folder
     await fs.rm(srcFolder, { recursive: true, force: true });
-
-    if (isGrpcProject && targetArch === 'x86_64') {
-      emitProgress(buildId, 'bundle', 'Bundling dynamic libraries...', 55);
-      await bundleDynamicLibs(path.join(srcArchFolder, binaryName), srcArchFolder);
-    }
 
     // Generate new config.yaml format at root (schemaVersion: 2)
     const newConfig = generateNewConfigFormat(appName, yamlConfig);
