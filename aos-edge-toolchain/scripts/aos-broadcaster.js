@@ -665,21 +665,10 @@ function generateNewConfigFormat(appName, oldYamlConfig) {
   // Use YAML sourceFolder if present, otherwise fall back to appName
   const effectiveSourceFolder = cfg.sourceFolder || appName;
 
-  // Use YAML images if present, otherwise default to src_any/any
-  let imagesBlock;
-  if (cfg.images && cfg.images.length > 0) {
-    imagesBlock = cfg.images.map(img => {
-      const sf = img.sourceFolder || 'src_any';
-      const arch = (img.archInfo && img.archInfo.architecture) || 'any';
-      return `      - sourceFolder: "${sf}"
-        archInfo:
-          architecture: "${arch}"`;
-    }).join('\n');
-  } else {
-    imagesBlock = `      - sourceFolder: "src_any"
+  // Images: always src_any/any — build creates src_any, config must match
+  const imagesBlock = `      - sourceFolder: "src_any"
         archInfo:
           architecture: "any"`;
-  }
 
   return `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
 schemaVersion: 2
@@ -742,21 +731,10 @@ function generatePythonConfig(appName, pyFileName, oldYamlConfig) {
   // Use YAML sourceFolder if present, otherwise fall back to appName
   const effectiveSourceFolder = cfg.sourceFolder || appName;
 
-  // Use YAML images if present, otherwise default to src_any/any
-  let imagesBlock;
-  if (cfg.images && cfg.images.length > 0) {
-    imagesBlock = cfg.images.map(img => {
-      const sf = img.sourceFolder || 'src_any';
-      const arch = (img.archInfo && img.archInfo.architecture) || 'any';
-      return `      - sourceFolder: "${sf}"
-        archInfo:
-          architecture: "${arch}"`;
-    }).join('\n');
-  } else {
-    imagesBlock = `      - sourceFolder: "src_any"
+  // Images: always src_any/any — build creates src_any, config must match
+  const imagesBlock = `      - sourceFolder: "src_any"
         archInfo:
           architecture: "any"`;
-  }
 
   return `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
 # Python service — architecture-independent
@@ -983,7 +961,7 @@ async function handleBuildDeploy(data, buildId) {
 
     if (isGrpcProject && targetArch === 'x86_64') {
       emitProgress(buildId, 'bundle', 'Bundling dynamic libraries...', 55);
-      await bundleDynamicLibs(path.join(srcArchFolder, appName), srcArchFolder);
+      await bundleDynamicLibs(path.join(srcArchFolder, binaryName), srcArchFolder);
     }
 
     // Generate new config.yaml format at root (schemaVersion: 2)
