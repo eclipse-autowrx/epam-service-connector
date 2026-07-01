@@ -25480,17 +25480,9 @@ items:
     sourceFolder: "hello-aos"
 
     images:
-      - sourceFolder: "src_x86_64"
+      - sourceFolder: "src_any"
         archInfo:
-          architecture: "amd64"
-        workingDir: "/"
-        cmd: "/hello-aos"
-
-      - sourceFolder: "src_aarch64"
-        archInfo:
-          architecture: "arm64"
-        workingDir: "/"
-        cmd: "/hello-aos"
+          architecture: "any"
 
     configuration:
       workingDir: "/"
@@ -25614,17 +25606,9 @@ items:
     sourceFolder: "signal-writer"
 
     images:
-      - sourceFolder: "src_x86_64"
+      - sourceFolder: "src_any"
         archInfo:
-          architecture: "amd64"
-        workingDir: "/"
-        cmd: "/signal-writer"
-
-      - sourceFolder: "src_aarch64"
-        archInfo:
-          architecture: "arm64"
-        workingDir: "/"
-        cmd: "/signal-writer"
+          architecture: "any"
 
     configuration:
       workingDir: "/"
@@ -25757,17 +25741,9 @@ items:
     sourceFolder: "kuksa-reader"
 
     images:
-      - sourceFolder: "src_x86_64"
+      - sourceFolder: "src_any"
         archInfo:
-          architecture: "amd64"
-        workingDir: "/"
-        cmd: "/kuksa-reader"
-
-      - sourceFolder: "src_aarch64"
-        archInfo:
-          architecture: "arm64"
-        workingDir: "/"
-        cmd: "/kuksa-reader"
+          architecture: "any"
 
     configuration:
       workingDir: "/"
@@ -25972,17 +25948,9 @@ items:
     sourceFolder: "ev-range-extender"
 
     images:
-      - sourceFolder: "src_x86_64"
+      - sourceFolder: "src_any"
         archInfo:
-          architecture: "amd64"
-        workingDir: "/"
-        cmd: "/ev-range-extender"
-
-      - sourceFolder: "src_aarch64"
-        archInfo:
-          architecture: "arm64"
-        workingDir: "/"
-        cmd: "/ev-range-extender"
+          architecture: "any"
 
     configuration:
       workingDir: "/"
@@ -26214,17 +26182,9 @@ items:
     sourceFolder: "battery-energy-saver"
 
     images:
-      - sourceFolder: "src_x86_64"
+      - sourceFolder: "src_any"
         archInfo:
-          architecture: "amd64"
-        workingDir: "/"
-        cmd: "/battery-energy-saver"
-
-      - sourceFolder: "src_aarch64"
-        archInfo:
-          architecture: "arm64"
-        workingDir: "/"
-        cmd: "/battery-energy-saver"
+          architecture: "any"
 
     configuration:
       workingDir: "/"
@@ -26474,17 +26434,9 @@ items:
     sourceFolder: "signal-reporter"
 
     images:
-      - sourceFolder: "src_x86_64"
+      - sourceFolder: "src_any"
         archInfo:
-          architecture: "amd64"
-        workingDir: "/"
-        cmd: "/signal-reporter"
-
-      - sourceFolder: "src_aarch64"
-        archInfo:
-          architecture: "arm64"
-        workingDir: "/"
-        cmd: "/signal-reporter"
+          architecture: "any"
 
     configuration:
       workingDir: "/"
@@ -26842,17 +26794,9 @@ items:
     sourceFolder: "battery-energy-saver-sdv"
 
     images:
-      - sourceFolder: "src_x86_64"
+      - sourceFolder: "src_any"
         archInfo:
-          architecture: "amd64"
-        workingDir: "/"
-        cmd: "/battery-energy-saver-sdv"
-
-      - sourceFolder: "src_aarch64"
-        archInfo:
-          architecture: "arm64"
-        workingDir: "/"
-        cmd: "/battery-energy-saver-sdv"
+          architecture: "any"
 
     configuration:
       workingDir: "/"

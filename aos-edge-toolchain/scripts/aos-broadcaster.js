@@ -486,6 +486,10 @@ function detectArchs(yamlConfig) {
       }
     }
     if (archs.size > 0) return Array.from(archs);
+    // If all architectures are "any", default to host arch
+    if (doc.items.some(item => (item.images || []).some(img => (img.archInfo && img.archInfo.architecture) === 'any'))) {
+      return [detectHostArch()];
+    }
   }
 
   if (doc && doc.build && doc.build.arch) {
@@ -576,6 +580,11 @@ function parseYamlConfig(yamlConfig) {
 
   const isV2 = doc && doc.schemaVersion === 2;
 
+  // Publish
+  const publish = (doc && doc.publish) || {};
+  const tlsKey = publish.tlsKey || 'aos-user-sp.p12';
+  const domain = publish.domain || 'aoscloud.io';
+
   // Publisher
   const publisher = (doc && doc.publisher) || {};
   const author = publisher.author || 'developer@example.com';
@@ -593,6 +602,11 @@ function parseYamlConfig(yamlConfig) {
   const title = identity.title || null;
   const description = identity.description || null;
 
+  // Item-level fields
+  const item = (isV2 && doc.items && doc.items[0]) || {};
+  const sourceFolder = item.sourceFolder || null;
+  const images = item.images || null;
+
   // Configuration
   const config = (isV2 && doc.items && doc.items[0] && doc.items[0].configuration)
     || (doc && doc.configuration)
@@ -603,16 +617,34 @@ function parseYamlConfig(yamlConfig) {
   // Environment variables
   const env = config.env || null;
 
+  // Instances
+  const instances = config.instances || {};
+  const minInstances = instances.minInstances != null ? instances.minInstances : 1;
+  const priority = instances.priority != null ? instances.priority : 10;
+
   // Quotas — support both v1 (quotas.cpu, quotas.mem) and v2 (quotas.cpuLimit, quotas.ramLimit)
   const quotas = config.quotas || {};
   const cpuLimit = quotas.cpuLimit || quotas.cpu || 1000;
   const ramLimit = quotas.ramLimit || quotas.mem || '10MB';
   const storageLimit = quotas.storageLimit || quotas.storage || '5MB';
   const stateLimit = quotas.stateLimit || quotas.state || '512KB';
+  const tmpLimit = quotas.tmpLimit || '256MiB';
+  const uploadSpeedLimit = quotas.uploadSpeedLimit || '10K';
+  const downloadSpeedLimit = quotas.downloadSpeedLimit || '10K';
+  const uploadLimit = quotas.uploadLimit || '10GiB';
+  const downloadLimit = quotas.downloadLimit || '10GiB';
+  const noFileLimit = quotas.noFileLimit != null ? quotas.noFileLimit : 1024;
+  const pidsLimit = quotas.pidsLimit != null ? quotas.pidsLimit : 256;
 
   return {
+    tlsKey, domain,
     author, company, version, serviceId, codename, title, description,
-    cmd, workingDir, env, cpuLimit, ramLimit, storageLimit, stateLimit,
+    sourceFolder, images,
+    cmd, workingDir, env,
+    minInstances, priority,
+    cpuLimit, ramLimit, storageLimit, stateLimit,
+    tmpLimit, uploadSpeedLimit, downloadSpeedLimit, uploadLimit, downloadLimit,
+    noFileLimit, pidsLimit,
   };
 }
 
@@ -630,6 +662,25 @@ function generateNewConfigFormat(appName, oldYamlConfig) {
     ? cfg.env.map(e => `        - "${e}"`).join('\n')
     : '';
 
+  // Use YAML sourceFolder if present, otherwise fall back to appName
+  const effectiveSourceFolder = cfg.sourceFolder || appName;
+
+  // Use YAML images if present, otherwise default to src_any/any
+  let imagesBlock;
+  if (cfg.images && cfg.images.length > 0) {
+    imagesBlock = cfg.images.map(img => {
+      const sf = img.sourceFolder || 'src_any';
+      const arch = (img.archInfo && img.archInfo.architecture) || 'any';
+      return `      - sourceFolder: "${sf}"
+        archInfo:
+          architecture: "${arch}"`;
+    }).join('\n');
+  } else {
+    imagesBlock = `      - sourceFolder: "src_any"
+        archInfo:
+          architecture: "any"`;
+  }
+
   return `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
 schemaVersion: 2
 
@@ -638,8 +689,8 @@ publisher:
   company: "${cfg.company}"
 
 publish:
-  tlsKey: "aos-user-sp.p12"
-  domain: "aoscloud.io"
+  tlsKey: "${cfg.tlsKey}"
+  domain: "${cfg.domain}"
 
 items:
   - identity:
@@ -648,31 +699,29 @@ ${identityLine}
       title: "${cfg.title || `${appName} Service`}"
       description: "${cfg.description || `Auto-generated service from AOS Edge Toolchain`}"
     version: "${cfg.version}"
-    sourceFolder: "${appName}"
+    sourceFolder: "${effectiveSourceFolder}"
 
     images:
-      - sourceFolder: "src_any"
-        archInfo:
-          architecture: "any"
+${imagesBlock}
 
     configuration:
       workingDir: "${cfg.workingDir}"
       cmd: ${resolvedCmd}${envLines ? '\n      env:\n' + envLines : ''}
       instances:
-        minInstances: 1
-        priority: 10
+        minInstances: ${cfg.minInstances}
+        priority: ${cfg.priority}
       quotas:
         cpuLimit: ${parseInt(String(cfg.cpuLimit)) || 1000}
         ramLimit: ${cfg.ramLimit}
         storageLimit: ${cfg.storageLimit}
         stateLimit: ${cfg.stateLimit}
-        tmpLimit: 256MiB
-        uploadSpeedLimit: 10K
-        downloadSpeedLimit: 10K
-        uploadLimit: 10GiB
-        downloadLimit: 10GiB
-        noFileLimit: 1024
-        pidsLimit: 256
+        tmpLimit: ${cfg.tmpLimit}
+        uploadSpeedLimit: ${cfg.uploadSpeedLimit}
+        downloadSpeedLimit: ${cfg.downloadSpeedLimit}
+        uploadLimit: ${cfg.uploadLimit}
+        downloadLimit: ${cfg.downloadLimit}
+        noFileLimit: ${cfg.noFileLimit}
+        pidsLimit: ${cfg.pidsLimit}
 `;
 }
 
@@ -690,6 +739,25 @@ function generatePythonConfig(appName, pyFileName, oldYamlConfig) {
     ? cfg.env.map(e => `        - "${e}"`).join('\n')
     : '';
 
+  // Use YAML sourceFolder if present, otherwise fall back to appName
+  const effectiveSourceFolder = cfg.sourceFolder || appName;
+
+  // Use YAML images if present, otherwise default to src_any/any
+  let imagesBlock;
+  if (cfg.images && cfg.images.length > 0) {
+    imagesBlock = cfg.images.map(img => {
+      const sf = img.sourceFolder || 'src_any';
+      const arch = (img.archInfo && img.archInfo.architecture) || 'any';
+      return `      - sourceFolder: "${sf}"
+        archInfo:
+          architecture: "${arch}"`;
+    }).join('\n');
+  } else {
+    imagesBlock = `      - sourceFolder: "src_any"
+        archInfo:
+          architecture: "any"`;
+  }
+
   return `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
 # Python service — architecture-independent
 schemaVersion: 2
@@ -699,8 +767,8 @@ publisher:
   company: "${cfg.company}"
 
 publish:
-  tlsKey: "aos-user-sp.p12"
-  domain: "aoscloud.io"
+  tlsKey: "${cfg.tlsKey}"
+  domain: "${cfg.domain}"
 
 items:
   - identity:
@@ -709,31 +777,29 @@ ${identityLine}
       title: "${cfg.title || `${appName} Service`}"
       description: "${cfg.description || `Auto-generated Python service from AOS Edge Toolchain`}"
     version: "${cfg.version}"
-    sourceFolder: "${appName}"
+    sourceFolder: "${effectiveSourceFolder}"
 
     images:
-      - sourceFolder: "src_any"
-        archInfo:
-          architecture: "any"
+${imagesBlock}
 
     configuration:
-      workingDir: "/"
+      workingDir: "${cfg.workingDir}"
       cmd: ${pythonCmd}${envLines ? '\n      env:\n' + envLines : ''}
       instances:
-        minInstances: 1
-        priority: 10
+        minInstances: ${cfg.minInstances}
+        priority: ${cfg.priority}
       quotas:
-        cpuLimit: ${parseInt(String(cfg.cpuLimit)) || 5000}
+        cpuLimit: ${parseInt(String(cfg.cpuLimit)) || 1000}
         ramLimit: ${cfg.ramLimit}
         storageLimit: ${cfg.storageLimit}
         stateLimit: ${cfg.stateLimit}
-        tmpLimit: 256MiB
-        uploadSpeedLimit: 10K
-        downloadSpeedLimit: 10K
-        uploadLimit: 10GiB
-        downloadLimit: 10GiB
-        noFileLimit: 1024
-        pidsLimit: 256
+        tmpLimit: ${cfg.tmpLimit}
+        uploadSpeedLimit: ${cfg.uploadSpeedLimit}
+        downloadSpeedLimit: ${cfg.downloadSpeedLimit}
+        uploadLimit: ${cfg.uploadLimit}
+        downloadLimit: ${cfg.downloadLimit}
+        noFileLimit: ${cfg.noFileLimit}
+        pidsLimit: ${cfg.pidsLimit}
 `;
 }
 
@@ -790,7 +856,9 @@ async function handleBuildDeploy(data, buildId) {
 
   try {
     // New aos-signer 2.x format: config.yaml at root, service folder with src_<arch> structure
-    const serviceFolder = path.join(buildDir, appName);
+    // Use YAML sourceFolder if present, otherwise fall back to appName (codename)
+    const effectiveSourceFolder = cfg.sourceFolder || appName;
+    const serviceFolder = path.join(buildDir, effectiveSourceFolder);
     const srcFolder = path.join(serviceFolder, `src_temp_${buildId}`);
     await fs.mkdir(srcFolder, { recursive: true });
 
