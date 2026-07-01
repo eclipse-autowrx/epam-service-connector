@@ -928,7 +928,7 @@ async function handleBuildDeploy(data, buildId) {
 
       // Always build static — AosCloud rejects dynamically linked bundles
       const grpcFlags = targetArch === 'x86_64'
-        ? '-lgrpc++ -lgrpc -lprotobuf -lpthread -lz -lcares -lssl -lcrypto -lre2 -lupb -laddress_sorting'
+        ? '$(pkg-config --static --libs grpc++ protobuf)'
         : '-I/opt/grpc-aarch64/include -L/opt/grpc-aarch64/lib -lgrpc++ -lgrpc -lprotobuf -lpthread';
       const compileCmd = `${cxx} -static -std=c++17 -O2 -I${genDir} ` +
         `${srcFolder}/main.cpp ` +

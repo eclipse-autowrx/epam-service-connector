@@ -51,7 +51,8 @@ RUN npm install --global --prefix=/usr/local \
 
 # Create symlinks for easier access
 RUN ln -sf /usr/bin/aarch64-linux-gnu-g++ /usr/local/bin/aarch64-linux-gnu-g++ && \
-    ln -sf /usr/bin/aarch64-linux-gnu-gcc /usr/local/bin/aarch64-linux-gnu-gcc
+    ln -sf /usr/bin/aarch64-linux-gnu-gcc /usr/local/bin/aarch64-linux-gnu-gcc && \
+    ln -sf /usr/lib/x86_64-linux-gnu/libcares_static.a /usr/lib/x86_64-linux-gnu/libcares.a
 
 # Install Conan 2 + aos-signer + aos-keys + Azure SDK
 RUN pip3 install --no-cache-dir --break-system-packages \
