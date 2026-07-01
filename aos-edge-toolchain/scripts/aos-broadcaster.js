@@ -972,7 +972,10 @@ async function handleBuildDeploy(data, buildId) {
     // Create src_any folder — AosCloud API requires architecture: "any"
     const srcArchFolder = path.join(serviceFolder, 'src_any');
     await fs.mkdir(srcArchFolder, { recursive: true });
-    await fs.copyFile(builtBinary, path.join(srcArchFolder, appName));
+    // Name the binary to match the cmd from YAML (e.g. /hello-aos → hello-aos)
+    const cmdPath = cfg.cmd || `/${appName}`;
+    const binaryName = cmdPath.split('/').pop() || appName;
+    await fs.copyFile(builtBinary, path.join(srcArchFolder, binaryName));
     await fs.rm(path.join(srcArchFolder, 'main.cpp')).catch(() => {});
 
     // Clean up temp src folder
