@@ -943,6 +943,8 @@ async function handleBuildDeploy(data, buildId) {
       await execAsync(compileCmd, { cwd: buildDir, timeout: 60000 });
     }
 
+    // Strip binary to reduce size (gRPC static binaries can be >100MB unstripped)
+    await execAsync(`strip ${builtBinary}`).catch(() => {});
     const { stdout: fileOut } = await execAsync(`file ${builtBinary}`);
     emitProgress(buildId, 'compile', `Binary: ${fileOut.trim().split(':').pop().trim().slice(0, 80)}`, 50);
 
