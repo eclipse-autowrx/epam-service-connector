@@ -617,18 +617,11 @@ function parseYamlConfig(yamlConfig) {
 }
 
 // Generate new aos-signer 2.x config format (schemaVersion: 2)
-function generateNewConfigFormat(appName, arch, oldYamlConfig, serviceUuid) {
+function generateNewConfigFormat(appName, oldYamlConfig) {
   const cfg = parseYamlConfig(oldYamlConfig);
 
-  // Map arch names
-  const archMap = { 'x86_64': 'amd64', 'aarch64': 'arm64' };
-  const newArch = archMap[arch] || arch;
-
-  // Use serviceUuid (from UI selection) first, then YAML id, then codename
-  const effectiveId = serviceUuid || cfg.serviceId;
-  const identityLine = effectiveId
-    ? `      id: ${effectiveId}`
-    : `      codename: "${cfg.codename || appName}"`;
+  // Use codename from YAML — aos-signer resolves the service by codename on AosCloud
+  const identityLine = `      codename: "${cfg.codename || appName}"`;
 
   const resolvedCmd = cfg.cmd || `/${appName}`;
 
@@ -658,9 +651,9 @@ ${identityLine}
     sourceFolder: "${appName}"
 
     images:
-      - sourceFolder: "src_${arch}"
+      - sourceFolder: "src_any"
         archInfo:
-          architecture: "${newArch}"
+          architecture: "any"
 
     configuration:
       workingDir: "${cfg.workingDir}"
@@ -775,12 +768,6 @@ async function handleBuildDeploy(data, buildId) {
   const cppCode = data.cppCode || '';
   const pythonCode = data.pythonCode || '';
 
-  // C++ builds are not supported in this version — reject early with a clear message
-  if (language === 'cpp') {
-    emitProgress(buildId, 'error', 'C++ builds are not supported in this version. Only Python deployments are available. Please switch to Python mode.', 0);
-    buildHistory.set(buildId, { ...buildHistory.get(buildId), status: 'error', finishedAt: Date.now() });
-    return;
-  }
   const yamlConfig = data.yamlConfig || '';
 
   // Parse appName from YAML codename — the YAML is the single source of truth
@@ -914,8 +901,8 @@ async function handleBuildDeploy(data, buildId) {
     const { stdout: fileOut } = await execAsync(`file ${builtBinary}`);
     emitProgress(buildId, 'compile', `Binary: ${fileOut.trim().split(':').pop().trim().slice(0, 80)}`, 50);
 
-    // Create proper src_<arch> folder structure for aos-signer 2.x
-    const srcArchFolder = path.join(serviceFolder, `src_${targetArch}`);
+    // Create src_any folder — AosCloud API requires architecture: "any"
+    const srcArchFolder = path.join(serviceFolder, 'src_any');
     await fs.mkdir(srcArchFolder, { recursive: true });
     await fs.copyFile(builtBinary, path.join(srcArchFolder, appName));
     await fs.rm(path.join(srcArchFolder, 'main.cpp')).catch(() => {});
@@ -929,7 +916,7 @@ async function handleBuildDeploy(data, buildId) {
     }
 
     // Generate new config.yaml format at root (schemaVersion: 2)
-    const newConfig = generateNewConfigFormat(appName, targetArch, yamlConfig, serviceUuid);
+    const newConfig = generateNewConfigFormat(appName, yamlConfig);
     await fs.writeFile(path.join(buildDir, 'config.yaml'), newConfig);
     emitProgress(buildId, 'config', 'Generated config.yaml (schemaVersion: 2)', 65);
 

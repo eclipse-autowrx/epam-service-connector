@@ -1,4 +1,5 @@
-# aos-edge-toolkit - Runtime toolkit for AOS provisioning and deployment
+# aos-edge-toolchain - Self-contained Docker image for AosEdge service development
+# Base: Ubuntu 24.04 with ARM64 cross-compiler and aos-signer
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -13,8 +14,12 @@ ARG http_proxy
 ARG https_proxy
 ARG no_proxy
 
-# Runtime dependencies only
+# Install build tools + ARM64 cross-compiler + Python + Node.js + gRPC deps
 RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    gcc-aarch64-linux-gnu \
+    g++-aarch64-linux-gnu \
     python3 \
     python3-pip \
     python3-venv \
@@ -29,6 +34,9 @@ RUN apt-get update && apt-get install -y \
     libnss3-tools \
     ca-certificates \
     docker.io \
+    autoconf automake libtool pkg-config \
+    protobuf-compiler libprotobuf-dev \
+    libgrpc++-dev protobuf-compiler-grpc \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -41,13 +49,31 @@ RUN npm install --global --prefix=/usr/local \
     dockerode \
     && npm cache clean --force
 
-# Install AOS CLI tools
+# Create symlinks for easier access
+RUN ln -sf /usr/bin/aarch64-linux-gnu-g++ /usr/local/bin/aarch64-linux-gnu-g++ && \
+    ln -sf /usr/bin/aarch64-linux-gnu-gcc /usr/local/bin/aarch64-linux-gnu-gcc
+
+# Install Conan 2 + aos-signer + aos-keys + Azure SDK
 RUN pip3 install --no-cache-dir --break-system-packages \
+    "conan>=2.0" \
     aos-signer==2.0.1 \
     aos-keys==1.10.0 \
-    aos-prov==5.4.1 \
+    aos-prov==5.4.2 \
     azure-identity \
     azure-keyvault-secrets
+
+# Setup Conan default profile and aarch64 cross-compile profile
+RUN conan profile detect --force
+COPY conan-profiles/ /root/.conan2/profiles/
+
+# Cross-compile gRPC + protobuf + abseil for aarch64 (cached in image)
+COPY conanfile-grpc.txt /tmp/conanfile-grpc.txt
+RUN cd /tmp && conan install conanfile-grpc.txt \
+    --profile:host aarch64-linux-gnu \
+    --profile:build default \
+    --build=missing \
+    --output-folder /opt/grpc-aarch64 \
+    || echo "gRPC cross-compile will be done on first build if this fails"
 
 # Install Aos Root CA as trusted (for aos-signer TLS uploads)
 RUN python3 -m aos_keys install-root 2>/dev/null || true

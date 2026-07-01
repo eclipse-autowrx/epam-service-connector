@@ -25,14 +25,11 @@ interface DockerInstance {
 
 export default function Page({ data, config }: PluginProps) {
 
-  // If config.language is set, lock to that language (e.g. standalone-python mode)
-  const forcedLanguage = (config as any)?.language as 'cpp' | 'python' | undefined
-
-  const [languageMode, setLanguageMode] = React.useState<'cpp' | 'python'>(forcedLanguage || 'python')
-  const [cppCode, setCppCode] = React.useState(forcedLanguage === 'cpp' ? PRESETS.helloAos.cpp : '')
-  const [pythonCode, setPythonCode] = React.useState(forcedLanguage === 'cpp' ? '' : ((PRESETS as any).helloPython?.python || ''))
-  const [yamlConfig, setYamlConfig] = React.useState(forcedLanguage === 'cpp' ? PRESETS.helloAos.yaml : ((PRESETS as any).helloPython?.yaml || PRESETS.helloAos.yaml))
-  const [appName, setAppName] = React.useState(forcedLanguage === 'cpp' ? 'hello-aos' : 'hello-python')
+  const [languageMode, setLanguageMode] = React.useState<'cpp' | 'python'>('python')
+  const [cppCode, setCppCode] = React.useState((PRESETS as any).helloAos?.cpp || '')
+  const [pythonCode, setPythonCode] = React.useState((PRESETS as any).helloPython?.python || '')
+  const [yamlConfig, setYamlConfig] = React.useState((PRESETS as any).helloPython?.yaml || (PRESETS as any).helloAos?.yaml || '')
+  const [appName, setAppName] = React.useState('hello-world-python')
   const [isBuilding, setIsBuilding] = React.useState(false)
   const [buildStatus, setBuildStatus] = React.useState<string>('')
   const [buildLogs, setBuildLogs] = React.useState<string[]>([])
@@ -41,7 +38,7 @@ export default function Page({ data, config }: PluginProps) {
   const [selectedPreset, setSelectedPreset] = React.useState('custom')
   const [autoIncVersion, setAutoIncVersion] = React.useState(true)
   const [autoSyncServiceUid, setAutoSyncServiceUid] = React.useState(true)
-  const [activeEditorTab, setActiveEditorTab] = React.useState<'cpp' | 'python' | 'yaml'>(forcedLanguage === 'cpp' ? 'cpp' : 'python')
+  const [activeEditorTab, setActiveEditorTab] = React.useState<'cpp' | 'python' | 'yaml'>('python')
   const cppCodeRef = React.useRef(cppCode)
   const pythonCodeRef = React.useRef(pythonCode)
   const yamlConfigRef = React.useRef(yamlConfig)
@@ -945,7 +942,8 @@ export default function Page({ data, config }: PluginProps) {
         let next = prev
         let synced = false
 
-        if (codename) {
+        const isUuidLike = (s: string) => /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(s)
+        if (codename && !isUuidLike(codename)) {
           // Replace v2 id: <uuid> with codename: "<codename>"
           if (/(\s+)id:\s*["']?[a-f0-9-]+["']?/i.test(next)) {
             next = next.replace(/(\s+)id:\s*["']?[a-f0-9-]+["']?/i, `$1codename: "${codename}"`)
@@ -956,12 +954,16 @@ export default function Page({ data, config }: PluginProps) {
             next = next.replace(/service_uid:\s*["']?[a-f0-9-]+["']?/i, `codename: "${codename}"`)
             synced = true
           }
-          // Update existing codename if present
-          if (/codename:\s*["']?[^"'\n]+["']?/.test(next)) {
-            next = next.replace(/codename:\s*["']?[^"'\n]+["']?/, `codename: "${codename}"`)
-            synced = true
+          // Update existing codename only if current one is UUID-like or empty
+          const currentCodenameMatch = next.match(/codename:\s*["']?([^"'\n]+)["']?/)
+          if (currentCodenameMatch) {
+            const currentCodename = currentCodenameMatch[1]
+            if (!currentCodename || isUuidLike(currentCodename)) {
+              next = next.replace(/codename:\s*["']?[^"'\n]+["']?/, `codename: "${codename}"`)
+              synced = true
+            }
           }
-        } else {
+        } else if (!codename) {
           // No codename — fall back to UUID sync
           if (/(\s+)id:\s*["']?[a-f0-9-]+["']?/i.test(next)) {
             next = next.replace(/(\s+)id:\s*["']?[a-f0-9-]+["']?/i, `$1id: ${uuid}`)
@@ -1278,6 +1280,31 @@ export default function Page({ data, config }: PluginProps) {
       refreshApps()
     } catch (err: any) {
       addLog(`[Error] Failed to stop app: ${err.message}`)
+    }
+  }
+
+  // Switch between C++ and Python mode — resets editor to the default preset
+  const switchLanguage = (lang: 'cpp' | 'python') => {
+    if (lang === languageMode) return
+    setLanguageMode(lang)
+    if (lang === 'cpp') {
+      const preset = (PRESETS as any).helloAos
+      if (preset) {
+        setCppCode(preset.cpp || '')
+        setYamlConfig(preset.yaml || '')
+        setAppName(preset.appName || 'hello-aos')
+        setActiveEditorTab('cpp')
+        setSelectedPreset('helloAos')
+      }
+    } else {
+      const preset = (PRESETS as any).helloPython
+      if (preset) {
+        setPythonCode(preset.python || '')
+        setYamlConfig(preset.yaml || '')
+        setAppName(preset.appName || 'hello-world-python')
+        setActiveEditorTab('python')
+        setSelectedPreset('helloPython')
+      }
     }
   }
 
@@ -1732,9 +1759,35 @@ export default function Page({ data, config }: PluginProps) {
     React.createElement('header', { style: styles.header },
       React.createElement('div', { style: styles.headerLeft },
         React.createElement('h1', { style: styles.title }, 'AOS Cloud Deployment'),
-        
+
       ),
       React.createElement('div', { style: styles.headerRight },
+        // Language toggle — segmented pill
+        React.createElement('div', {
+          style: {
+            display: 'inline-flex', borderRadius: '6px', overflow: 'hidden',
+            border: '1px solid #d1d5db', flexShrink: 0
+          }
+        },
+          React.createElement('button', {
+            onClick: () => switchLanguage('cpp'),
+            style: {
+              padding: '5px 12px', fontSize: '12px', fontWeight: 600, border: 'none', cursor: 'pointer',
+              backgroundColor: languageMode === 'cpp' ? '#3b82f6' : 'white',
+              color: languageMode === 'cpp' ? 'white' : '#6b7280',
+              transition: 'all 0.15s ease'
+            }
+          }, 'C++'),
+          React.createElement('button', {
+            onClick: () => switchLanguage('python'),
+            style: {
+              padding: '5px 12px', fontSize: '12px', fontWeight: 600, border: 'none', cursor: 'pointer',
+              backgroundColor: languageMode === 'python' ? '#3b82f6' : 'white',
+              color: languageMode === 'python' ? 'white' : '#6b7280',
+              transition: 'all 0.15s ease'
+            }
+          }, 'Python')
+        ),
         React.createElement('button', {
           onClick: () => setShowGuide(!showGuide),
           style: {
@@ -1750,13 +1803,22 @@ export default function Page({ data, config }: PluginProps) {
           style: styles.select
         },
           React.createElement('option', { value: 'custom' }, 'Write your own code'),
-          React.createElement('optgroup', { label: 'Python Presets' },
+          languageMode === 'cpp' ? React.createElement('optgroup', { label: 'C++ Presets' },
+            React.createElement('option', { value: 'helloAos' }, 'Hello AOS — simple C++ starter'),
+            React.createElement('option', { value: 'kuksaWriter' }, 'Signal Writer — write vehicle signals'),
+            React.createElement('option', { value: 'kuksaReader' }, 'KUKSA Reader — read vehicle signals'),
+            React.createElement('option', { value: 'evRangeExtender' }, 'EV Range Extender — battery management'),
+            React.createElement('option', { value: 'batteryEnergySaver' }, 'Battery Energy Saver — HVAC/seat cutoff'),
+            React.createElement('option', { value: 'batteryEnergySaverSdvRuntime' }, 'Battery Energy Saver — sdv-runtime / VSS 4.0'),
+            React.createElement('option', { value: 'signalReporter' }, 'Signal Reporter — relay to dashboard')
+          ) : null,
+          languageMode === 'python' ? React.createElement('optgroup', { label: 'Python Presets' },
             React.createElement('option', { value: 'helloPython' }, 'Hello Python — simple Python starter'),
             React.createElement('option', { value: 'seatEcu' }, 'Seat ECU — seat heating/cooling control'),
             React.createElement('option', { value: 'hvacEcu' }, 'HVAC ECU — fan speed / climate control'),
             React.createElement('option', { value: 'bms' }, 'BMS — battery monitoring system'),
             React.createElement('option', { value: 'rangeAi' }, 'Range AI — driving range computation')
-          )
+          ) : null
         ),
         React.createElement('span', {
           style: { fontSize: '12px', color: '#6b7280', fontWeight: 500 },
@@ -2176,10 +2238,23 @@ export default function Page({ data, config }: PluginProps) {
 
         // Editor with tabs
         React.createElement('div', { style: { ...styles.card, ...styles.editorCard, flex: 1, display: 'flex', flexDirection: 'column' as const } },
-          // Tab bar — Python only
+          // Tab bar — shows only the active language's code tab + shared YAML tab
           React.createElement('div', { style: { display: 'flex', borderBottom: '1px solid #e5e7eb', background: '#f9fafb' } },
-            React.createElement('button', {
-              onClick: () => { setActiveEditorTab('python'); setLanguageMode('python'); },
+            languageMode === 'cpp' ? React.createElement('button', {
+              onClick: () => setActiveEditorTab('cpp'),
+              style: {
+                padding: '8px 16px', fontSize: '13px', fontWeight: 500, border: 'none', cursor: 'pointer',
+                background: activeEditorTab === 'cpp' ? '#fff' : 'transparent',
+                color: activeEditorTab === 'cpp' ? '#2563eb' : '#6b7280',
+                borderBottom: activeEditorTab === 'cpp' ? '2px solid #2563eb' : '2px solid transparent',
+                display: 'inline-flex', alignItems: 'center', gap: '6px'
+              }
+            },
+              React.createElement(Icon, { name: 'file-code', size: 14 }),
+              'main.cpp'
+            ) : null,
+            languageMode === 'python' ? React.createElement('button', {
+              onClick: () => setActiveEditorTab('python'),
               style: {
                 padding: '8px 16px', fontSize: '13px', fontWeight: 500, border: 'none', cursor: 'pointer',
                 background: activeEditorTab === 'python' ? '#fff' : 'transparent',
@@ -2190,7 +2265,7 @@ export default function Page({ data, config }: PluginProps) {
             },
               React.createElement(Icon, { name: 'file-code', size: 14 }),
               'main.py'
-            ),
+            ) : null,
             React.createElement('button', {
               onClick: () => setActiveEditorTab('yaml'),
               style: {

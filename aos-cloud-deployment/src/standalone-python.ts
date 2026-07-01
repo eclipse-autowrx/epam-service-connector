@@ -16,7 +16,7 @@ const root = ReactDOM.createRoot(container)
 
 root.render(
   React.createElement(Page as any, {
-    data: { prototype: { name: 'Python Deployment Mode' } },
-    config: { language: 'python' },
+    data: { prototype: { name: 'Standalone Mode' } },
+    config: {},
   })
 )
