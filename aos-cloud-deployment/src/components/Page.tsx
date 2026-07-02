@@ -907,6 +907,7 @@ export default function Page({ data, config }: PluginProps) {
           setSelectedMonitorUnit(firstUid)
           setSelectedUnitUid(firstUid)
           loadUnitMonitoring(firstUid)
+          loadUnitInfo(firstUid)
         }
       }
       // Auto-set subject ID from the first available subject
@@ -928,6 +929,7 @@ export default function Page({ data, config }: PluginProps) {
     setServiceUnits([])
     setServiceVersions([])
     setUnitMonitoring(null)
+    setShowAllUnits(false)
 
     // Look up the codename from the services list
     const svc = aosServices.find((s: any) => s.uuid === uuid)
@@ -999,6 +1001,30 @@ export default function Page({ data, config }: PluginProps) {
     }
   }
 
+  const loadUnitInfo = async (uid: string) => {
+    if (!aosServiceRef.current || !uid) return
+    try {
+      const res = await aosServiceRef.current.getUnitInfo(uid)
+      if (res.status === 'success') {
+        setUnitInfo({
+          name: res.name,
+          onlineStatus: res.onlineStatus,
+          versions: res.versions,
+          nodeCount: res.nodeCount
+        })
+        const verParts = res.versions && Object.keys(res.versions).length > 0
+          ? Object.entries(res.versions).map(([k, v]) => `${k}=${v}`).join(', ')
+          : 'no version fields'
+        addLog(`[Unit] ${res.name || uid}: ${verParts}, ${res.nodeCount} node(s), ${res.onlineStatus}`)
+        if (res._rawKeys) {
+          addLog(`[Unit] API response keys: ${res._rawKeys.join(', ')}`)
+        }
+      }
+    } catch (err: any) {
+      // non-fatal — unit info is supplementary
+    }
+  }
+
   const requestServiceLog = async () => {
     if (!aosServiceRef.current || !selectedServiceUuid || !selectedMonitorUnit) return
     setIsRequestingLog(true)
@@ -1037,6 +1063,13 @@ export default function Page({ data, config }: PluginProps) {
 
   // Toolchain package versions (fetched after cert upload)
   const [toolchainVersions, setToolchainVersions] = React.useState<Record<string, string> | null>(null)
+
+  // Unit list view toggle: false = this service, true = all units
+  const [showAllUnits, setShowAllUnits] = React.useState<boolean>(false)
+  const [allUnits, setAllUnits] = React.useState<any[]>([])
+
+  // Unit version info (fetched when a unit is selected)
+  const [unitInfo, setUnitInfo] = React.useState<{ name?: string; onlineStatus?: string; versions?: Record<string, string>; nodeCount?: number } | null>(null)
 
   const handleCertUpload = async (e: any) => {
     const file = e.target.files?.[0]
@@ -1432,63 +1465,51 @@ export default function Page({ data, config }: PluginProps) {
 
         React.createElement('div', { style: { fontSize: '13px', lineHeight: 1.8, color: '#374151' } },
 
-          React.createElement('h3', { style: { fontSize: '14px', marginTop: 0, marginBottom: '8px' } }, '1. Pick a Docker Instance'),
-          React.createElement('p', { style: { color: '#6b7280', marginBottom: '8px' } },
-            'In the left panel, pick an online Docker instance from the dropdown. This is the build server that compiles, signs, and uploads your service to AosCloud. Switching instances clears the cards below and reloads everything from the newly-selected broadcaster.'
-          ),
-          React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px', fontSize: '12px' } },
-            React.createElement('strong', null, 'Tip: '),
-            'Use ', React.createElement('strong', null, 'AET-CLOUD-001'), ' for builds that should be signed with the shared SP cert; use ',
-            React.createElement('strong', null, 'AET-CLOUD-002'), ' if you want to upload your own personal cert without affecting other users.'
-          ),
-
-          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '2. Check or upload your Certificate'),
+          React.createElement('h3', { style: { fontSize: '14px', marginTop: 0, marginBottom: '8px' } }, '1. Upload your certificate'),
           React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px' } },
-            'The Certificate card shows whether the selected instance has a .p12 loaded. Click ',
-            React.createElement('strong', null, 'Manage'), ' to expand it. There you can see the loaded cert\u2019s CN, upload or replace a .p12, or remove the current one. ',
-            'Uploading a cert replaces the active signing identity on that broadcaster.'
+            'Click ', React.createElement('strong', null, 'Choose File'), ' in the Setup card and select your .p12 certificate. ',
+            'The orchestrator extracts your identity (CN) and creates a dedicated, isolated build environment just for you. ',
+            'Once loaded, the Certificate card shows your CN, toolchain versions (aos-signer, aos-keys, aos-prov), and unit info when a unit is selected. ',
+            'If your worker becomes unresponsive, Remove and re-upload the certificate to get a fresh environment.'
           ),
 
-          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '3. Choose an AosCloud Service'),
+          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '2. Choose an AosCloud Service'),
           React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px' } },
-            'Pick a service from the AosCloud Service dropdown. The chosen service\u2019s UUID is automatically written into ',
-            React.createElement('code', null, 'config.yaml'), ' (toggle ',
-            React.createElement('strong', null, 'Auto-sync codename'), ' to disable). ',
-            'The version pills below the dropdown show the latest versions deployed; with ',
-            React.createElement('strong', null, 'Auto-increment version after build'), ' enabled, the editor bumps to the next patch number after each successful build.'
+            'Pick a service from the AosCloud Service dropdown. The service\u2019s codename is synced into ',
+            React.createElement('code', null, 'config.yaml'), '. ',
+            'Version pills show deployed versions; enable ',
+            React.createElement('strong', null, 'Auto-increment version'), ' to bump the patch number after each build.'
           ),
 
-          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '4. Edit your code'),
+          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '3. Edit your code'),
           React.createElement('p', { style: { color: '#6b7280', marginBottom: '4px' } },
-            'The middle column has a tabbed editor. Use the preset dropdown (top-right header) to load a starting point, then edit the tabs:'
+            'Use the preset dropdown in the header to load a starting point, then edit:'
           ),
           React.createElement('ul', { style: { color: '#6b7280', marginBottom: '16px', paddingLeft: '20px' } },
-            React.createElement('li', null, React.createElement('strong', null, 'main.py'), ' \u2014 your Python application source code'),
-            React.createElement('li', null, React.createElement('strong', null, 'config.yaml'), ' \u2014 service metadata: architecture, version, resource quotas, entry point')
+            React.createElement('li', null, React.createElement('strong', null, 'main.py'), ' \u2014 your Python application'),
+            React.createElement('li', null, React.createElement('strong', null, 'config.yaml'), ' \u2014 service metadata: codename, version, quotas, entry point')
           ),
 
-          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '5. Build & Deploy'),
+          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '4. Build & Deploy'),
           React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px' } },
-            'Click ', React.createElement('strong', null, 'Build & Deploy'), '. The selected broadcaster compiles your code, signs the package with its loaded cert, and uploads it to AosCloud. The edge unit picks up the new version via OTA. ',
-            'Watch the right column for live progress: the Build Status banner pulses while running, the Build Logs card streams output, and a thin progress bar across the top of that card animates during long silent steps (uploading, signing). ',
-            'After success, the AosCloud Service card auto-refreshes with the new version pill.'
+            'Click ', React.createElement('strong', null, 'Build & Deploy'), '. Your code is packaged, signed with your certificate, and uploaded to AosCloud. ',
+            'The target unit picks up the new version via OTA. Watch the Build Log for live progress.'
           ),
 
-          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '6. Inspect a unit'),
+          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '5. Inspect units'),
           React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px' } },
-            'In the Units card, click any unit row to open a detail overlay with that unit\u2019s hardware specs, live CPU/RAM/disk usage, and the latest alerts. ',
-            React.createElement('em', null, 'Note: '), 'AosCloud only shares device-level monitoring with the unit\u2019s OEM account, so units provisioned by someone else will show "Hardware monitoring not available" \u2014 services still deploy and run normally.'
+            'The Units card shows units assigned to the selected service. Toggle ', React.createElement('strong', null, 'All units'), ' to see every unit. ',
+            'Click any unit row to open a detail overlay with hardware specs, live CPU/RAM/disk, and alerts. ',
+            React.createElement('em', null, 'Note: '), 'monitoring requires the unit\u2019s OEM account; units from other accounts show "Hardware monitoring not available".'
           ),
 
           React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, 'Available Presets'),
           React.createElement('ul', { style: { color: '#6b7280', paddingLeft: '20px', marginBottom: 0 } },
-            React.createElement('li', null, React.createElement('strong', null, 'Hello AOS'), ' \u2014 simple C++ hello world service'),
-            React.createElement('li', null, React.createElement('strong', null, 'Hello Python'), ' \u2014 simple Python hello world service'),
-            React.createElement('li', null, React.createElement('strong', null, 'Signal Writer'), ' \u2014 writes vehicle signals to KUKSA Databroker (C++ and Python)'),
-            React.createElement('li', null, React.createElement('strong', null, 'KUKSA Reader'), ' \u2014 subscribes to vehicle signals (C++ and Python)'),
-            React.createElement('li', null, React.createElement('strong', null, 'EV Range Extender'), ' \u2014 battery management with power-save mode (C++ and Python)'),
-            React.createElement('li', null, React.createElement('strong', null, 'Battery Energy Saver'), ' \u2014 forces HVAC/seat off below SoC thresholds (C++ and Python)'),
-            React.createElement('li', null, React.createElement('strong', null, 'Signal Reporter'), ' \u2014 relays signals to the live dashboard (C++ and Python)')
+            React.createElement('li', null, React.createElement('strong', null, 'Hello Python'), ' \u2014 simple Python hello world'),
+            React.createElement('li', null, React.createElement('strong', null, 'Seat ECU'), ' \u2014 seat heating/cooling control via Zenoh + Kuksa'),
+            React.createElement('li', null, React.createElement('strong', null, 'HVAC ECU'), ' \u2014 HVAC fan-speed control via Zenoh + Kuksa'),
+            React.createElement('li', null, React.createElement('strong', null, 'BMS'), ' \u2014 battery monitoring (voltage, current, SoC) via Zenoh + Kuksa'),
+            React.createElement('li', null, React.createElement('strong', null, 'Range AI'), ' \u2014 range computation from battery + cabin signals')
           )
         )
       )
@@ -1591,7 +1612,7 @@ export default function Page({ data, config }: PluginProps) {
                 'Resource Monitoring'
               ),
               React.createElement('button', {
-                onClick: () => loadUnitMonitoring(detailUnitUid),
+                onClick: () => { loadUnitMonitoring(detailUnitUid); loadUnitInfo(detailUnitUid) },
                 style: { ...styles.iconButton, width: '22px', height: '22px', fontSize: '12px' },
                 title: 'Refresh'
               }, '↻')
@@ -1881,6 +1902,26 @@ export default function Page({ data, config }: PluginProps) {
           )
         ),
 
+        // ── No-cert banner ──────────────────────────────────────────────────
+        !certStatus?.loaded && React.createElement('div', {
+          style: {
+            ...styles.card,
+            backgroundColor: '#fffbeb', border: '1px solid #fcd34d',
+            padding: '10px 14px', marginBottom: '10px',
+            display: 'flex', alignItems: 'center', gap: '10px'
+          }
+        },
+          React.createElement('span', { style: { fontSize: '18px', flexShrink: 0 } }, '🔐'),
+          React.createElement('div', { style: { flex: 1 } },
+            React.createElement('div', { style: { fontSize: '13px', fontWeight: 600, color: '#92400e' } },
+              'Upload your .p12 certificate to begin'
+            ),
+            React.createElement('div', { style: { fontSize: '11px', color: '#a16207', marginTop: '2px' } },
+              'Your certificate creates an isolated build environment. Without it, deployment is not possible.'
+            )
+          )
+        ),
+
         // ── Flow Steps Card ────────────────────────────────────────────────
         React.createElement('div', { style: styles.card },
           React.createElement('div', { style: { ...styles.cardHeader, padding: '8px 12px' } },
@@ -2030,6 +2071,33 @@ export default function Page({ data, config }: PluginProps) {
             React.createElement('span', { style: { color: '#065f46' } }, `aos-signer ${toolchainVersions['aos-signer'] || '?'}`),
             React.createElement('span', { style: { color: '#065f46' } }, `aos-keys ${toolchainVersions['aos-keys'] || '?'}`),
             React.createElement('span', { style: { color: '#065f46' } }, `aos-prov ${toolchainVersions['aos-prov'] || '?'}`)
+          ),
+          unitInfo && (Object.keys(unitInfo.versions || {}).length > 0
+            ? React.createElement('div', {
+                style: {
+                  fontSize: '11px', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe',
+                  borderRadius: '4px', padding: '6px 10px', marginBottom: '8px',
+                  fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
+                  display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' as const
+                }
+              },
+                React.createElement('span', { style: { color: '#6b7280', flexShrink: 0 } }, 'Unit:'),
+                ...Object.entries(unitInfo.versions!).map(([k, v]) =>
+                  React.createElement('span', { key: k, style: { color: '#1e40af' } }, `${k}=${v}`)
+                ),
+                React.createElement('span', { style: { color: '#6b7280' } }, `(${unitInfo.nodeCount} node(s))`)
+              )
+            : unitInfo.name && React.createElement('div', {
+                style: {
+                  fontSize: '11px', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe',
+                  borderRadius: '4px', padding: '6px 10px', marginBottom: '8px',
+                  fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
+                }
+              },
+                React.createElement('span', { style: { color: '#6b7280' } }, 'Unit: '),
+                React.createElement('span', { style: { color: '#1e40af' } }, unitInfo.name),
+                React.createElement('span', { style: { color: '#9ca3af' } }, ' — no version fields in API response')
+              )
           ),
           certError && React.createElement('div', { style: { fontSize: '12px', color: '#dc2626', marginBottom: '8px' } }, certError),
           React.createElement('div', { style: { display: 'flex', gap: '6px' } },
@@ -2196,68 +2264,145 @@ export default function Page({ data, config }: PluginProps) {
           )
         ),
 
-        // Units running this service
-        serviceUnits.length > 0 && React.createElement('div', { style: styles.card },
+        // Units card — always visible, toggle between service units and all units
+        React.createElement('div', { style: styles.card },
           React.createElement('div', { style: styles.cardHeader },
             React.createElement('div', { style: styles.cardTitle },
               React.createElement(Icon, { name: 'server', size: 16, color: '#6366f1' }),
-              `Units (${serviceUnits.length})`,
-              React.createElement('span', {
-                style: { fontSize: '10px', fontWeight: 400, color: '#9ca3af', marginLeft: '4px' }
-              }, '— click for details')
+              'Units'
+            ),
+            // Toggle pills: This service | All units
+            React.createElement('div', {
+              style: {
+                display: 'flex', border: '1px solid #d1d5db', borderRadius: '4px',
+                overflow: 'hidden', marginRight: '6px'
+              }
+            },
+              React.createElement('button', {
+                onClick: () => setShowAllUnits(false),
+                style: {
+                  border: 'none', padding: '2px 8px', fontSize: '10px', fontWeight: 600,
+                  cursor: 'pointer',
+                  backgroundColor: !showAllUnits ? '#6366f1' : 'transparent',
+                  color: !showAllUnits ? '#fff' : '#6b7280'
+                }
+              }, 'This service'),
+              React.createElement('button', {
+                onClick: async () => {
+                  setShowAllUnits(true)
+                  if (!aosServiceRef.current) return
+                  try {
+                    const res = await aosServiceRef.current.listUnits()
+                    if (res.status === 'success' && res.items?.length) {
+                      setAllUnits(res.items.map((u: any) => ({
+                        uid: u.uid || u.systemUid,
+                        systemUid: u.system_uid || u.systemUid || u.uid || '',
+                        name: u.name || u.system_uid || u.systemUid || 'Unknown',
+                        online: u.online,
+                        status: u.status || 'Unknown',
+                        runState: '',
+                        version: '',
+                        error: '',
+                        ip: ''
+                      })))
+                    }
+                  } catch (err: any) { /* silent */ }
+                },
+                style: {
+                  border: 'none', padding: '2px 8px', fontSize: '10px', fontWeight: 600,
+                  cursor: 'pointer',
+                  backgroundColor: showAllUnits ? '#6366f1' : 'transparent',
+                  color: showAllUnits ? '#fff' : '#6b7280'
+                }
+              }, 'All units')
             ),
             React.createElement('button', {
-              onClick: () => { if (selectedServiceUuid) loadServiceDetails(selectedServiceUuid) },
-              style: styles.iconButton,
-              title: 'Refresh units status'
-            }, '↻')
-          ),
-          React.createElement('div', { style: { maxHeight: '150px', overflowY: 'auto' } },
-            ...serviceUnits.map((u: any) =>
-              React.createElement('div', {
-                key: u.uid,
-                onClick: () => { loadUnitMonitoring(u.uid); setDetailUnitUid(u.uid) },
-                onMouseEnter: (e: any) => {
-                  if (selectedMonitorUnit !== u.uid) e.currentTarget.style.backgroundColor = '#f9fafb'
-                },
-                onMouseLeave: (e: any) => {
-                  e.currentTarget.style.backgroundColor = selectedMonitorUnit === u.uid ? '#f0f7ff' : 'transparent'
-                },
-                title: 'Click to view monitoring + alerts',
-                style: {
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6',
-                  backgroundColor: selectedMonitorUnit === u.uid ? '#f0f7ff' : 'transparent',
-                  transition: 'background-color 0.15s'
+              onClick: () => {
+                if (showAllUnits) {
+                  setShowAllUnits(true) // trigger re-render; re-fetch below
+                  if (aosServiceRef.current) {
+                    aosServiceRef.current.listUnits().then(res => {
+                      if (res.status === 'success' && res.items?.length) {
+                        setAllUnits(res.items.map((u: any) => ({
+                          uid: u.uid || u.systemUid,
+                          systemUid: u.system_uid || u.systemUid || u.uid || '',
+                          name: u.name || u.system_uid || u.systemUid || 'Unknown',
+                          online: u.online,
+                          status: u.status || 'Unknown',
+                          runState: '', version: '', error: '', ip: ''
+                        })))
+                      }
+                    }).catch(() => {})
+                  }
+                } else if (selectedServiceUuid) {
+                  loadServiceDetails(selectedServiceUuid)
                 }
               },
-                React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 } },
-                  React.createElement('span', {
-                    style: { width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0, backgroundColor: u.online ? '#16a34a' : '#dc2626' }
-                  }),
-                  React.createElement('span', { style: { fontSize: '12px', fontWeight: 500 } }, u.name),
-                  React.createElement('button', {
-                    onClick: (e: any) => { e.stopPropagation(); navigator.clipboard.writeText(u.systemUid || u.uid); addLog(`[Copied] Unit UID: ${u.systemUid || u.uid}`) },
-                    style: { ...styles.iconButton, width: '18px', height: '18px', fontSize: '10px', flexShrink: 0 },
-                    title: u.systemUid || u.uid
-                  }, '📋')
-                ),
-                React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 } },
-                  u.version && React.createElement('span', {
-                    style: { fontSize: '10px', padding: '1px 5px', borderRadius: '6px', backgroundColor: '#e7f3ff', color: '#2563eb' }
-                  }, `v${u.version}`),
-                  u.error && React.createElement('span', {
-                    style: { fontSize: '10px', color: '#dc2626' }, title: u.error
-                  }, '⚠'),
-                  // Click affordance — chevron makes the row obviously expandable
-                  React.createElement('span', {
-                    style: { fontSize: '12px', color: '#9ca3af', flexShrink: 0, marginLeft: '2px' },
-                    title: 'Click to open details'
-                  }, '›')
+              style: styles.iconButton,
+              title: 'Refresh'
+            }, '↻')
+          ),
+          (() => {
+            const units = showAllUnits ? allUnits : serviceUnits
+            if (units.length === 0) {
+              return React.createElement('div', {
+                style: { padding: '14px', textAlign: 'center', fontSize: '11px', color: '#9ca3af' }
+              },
+                showAllUnits
+                  ? 'No units available'
+                  : !certStatus?.loaded
+                    ? 'Upload a certificate and select a service to see units'
+                    : !selectedServiceUuid
+                      ? 'Select a service to see its assigned units'
+                      : 'No units assigned to this service'
+              )
+            }
+            return React.createElement('div', { style: { maxHeight: '150px', overflowY: 'auto' } },
+              ...units.map((u: any) =>
+                React.createElement('div', {
+                  key: u.uid,
+                  onClick: () => { loadUnitMonitoring(u.uid); loadUnitInfo(u.uid); setDetailUnitUid(u.uid) },
+                  onMouseEnter: (e: any) => {
+                    if (selectedMonitorUnit !== u.uid) e.currentTarget.style.backgroundColor = '#f9fafb'
+                  },
+                  onMouseLeave: (e: any) => {
+                    e.currentTarget.style.backgroundColor = selectedMonitorUnit === u.uid ? '#f0f7ff' : 'transparent'
+                  },
+                  title: 'Click to view monitoring + alerts',
+                  style: {
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6',
+                    backgroundColor: selectedMonitorUnit === u.uid ? '#f0f7ff' : 'transparent',
+                    transition: 'background-color 0.15s'
+                  }
+                },
+                  React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 } },
+                    React.createElement('span', {
+                      style: { width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0, backgroundColor: u.online ? '#16a34a' : '#dc2626' }
+                    }),
+                    React.createElement('span', { style: { fontSize: '12px', fontWeight: 500 } }, u.name),
+                    React.createElement('button', {
+                      onClick: (e: any) => { e.stopPropagation(); navigator.clipboard.writeText(u.systemUid || u.uid); addLog(`[Copied] Unit UID: ${u.systemUid || u.uid}`) },
+                      style: { ...styles.iconButton, width: '18px', height: '18px', fontSize: '10px', flexShrink: 0 },
+                      title: u.systemUid || u.uid
+                    }, '📋')
+                  ),
+                  React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 } },
+                    u.version && React.createElement('span', {
+                      style: { fontSize: '10px', padding: '1px 5px', borderRadius: '6px', backgroundColor: '#e7f3ff', color: '#2563eb' }
+                    }, `v${u.version}`),
+                    u.error && React.createElement('span', {
+                      style: { fontSize: '10px', color: '#dc2626' }, title: u.error
+                    }, '⚠'),
+                    React.createElement('span', {
+                      style: { fontSize: '12px', color: '#9ca3af', flexShrink: 0, marginLeft: '2px' },
+                      title: 'Click to open details'
+                    }, '›')
+                  )
                 )
               )
             )
-          )
+          })()
         ),
 
         // Monitoring + Alerts moved to the Unit Detail overlay (opens on

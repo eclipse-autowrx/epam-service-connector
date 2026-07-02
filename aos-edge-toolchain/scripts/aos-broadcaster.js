@@ -316,6 +316,9 @@ async function routeCommand(data) {
       case 'aos_get_toolchain_info':
         response = await handleGetToolchainInfo(data);
         break;
+      case 'aos_get_unit_info':
+        response = await handleGetUnitInfo(data);
+        break;
       default:
         response = {
           id: data.id,
@@ -415,7 +418,9 @@ async function main() {
         'aos_get_service_log_status',
         'aos_get_build_status',
         'aos_get_service_stdout',
-        'aos_signal_stream'
+        'aos_signal_stream',
+        'aos_get_toolchain_info',
+        'aos_get_unit_info'
       ],
       type: 'aos-edge-toolchain',
       suffix: instanceId.split('-')[0],
@@ -842,6 +847,68 @@ async function handleGetToolchainInfo(data) {
       status: 'error',
       message: error.message
     };
+  }
+}
+
+async function handleGetUnitInfo(data) {
+  const unitUid = data.unitUid;
+  if (!unitUid) {
+    return { kit_id: instanceId, type: 'aos_get_unit_info', status: 'error', message: 'No unitUid provided' };
+  }
+  try {
+    const detail = await curlAosCloud(`units/${unitUid}/`, true);
+    const versionFields = {};
+
+    // Collect version-like fields from the top-level unit object
+    for (const key of Object.keys(detail)) {
+      if (key.toLowerCase().includes('version') || key.toLowerCase().includes('aos')) {
+        const v = detail[key];
+        if (typeof v === 'string' || typeof v === 'number') versionFields[key] = v;
+      }
+    }
+
+    // Extract layer versions — this is where AosCore version lives
+    // e.g. layers: [{ layer_uid: "aos-core", layer_version_version: "6.1.0-bosch.2" }]
+    const layers = Array.isArray(detail.layers) ? detail.layers : [];
+    for (const layer of layers) {
+      const uid = layer.layer_uid || '';
+      const ver = layer.layer_version_version || layer.version || '';
+      if (uid && ver) versionFields[uid] = ver;
+    }
+
+    // Extract component versions
+    const components = Array.isArray(detail.unit_update_components) ? detail.unit_update_components : [];
+    for (const comp of components) {
+      const ctype = comp.type || '';
+      const cver = (comp.installed_component && comp.installed_component.version) || comp.version || '';
+      if (ctype && cver) versionFields[ctype] = cver;
+    }
+
+    // Node info: os_type, node_type
+    const nodes = Array.isArray(detail.nodes) ? detail.nodes : [];
+    if (nodes.length > 0) {
+      const n0 = nodes[0];
+      if (n0.os_type) versionFields['os_type'] = n0.os_type;
+      if (n0.node_type) versionFields['node_type'] = n0.node_type;
+      if (n0.status) versionFields['node_status'] = n0.status;
+    }
+
+    // Surface model info
+    const model = detail.model || {};
+    return {
+      kit_id: instanceId,
+      type: 'aos_get_unit_info',
+      status: 'success',
+      unitUid,
+      name: detail.name || detail.display_name || model?.name || '',
+      onlineStatus: detail.online_status || 'unknown',
+      manufacturer: detail.manufacturer || '',
+      versions: versionFields,
+      nodeCount: nodes.length,
+      _rawKeys: Object.keys(detail).filter(k => typeof detail[k] !== 'object' || detail[k] === null)
+    };
+  } catch (error) {
+    return { kit_id: instanceId, type: 'aos_get_unit_info', status: 'error', message: error.message };
   }
 }
 

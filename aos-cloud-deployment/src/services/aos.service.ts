@@ -338,6 +338,11 @@ export class AosService {
     return this.sendCommand('aos_get_toolchain_info', {})
   }
 
+  // Get unit version info from AosCloud (aos_version, os_version, etc.)
+  async getUnitInfo(unitUid: string): Promise<any> {
+    return this.sendCommand('aos_get_unit_info', { unitUid })
+  }
+
   // Restart an AOS application
   async restartApp(appId: string): Promise<any> {
     return this.sendCommand('aos_restart_app', { appId })
