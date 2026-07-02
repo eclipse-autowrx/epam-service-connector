@@ -30378,12 +30378,12 @@ items:
               React2.createElement(
                 "div",
                 { style: { fontSize: "13px", fontWeight: 600, color: "#92400e" } },
-                "Your .p12 is private \u2014 upload it to create your isolated workspace"
+                "Upload your .p12 certificate to provision a build environment"
               ),
               React2.createElement(
                 "div",
                 { style: { fontSize: "11px", color: "#a16207", marginTop: "2px" } },
-                "Your certificate is yours alone. It creates a private, isolated build environment just for you. Without it, deployment is not possible."
+                "A dedicated, isolated workspace is created per certificate identity. Deployment is unavailable without a valid certificate."
               )
             )
           ),
