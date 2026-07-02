@@ -1914,10 +1914,10 @@ export default function Page({ data, config }: PluginProps) {
           React.createElement('span', { style: { fontSize: '18px', flexShrink: 0 } }, '🔐'),
           React.createElement('div', { style: { flex: 1 } },
             React.createElement('div', { style: { fontSize: '13px', fontWeight: 600, color: '#92400e' } },
-              'Upload your .p12 certificate to begin'
+              'Your .p12 is private — upload it to create your isolated workspace'
             ),
             React.createElement('div', { style: { fontSize: '11px', color: '#a16207', marginTop: '2px' } },
-              'Your certificate creates an isolated build environment. Without it, deployment is not possible.'
+              'Your certificate is yours alone. It creates a private, isolated build environment just for you. Without it, deployment is not possible.'
             )
           )
         ),

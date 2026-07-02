@@ -3574,17 +3574,11 @@
     }
     // Build and deploy AOS application
     async buildAndDeploy(request) {
-      const lang = request.language || "cpp";
+      const lang = request.language || "python";
       const data = {
-        name: request.name,
-        displayName: request.displayName || request.name,
         yamlConfig: request.yamlConfig,
-        language: lang,
-        vehicleId: "default-vehicle"
+        language: lang
       };
-      if (request.serviceUuid) {
-        data.serviceUuid = request.serviceUuid;
-      }
       if (lang === "python") {
         data.pythonCode = request.pythonCode || "";
       } else {
@@ -3698,6 +3692,14 @@
     async removeCertificate(certName = "aos-user-sp") {
       return this.sendCommand("aos_remove_cert", { certName });
     }
+    // Get installed toolchain package versions (aos-signer, aos-keys, aos-prov)
+    async getToolchainInfo() {
+      return this.sendCommand("aos_get_toolchain_info", {});
+    }
+    // Get unit version info from AosCloud (aos_version, os_version, etc.)
+    async getUnitInfo(unitUid) {
+      return this.sendCommand("aos_get_unit_info", { unitUid });
+    }
     // Restart an AOS application
     async restartApp(appId) {
       return this.sendCommand("aos_restart_app", { appId });
@@ -3741,7 +3743,1391 @@
 
   // src/presets/index.ts
   var PRESETS = {
-    // ── Python Presets ──
+    // ── C++ Presets ──
+    helloAos: {
+      name: "Hello AOS",
+      appName: "hello-aos",
+      description: "Simple hello world application (aos-signer 2.x format)",
+      cpp: `#include <iostream>
+#include <thread>
+#include <chrono>
+
+#define VERSION "1.0.0"
+
+int main() {
+    std::cout << "========================================" << std::endl;
+    std::cout << "AosEdge Hello Service" << std::endl;
+    std::cout << "Version: " << VERSION << std::endl;
+    std::cout << "Deployed via aos-edge-toolchain!" << std::endl;
+    std::cout << "========================================" << std::endl;
+    std::cout.flush();
+
+    int count = 0;
+    while (true) {
+        std::this_thread::sleep_for(std::chrono::seconds(10));
+        count++;
+        std::cout << "[" << count << "] Hello from AosEdge! v" << VERSION << std::endl;
+        std::cout.flush();
+    }
+
+    return 0;
+}`,
+      yaml: `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
+schemaVersion: 2
+
+publisher:
+  author: "developer@example.com"
+  company: "Example Corp"
+
+publish:
+  tlsKey: "aos-user-sp.p12"
+  domain: "aoscloud.io"
+
+items:
+  - identity:
+      type: "service"
+      codename: "hello-aos"
+      title: "Hello AOS Service"
+      description: "Simple hello world application"
+    version: "1.0.0"
+    sourceFolder: "hello-aos"
+
+    images:
+      - sourceFolder: "src_any"
+        archInfo:
+          architecture: "any"
+
+    configuration:
+      workingDir: "/"
+      cmd: "/hello-aos"
+      instances:
+        minInstances: 1
+        priority: 10
+      quotas:
+        cpuLimit: 1000
+        ramLimit: 10MB
+        storageLimit: 5MB
+        stateLimit: 512KB
+        tmpLimit: 256MiB`
+    },
+    kuksaWriter: {
+      name: "Signal Writer - Zonal Domain",
+      appName: "signal-writer",
+      description: "Writes Speed, SoC, AmbientTemp to KUKSA Databroker on Zonal node",
+      cpp: `#include <iostream>
+#include <string>
+#include <thread>
+#include <chrono>
+#include <cstdlib>
+#include <cmath>
+
+#include <grpcpp/grpcpp.h>
+#include "kuksa/val/v1/val.grpc.pb.h"
+#include "kuksa/val/v1/types.pb.h"
+
+#define VERSION "1.0.0"
+
+static bool set_signal(kuksa::val::v1::VAL::Stub* stub,
+                       const std::string& path, float value) {
+    kuksa::val::v1::SetRequest request;
+    auto* update = request.add_updates();
+    update->mutable_entry()->set_path(path);
+    update->mutable_entry()->mutable_value()->set_float_(value);
+    update->add_fields(kuksa::val::v1::FIELD_VALUE);
+    kuksa::val::v1::SetResponse response;
+    grpc::ClientContext context;
+    return stub->Set(&context, request, &response).ok();
+}
+
+int main(int argc, char* argv[]) {
+    std::string target = "10.0.0.100:55556";
+    int interval = 2;
+
+    if (auto t = std::getenv("KUKSA_DATABROKER_ADDR")) target = t;
+    if (auto i = std::getenv("WRITE_INTERVAL"))        interval = std::atoi(i);
+    if (argc > 1) target   = argv[1];
+    if (argc > 2) interval = std::atoi(argv[2]);
+
+    std::cout << "========================================" << std::endl;
+    std::cout << "  KUKSA Signal Writer" << std::endl;
+    std::cout << "  Version:    " << VERSION << std::endl;
+    std::cout << "  Databroker: " << target << std::endl;
+    std::cout << "  Interval:   " << interval << "s" << std::endl;
+    std::cout << "========================================" << std::endl;
+    std::cout.flush();
+
+    auto channel = grpc::CreateChannel(target, grpc::InsecureChannelCredentials());
+    auto stub = kuksa::val::v1::VAL::NewStub(channel);
+
+    for (int r = 1; r <= 15; r++) {
+        kuksa::val::v1::GetServerInfoRequest req;
+        kuksa::val::v1::GetServerInfoResponse resp;
+        grpc::ClientContext ctx;
+        ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(3));
+        auto st = stub->GetServerInfo(&ctx, req, &resp);
+        if (st.ok()) {
+            std::cout << "[Writer] Connected: " << resp.name()
+                      << " " << resp.version() << std::endl;
+            break;
+        }
+        if (r == 15) std::cerr << "[Writer] Unreachable: " << target << std::endl;
+        std::cout << "[Writer] Waiting (" << r << "/15)..." << std::endl;
+        std::cout.flush();
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+    }
+
+    int t = 0;
+    while (true) {
+        float speed = 40.0f + 30.0f * std::sin(t * 0.1f);
+        float temp  = 22.0f +  5.0f * std::sin(t * 0.05f);
+        float soc   = std::fmax(0.0f, std::fmin(100.0f, 80.0f - t * 0.01f));
+
+        set_signal(stub.get(), "Vehicle.Speed", speed);
+        set_signal(stub.get(), "Vehicle.Cabin.HVAC.AmbientAirTemperature", temp);
+        set_signal(stub.get(), "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current", soc);
+
+        if (t % 5 == 0) {
+            std::cout << "[Writer] t=" << t
+                      << " Speed=" << speed
+                      << " Temp=" << temp
+                      << " SoC=" << soc << std::endl;
+            std::cout.flush();
+        }
+        t++;
+        std::this_thread::sleep_for(std::chrono::seconds(interval));
+    }
+    return 0;
+}`,
+      yaml: `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
+schemaVersion: 2
+
+publisher:
+  author: "developer@example.com"
+  company: "Example Corp"
+
+publish:
+  tlsKey: "aos-user-sp.p12"
+  domain: "aoscloud.io"
+
+items:
+  - identity:
+      type: "service"
+      codename: "signal-writer"
+      title: "Signal Writer - Zonal Domain"
+      description: "Writes Speed, SoC, AmbientTemp to KUKSA Databroker"
+    version: "1.0.0"
+    sourceFolder: "signal-writer"
+
+    images:
+      - sourceFolder: "src_any"
+        archInfo:
+          architecture: "any"
+
+    configuration:
+      workingDir: "/"
+      cmd: "/signal-writer"
+      env:
+        - "KUKSA_DATABROKER_ADDR=172.17.0.1:55556"
+      instances:
+        minInstances: 1
+        priority: 10
+      quotas:
+        cpuLimit: 1000
+        ramLimit: 10MB
+        storageLimit: 5MB
+        stateLimit: 512KB
+        tmpLimit: 256MiB`
+    },
+    kuksaReader: {
+      name: "KUKSA Reader",
+      appName: "kuksa-reader",
+      description: "Subscribes to vehicle signals from KUKSA Databroker via gRPC Subscribe() streaming",
+      cpp: `#include <iostream>
+#include <string>
+#include <thread>
+#include <chrono>
+#include <cstdlib>
+
+#include <grpcpp/grpcpp.h>
+#include "kuksa/val/v1/val.grpc.pb.h"
+#include "kuksa/val/v1/types.pb.h"
+
+#define VERSION "1.0.0"
+
+static std::string format_value(const kuksa::val::v1::Datapoint& dp) {
+    switch (dp.value_case()) {
+        case kuksa::val::v1::Datapoint::kFloat:  return std::to_string(dp.float_());
+        case kuksa::val::v1::Datapoint::kDouble: return std::to_string(dp.double_());
+        case kuksa::val::v1::Datapoint::kInt32:  return std::to_string(dp.int32());
+        case kuksa::val::v1::Datapoint::kUint32: return std::to_string(dp.uint32());
+        case kuksa::val::v1::Datapoint::kBool:   return dp.bool_() ? "true" : "false";
+        case kuksa::val::v1::Datapoint::kString: return dp.string();
+        default: return "N/A";
+    }
+}
+
+int main(int argc, char* argv[]) {
+    std::string target = "10.0.0.100:55556";
+    if (auto t = std::getenv("KUKSA_DATABROKER_ADDR")) target = t;
+    if (argc > 1) target = argv[1];
+
+    std::cout << "========================================" << std::endl;
+    std::cout << "  KUKSA Signal Reader (Subscribe)" << std::endl;
+    std::cout << "  Version:    " << VERSION << std::endl;
+    std::cout << "  Databroker: " << target << std::endl;
+    std::cout << "========================================" << std::endl;
+    std::cout.flush();
+
+    auto channel = grpc::CreateChannel(target, grpc::InsecureChannelCredentials());
+    auto stub = kuksa::val::v1::VAL::NewStub(channel);
+
+    for (int r = 1; r <= 15; r++) {
+        kuksa::val::v1::GetServerInfoRequest req;
+        kuksa::val::v1::GetServerInfoResponse resp;
+        grpc::ClientContext ctx;
+        ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(3));
+        auto st = stub->GetServerInfo(&ctx, req, &resp);
+        if (st.ok()) {
+            std::cout << "[Reader] Connected: " << resp.name()
+                      << " " << resp.version() << std::endl;
+            break;
+        }
+        if (r == 15) { std::cerr << "[Reader] Unreachable: " << target << std::endl; return 1; }
+        std::cout << "[Reader] Waiting (" << r << "/15)..." << std::endl;
+        std::cout.flush();
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+    }
+
+    kuksa::val::v1::SubscribeRequest sub_req;
+    for (const auto& path : {"Vehicle.Speed",
+                              "Vehicle.Cabin.HVAC.AmbientAirTemperature",
+                              "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current"}) {
+        auto* entry = sub_req.add_entries();
+        entry->set_path(path);
+        entry->set_view(kuksa::val::v1::VIEW_CURRENT_VALUE);
+        entry->add_fields(kuksa::val::v1::FIELD_VALUE);
+    }
+
+    std::cout << "[Reader] Subscribing to 3 signals..." << std::endl;
+    std::cout.flush();
+
+    int msg_count = 0;
+    while (true) {
+        grpc::ClientContext ctx;
+        auto reader = stub->Subscribe(&ctx, sub_req);
+        kuksa::val::v1::SubscribeResponse response;
+        while (reader->Read(&response)) {
+            msg_count++;
+            std::cout << "[Reader] #" << msg_count << ":";
+            for (const auto& update : response.updates())
+                std::cout << " " << update.entry().path()
+                          << "=" << format_value(update.entry().value());
+            std::cout << std::endl;
+            std::cout.flush();
+        }
+        auto status = reader->Finish();
+        std::cerr << "[Reader] Stream ended: " << status.error_message() << std::endl;
+        std::cout << "[Reader] Reconnecting in 5s..." << std::endl;
+        std::cout.flush();
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+    }
+    return 0;
+}`,
+      yaml: `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
+schemaVersion: 2
+
+publisher:
+  author: "developer@example.com"
+  company: "Example Corp"
+
+publish:
+  tlsKey: "aos-user-sp.p12"
+  domain: "aoscloud.io"
+
+items:
+  - identity:
+      type: "service"
+      codename: "kuksa-reader"
+      title: "KUKSA Reader"
+      description: "Subscribes to vehicle signals from KUKSA Databroker"
+    version: "1.0.0"
+    sourceFolder: "kuksa-reader"
+
+    images:
+      - sourceFolder: "src_any"
+        archInfo:
+          architecture: "any"
+
+    configuration:
+      workingDir: "/"
+      cmd: "/kuksa-reader"
+      env:
+        - "KUKSA_DATABROKER_ADDR=172.17.0.1:55555"
+      instances:
+        minInstances: 1
+        priority: 10
+      quotas:
+        cpuLimit: 1000
+        ramLimit: 10MB
+        storageLimit: 5MB
+        stateLimit: 512KB
+        tmpLimit: 256MiB`
+    },
+    evRangeExtender: {
+      name: "EV Range Extender - HPC Domain",
+      appName: "ev-range-extender",
+      description: "Battery management, range computation, power-saving mode control for HPC node",
+      cpp: `#include <iostream>
+#include <string>
+#include <thread>
+#include <chrono>
+#include <cstdlib>
+#include <cmath>
+#include <atomic>
+
+#include <grpcpp/grpcpp.h>
+#include "kuksa/val/v1/val.grpc.pb.h"
+#include "kuksa/val/v1/types.pb.h"
+
+#define VERSION "1.0.0"
+#define SOC_THRESHOLD 20.0f
+#define NORMAL_EFFICIENCY 5.5f
+#define DEGRADED_EFFICIENCY 4.0f
+
+static float get_signal(kuksa::val::v1::VAL::Stub* stub,
+                        const std::string& path) {
+    kuksa::val::v1::GetRequest request;
+    auto* entry = request.add_entries();
+    entry->set_path(path);
+    entry->set_view(kuksa::val::v1::VIEW_CURRENT_VALUE);
+    entry->add_fields(kuksa::val::v1::FIELD_VALUE);
+
+    kuksa::val::v1::GetResponse response;
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() +
+                         std::chrono::seconds(3));
+
+    auto status = stub->Get(&context, request, &response);
+    if (!status.ok() || response.entries_size() == 0) return -1.0f;
+
+    const auto& dp = response.entries(0).value();
+    switch (dp.value_case()) {
+        case kuksa::val::v1::Datapoint::kFloat:  return dp.float_();
+        case kuksa::val::v1::Datapoint::kDouble: return static_cast<float>(dp.double_());
+        case kuksa::val::v1::Datapoint::kInt32:  return static_cast<float>(dp.int32());
+        case kuksa::val::v1::Datapoint::kUint32: return static_cast<float>(dp.uint32());
+        default: return -1.0f;
+    }
+}
+
+static bool set_signal(kuksa::val::v1::VAL::Stub* stub,
+                       const std::string& path, float value) {
+    kuksa::val::v1::SetRequest request;
+    auto* update = request.add_updates();
+    update->mutable_entry()->set_path(path);
+    update->mutable_entry()->mutable_value()->set_float_(value);
+    update->add_fields(kuksa::val::v1::FIELD_VALUE);
+
+    kuksa::val::v1::SetResponse response;
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() +
+                         std::chrono::seconds(3));
+
+    return stub->Set(&context, request, &response).ok();
+}
+
+int main(int argc, char* argv[]) {
+    std::string target = "10.0.0.100:55555";
+    int interval = 2;
+
+    if (auto t = std::getenv("KUKSA_DATABROKER_ADDR")) target = t;
+    if (auto i = std::getenv("CHECK_INTERVAL"))        interval = std::atoi(i);
+    if (argc > 1) target   = argv[1];
+    if (argc > 2) interval = std::atoi(argv[2]);
+
+    const float soc_threshold = std::getenv("SOC_THRESHOLD")
+        ? std::atof(std::getenv("SOC_THRESHOLD"))
+        : SOC_THRESHOLD;
+
+    std::cout << "========================================" << std::endl;
+    std::cout << "  EV Range Extender" << std::endl;
+    std::cout << "  Version:       " << VERSION << std::endl;
+    std::cout << "  Databroker:    " << target << std::endl;
+    std::cout << "  Interval:      " << interval << "s" << std::endl;
+    std::cout << "  SoC threshold: " << soc_threshold << "%" << std::endl;
+    std::cout << "========================================" << std::endl;
+    std::cout.flush();
+
+    auto channel = grpc::CreateChannel(target,
+                                       grpc::InsecureChannelCredentials());
+    auto stub = kuksa::val::v1::VAL::NewStub(channel);
+
+    for (int r = 1; r <= 15; r++) {
+        kuksa::val::v1::GetServerInfoRequest req;
+        kuksa::val::v1::GetServerInfoResponse resp;
+        grpc::ClientContext ctx;
+        ctx.set_deadline(std::chrono::system_clock::now() +
+                         std::chrono::seconds(3));
+        auto st = stub->GetServerInfo(&ctx, req, &resp);
+        if (st.ok()) {
+            std::cout << "[RangeExt] Connected: " << resp.name()
+                      << " " << resp.version() << std::endl;
+            break;
+        }
+        if (r == 15) {
+            std::cerr << "[RangeExt] Unreachable: " << target << std::endl;
+            return 1;
+        }
+        std::cout << "[RangeExt] Waiting (" << r << "/15)..." << std::endl;
+        std::cout.flush();
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+    }
+
+    std::string prev_mode = "";
+    int cycle = 0;
+
+    while (true) {
+        cycle++;
+
+        float soc  = get_signal(stub.get(),
+            "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current");
+        float temp = get_signal(stub.get(),
+            "Vehicle.Cabin.HVAC.AmbientAirTemperature");
+
+        if (soc < 0) soc = 50.0f;
+
+        std::string mode;
+        float range;
+        float light_intensity;
+        float seat_heating;
+
+        if (soc < soc_threshold) {
+            mode = "POWER_SAVE";
+            range = soc * DEGRADED_EFFICIENCY;
+            light_intensity = 30.0f;
+            seat_heating = 0.0f;
+        } else {
+            mode = "NORMAL";
+            range = soc * NORMAL_EFFICIENCY;
+            light_intensity = 100.0f;
+            seat_heating = 1.0f;
+        }
+
+        set_signal(stub.get(), "Vehicle.Powertrain.Range", range);
+        set_signal(stub.get(),
+            "Vehicle.Cabin.Lights.AmbientLight.Intensity", light_intensity);
+        set_signal(stub.get(), "Vehicle.Cabin.Seat.Heating", seat_heating);
+
+        if (mode != prev_mode) {
+            std::cout << "[RangeExt] *** MODE CHANGE: " << mode << " ***"
+                      << std::endl;
+            prev_mode = mode;
+        }
+
+        if (cycle % 5 == 1) {
+            std::cout << "[RangeExt] cycle=" << cycle
+                      << " mode=" << mode
+                      << " SoC=" << soc << "%"
+                      << " Temp=" << (temp >= 0 ? std::to_string((int)temp) : "N/A") << "C"
+                      << " Range=" << range << "km"
+                      << " Lights=" << light_intensity
+                      << " SeatHeat=" << seat_heating
+                      << std::endl;
+            std::cout.flush();
+        }
+
+        std::this_thread::sleep_for(std::chrono::seconds(interval));
+    }
+    return 0;
+}`,
+      yaml: `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
+schemaVersion: 2
+
+publisher:
+  author: "developer@example.com"
+  company: "Example Corp"
+
+publish:
+  tlsKey: "aos-user-sp.p12"
+  domain: "aoscloud.io"
+
+items:
+  - identity:
+      type: "service"
+      codename: "ev-range-extender"
+      title: "EV Range Extender - HPC Domain"
+      description: "Battery management, range computation, power-saving mode control"
+    version: "1.0.0"
+    sourceFolder: "ev-range-extender"
+
+    images:
+      - sourceFolder: "src_any"
+        archInfo:
+          architecture: "any"
+
+    configuration:
+      workingDir: "/"
+      cmd: "/ev-range-extender"
+      env:
+        - "KUKSA_DATABROKER_ADDR=172.17.0.1:55555"
+      instances:
+        minInstances: 1
+        priority: 10
+      quotas:
+        cpuLimit: 1000
+        ramLimit: 10MB
+        storageLimit: 5MB
+        stateLimit: 512KB
+        tmpLimit: 256MiB`
+    },
+    batteryEnergySaver: {
+      name: "Battery Energy Saver - HPC Domain",
+      appName: "battery-energy-saver",
+      description: "Forces HVAC and seat heating/cooling off when SoC drops below configurable thresholds; blocks re-activation while battery is low",
+      cpp: `#include <iostream>
+#include <string>
+#include <thread>
+#include <chrono>
+#include <cstdlib>
+#include <csignal>
+#include <atomic>
+
+#include <grpcpp/grpcpp.h>
+#include "kuksa/val/v1/val.grpc.pb.h"
+#include "kuksa/val/v1/types.pb.h"
+
+#define VERSION "1.0.0"
+#define DEFAULT_HVAC_OFF_THRESHOLD 50.0f
+#define DEFAULT_SEAT_OFF_THRESHOLD 30.0f
+
+static const char* RANGE_PATH     = "Vehicle.Powertrain.Range";
+static const char* SOC_PATH       = "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current";
+static const char* HVAC_PATH      = "Vehicle.Cabin.HVAC.AmbientAirTemperature";
+static const char* SEAT_HEAT_PATH = "Vehicle.Cabin.Seat.Row1.DriverSide.Heating";
+
+static std::atomic<bool> g_running{true};
+
+static float as_float(const kuksa::val::v1::Datapoint& dp) {
+    switch (dp.value_case()) {
+        case kuksa::val::v1::Datapoint::kFloat:  return dp.float_();
+        case kuksa::val::v1::Datapoint::kDouble: return static_cast<float>(dp.double_());
+        case kuksa::val::v1::Datapoint::kInt32:  return static_cast<float>(dp.int32());
+        case kuksa::val::v1::Datapoint::kUint32: return static_cast<float>(dp.uint32());
+        default: return 0.0f;
+    }
+}
+
+static int as_int(const kuksa::val::v1::Datapoint& dp) {
+    switch (dp.value_case()) {
+        case kuksa::val::v1::Datapoint::kInt32:  return dp.int32();
+        case kuksa::val::v1::Datapoint::kUint32: return static_cast<int>(dp.uint32());
+        case kuksa::val::v1::Datapoint::kFloat:  return static_cast<int>(dp.float_());
+        case kuksa::val::v1::Datapoint::kBool:   return dp.bool_() ? 1 : 0;
+        default: return 0;
+    }
+}
+
+static bool set_float(kuksa::val::v1::VAL::Stub* stub,
+                      const std::string& path, float value) {
+    kuksa::val::v1::SetRequest request;
+    auto* update = request.add_updates();
+    update->mutable_entry()->set_path(path);
+    update->mutable_entry()->mutable_value()->set_float_(value);
+    update->add_fields(kuksa::val::v1::FIELD_VALUE);
+    kuksa::val::v1::SetResponse response;
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(3));
+    return stub->Set(&context, request, &response).ok();
+}
+
+static bool set_int(kuksa::val::v1::VAL::Stub* stub,
+                    const std::string& path, int value) {
+    kuksa::val::v1::SetRequest request;
+    auto* update = request.add_updates();
+    update->mutable_entry()->set_path(path);
+    update->mutable_entry()->mutable_value()->set_int32(value);
+    update->add_fields(kuksa::val::v1::FIELD_VALUE);
+    kuksa::val::v1::SetResponse response;
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(3));
+    return stub->Set(&context, request, &response).ok();
+}
+
+static void run(kuksa::val::v1::VAL::Stub* stub,
+                float hvac_threshold, float seat_threshold) {
+    float soc = 100.0f, vehicle_range = 0.0f;
+    bool  hvac_cut = false, seat_cut = false;
+
+    kuksa::val::v1::SubscribeRequest sub_req;
+    for (const char* path : { RANGE_PATH, SOC_PATH, HVAC_PATH, SEAT_HEAT_PATH }) {
+        auto* entry = sub_req.add_entries();
+        entry->set_path(path);
+        entry->set_view(kuksa::val::v1::VIEW_CURRENT_VALUE);
+        entry->add_fields(kuksa::val::v1::FIELD_VALUE);
+    }
+
+    while (g_running) {
+        grpc::ClientContext ctx;
+        auto reader = stub->Subscribe(&ctx, sub_req);
+        kuksa::val::v1::SubscribeResponse response;
+
+        while (g_running && reader->Read(&response)) {
+            for (const auto& update : response.updates()) {
+                const std::string& path = update.entry().path();
+                const auto& dp = update.entry().value();
+
+                if (path == RANGE_PATH) {
+                    vehicle_range = as_float(dp);
+                } else if (path == SOC_PATH) {
+                    soc = as_float(dp);
+                    std::cout << "Charge: " << soc << "% | Range: " << vehicle_range << std::endl;
+
+                    if (soc < hvac_threshold && !hvac_cut) {
+                        std::cout << "[!] SoC=" << soc << "% < " << hvac_threshold << "%  ->  Turning HVAC off" << std::endl;
+                        set_float(stub, HVAC_PATH, 0.0f);
+                        hvac_cut = true;
+                    } else if (soc >= hvac_threshold && hvac_cut) {
+                        std::cout << "[+] SoC=" << soc << "%  ->  HVAC restriction lifted" << std::endl;
+                        hvac_cut = false;
+                    }
+                    if (soc < seat_threshold && !seat_cut) {
+                        std::cout << "[!] SoC=" << soc << "% < " << seat_threshold << "%  ->  Turning Seat Heating off" << std::endl;
+                        set_int(stub, SEAT_HEAT_PATH, 0);
+                        seat_cut = true;
+                    } else if (soc >= seat_threshold && seat_cut) {
+                        std::cout << "[+] SoC=" << soc << "%  ->  Seat restriction lifted" << std::endl;
+                        seat_cut = false;
+                    }
+                } else if (path == HVAC_PATH && hvac_cut) {
+                    if (as_float(dp) != 0.0f) {
+                        std::cout << "[!] Battery low  ->  blocking HVAC re-activation" << std::endl;
+                        set_float(stub, HVAC_PATH, 0.0f);
+                    }
+                } else if (path == SEAT_HEAT_PATH && seat_cut) {
+                    if (as_int(dp) != 0) {
+                        std::cout << "[!] Battery low  ->  blocking Seat Heating re-activation" << std::endl;
+                        set_int(stub, SEAT_HEAT_PATH, 0);
+                    }
+                }
+            }
+        }
+
+        if (!g_running) break;
+        auto status = reader->Finish();
+        std::cerr << "[EnergySaver] Stream ended: " << status.error_message() << std::endl;
+        std::cout << "[EnergySaver] Reconnecting in 5s..." << std::endl;
+        std::cout.flush();
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+    }
+}
+
+int main(int argc, char* argv[]) {
+    std::string target   = "172.17.0.1:55555";
+    float hvac_threshold = DEFAULT_HVAC_OFF_THRESHOLD;
+    float seat_threshold = DEFAULT_SEAT_OFF_THRESHOLD;
+
+    if (auto t = std::getenv("KUKSA_DATABROKER_ADDR")) target         = t;
+    if (auto h = std::getenv("HVAC_OFF_THRESHOLD"))    hvac_threshold = std::atof(h);
+    if (auto s = std::getenv("SEAT_OFF_THRESHOLD"))    seat_threshold = std::atof(s);
+    if (argc > 1) target         = argv[1];
+    if (argc > 2) hvac_threshold = std::atof(argv[2]);
+    if (argc > 3) seat_threshold = std::atof(argv[3]);
+
+    std::signal(SIGINT,  [](int) { g_running = false; });
+    std::signal(SIGTERM, [](int) { g_running = false; });
+
+    std::cout << "======================================================" << std::endl;
+    std::cout << "  Battery Energy Saver" << std::endl;
+    std::cout << "  Version:         " << VERSION << std::endl;
+    std::cout << "  Databroker:      " << target << std::endl;
+    std::cout << "  HVAC off below:  " << hvac_threshold << "%" << std::endl;
+    std::cout << "  Seat off below:  " << seat_threshold << "%" << std::endl;
+    std::cout << "  TLS:             Disabled (insecure)" << std::endl;
+    std::cout << "======================================================" << std::endl;
+    std::cout.flush();
+
+    auto channel = grpc::CreateChannel(target, grpc::InsecureChannelCredentials());
+    auto stub = kuksa::val::v1::VAL::NewStub(channel);
+
+    for (int r = 1; r <= 15; r++) {
+        kuksa::val::v1::GetServerInfoRequest req;
+        kuksa::val::v1::GetServerInfoResponse resp;
+        grpc::ClientContext ctx;
+        ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(3));
+        auto st = stub->GetServerInfo(&ctx, req, &resp);
+        if (st.ok()) {
+            std::cout << "[EnergySaver] Connected: " << resp.name()
+                      << " " << resp.version() << std::endl;
+            break;
+        }
+        if (r == 15) { std::cerr << "[EnergySaver] Unreachable: " << target << std::endl; return 1; }
+        std::cout << "[EnergySaver] Waiting (" << r << "/15)..." << std::endl;
+        std::cout.flush();
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+    }
+
+    std::cout << "[EnergySaver] Subscribing to signals..." << std::endl;
+    std::cout.flush();
+
+    run(stub.get(), hvac_threshold, seat_threshold);
+
+    std::cout << "Battery Energy Saver: shutdown, no signal reset needed." << std::endl;
+    return 0;
+}`,
+      yaml: `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
+schemaVersion: 2
+
+publisher:
+  author: "developer@example.com"
+  company: "Example Corp"
+
+publish:
+  tlsKey: "aos-user-sp.p12"
+  domain: "aoscloud.io"
+
+items:
+  - identity:
+      type: "service"
+      codename: "battery-energy-saver"
+      title: "Battery Energy Saver - HPC Domain"
+      description: "Forces HVAC and seat heating/cooling off when SoC drops below thresholds"
+    version: "1.0.0"
+    sourceFolder: "battery-energy-saver"
+
+    images:
+      - sourceFolder: "src_any"
+        archInfo:
+          architecture: "any"
+
+    configuration:
+      workingDir: "/"
+      cmd: "/battery-energy-saver"
+      env:
+        - "KUKSA_DATABROKER_ADDR=172.17.0.1:55555"
+        - "HVAC_OFF_THRESHOLD=50.0"
+        - "SEAT_OFF_THRESHOLD=30.0"
+      instances:
+        minInstances: 1
+        priority: 10
+      quotas:
+        cpuLimit: 1000
+        ramLimit: 10MB
+        storageLimit: 5MB
+        stateLimit: 512KB
+        tmpLimit: 256MiB`
+    },
+    signalReporter: {
+      name: "Signal Reporter - Dashboard Relay",
+      appName: "signal-reporter",
+      description: "Subscribes to all 9 vehicle signals and relays to dashboard via HTTP on HPC node",
+      cpp: `#include <iostream>
+#include <string>
+#include <thread>
+#include <chrono>
+#include <cstdlib>
+#include <sstream>
+#include <cstring>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <unistd.h>
+
+#include <grpcpp/grpcpp.h>
+#include "kuksa/val/v1/val.grpc.pb.h"
+#include "kuksa/val/v1/types.pb.h"
+
+#define VERSION "1.0.17"
+
+static std::string format_value(const kuksa::val::v1::Datapoint& dp) {
+    switch (dp.value_case()) {
+        case kuksa::val::v1::Datapoint::kFloat:
+            return std::to_string(dp.float_());
+        case kuksa::val::v1::Datapoint::kDouble:
+            return std::to_string(dp.double_());
+        case kuksa::val::v1::Datapoint::kInt32:
+            return std::to_string(dp.int32());
+        case kuksa::val::v1::Datapoint::kUint32:
+            return std::to_string(dp.uint32());
+        case kuksa::val::v1::Datapoint::kBool:
+            return dp.bool_() ? "true" : "false";
+        case kuksa::val::v1::Datapoint::kString:
+            return dp.string();
+        default:
+            return "null";
+    }
+}
+
+static bool http_post(const std::string& host, int port,
+                      const std::string& path, const std::string& body) {
+    struct addrinfo hints{}, *res;
+    hints.ai_family   = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    if (getaddrinfo(host.c_str(), std::to_string(port).c_str(),
+                    &hints, &res) != 0)
+        return false;
+
+    int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (fd < 0) { freeaddrinfo(res); return false; }
+
+    struct timeval tv{2, 0};
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    if (connect(fd, res->ai_addr, res->ai_addrlen) < 0) {
+        close(fd); freeaddrinfo(res); return false;
+    }
+    freeaddrinfo(res);
+
+    std::ostringstream req;
+    req << "POST " << path << " HTTP/1.1\\r\\n"
+        << "Host: " << host << ":" << port << "\\r\\n"
+        << "Content-Type: application/json\\r\\n"
+        << "Content-Length: " << body.size() << "\\r\\n"
+        << "Connection: close\\r\\n\\r\\n"
+        << body;
+
+    std::string s = req.str();
+    send(fd, s.c_str(), s.size(), 0);
+
+    char buf[256];
+    recv(fd, buf, sizeof(buf) - 1, 0);
+    close(fd);
+    return true;
+}
+
+static void parse_host_port(const std::string& url,
+                            std::string& host, int& port) {
+    auto colon = url.rfind(':');
+    if (colon != std::string::npos) {
+        host = url.substr(0, colon);
+        port = std::atoi(url.substr(colon + 1).c_str());
+    } else {
+        host = url;
+        port = 9100;
+    }
+}
+
+int main(int argc, char* argv[]) {
+    std::string kuksa_target = "10.0.0.100:55555";
+    std::string relay_url    = "10.0.0.1:9100";
+
+    if (auto t = std::getenv("KUKSA_DATABROKER_ADDR")) kuksa_target = t;
+    if (auto r = std::getenv("SIGNAL_RELAY_URL"))      relay_url    = r;
+    if (argc > 1) kuksa_target = argv[1];
+    if (argc > 2) relay_url    = argv[2];
+
+    std::string relay_host;
+    int relay_port;
+    parse_host_port(relay_url, relay_host, relay_port);
+
+    std::cout << "========================================" << std::endl;
+    std::cout << "  Signal Reporter" << std::endl;
+    std::cout << "  Version:    " << VERSION << std::endl;
+    std::cout << "  Databroker: " << kuksa_target << std::endl;
+    std::cout << "  Relay:      " << relay_host << ":" << relay_port << std::endl;
+    std::cout << "========================================" << std::endl;
+    std::cout.flush();
+
+    auto channel = grpc::CreateChannel(kuksa_target,
+                                       grpc::InsecureChannelCredentials());
+    auto stub = kuksa::val::v1::VAL::NewStub(channel);
+
+    for (int r = 1; r <= 15; r++) {
+        kuksa::val::v1::GetServerInfoRequest req;
+        kuksa::val::v1::GetServerInfoResponse resp;
+        grpc::ClientContext ctx;
+        ctx.set_deadline(std::chrono::system_clock::now() +
+                         std::chrono::seconds(3));
+        if (stub->GetServerInfo(&ctx, req, &resp).ok()) {
+            std::cout << "[Reporter] Connected: " << resp.name()
+                      << " " << resp.version() << std::endl;
+            break;
+        }
+        if (r == 15) {
+            std::cerr << "[Reporter] Unreachable: " << kuksa_target << std::endl;
+            return 1;
+        }
+        std::cout << "[Reporter] Waiting (" << r << "/15)..." << std::endl;
+        std::cout.flush();
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+    }
+
+    const char* paths[] = {
+        "Vehicle.Speed",
+        "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current",
+        "Vehicle.Powertrain.Range",
+        "Vehicle.Cabin.HVAC.AmbientAirTemperature",
+        "Vehicle.Cabin.HVAC.TargetTemperature",
+        "Vehicle.Cabin.Lights.AmbientLight.Intensity",
+        "Vehicle.Cabin.Seat.Heating",
+        "Vehicle.Cabin.Seat.VentilationLevel",
+        "Vehicle.Infotainment.Display.Brightness"
+    };
+
+    kuksa::val::v1::SubscribeRequest sub_req;
+    for (const auto& p : paths) {
+        auto* entry = sub_req.add_entries();
+        entry->set_path(p);
+        entry->set_view(kuksa::val::v1::VIEW_CURRENT_VALUE);
+        entry->add_fields(kuksa::val::v1::FIELD_VALUE);
+    }
+
+    std::cout << "[Reporter] Subscribing to " << sub_req.entries_size()
+              << " signals..." << std::endl;
+    std::cout.flush();
+
+    int msg_count = 0;
+    int post_ok   = 0;
+    int post_fail = 0;
+
+    while (true) {
+        grpc::ClientContext ctx;
+        auto reader = stub->Subscribe(&ctx, sub_req);
+        kuksa::val::v1::SubscribeResponse response;
+
+        while (reader->Read(&response)) {
+            msg_count++;
+
+            for (const auto& update : response.updates()) {
+                const auto& path = update.entry().path();
+                std::string val  = format_value(update.entry().value());
+
+                auto now = std::chrono::system_clock::now();
+                auto ms  = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now.time_since_epoch()).count();
+
+                std::ostringstream json;
+                json << "{\\"signal\\":\\"" << path
+                     << "\\",\\"value\\":" << val
+                     << ",\\"ts\\":" << ms << "}";
+
+                if (http_post(relay_host, relay_port,
+                              "/signal", json.str())) {
+                    post_ok++;
+                } else {
+                    post_fail++;
+                }
+            }
+
+            if (msg_count % 50 == 0) {
+                std::cout << "[Reporter] msgs=" << msg_count
+                          << " posted=" << post_ok
+                          << " failed=" << post_fail << std::endl;
+                std::cout.flush();
+            }
+        }
+
+        auto status = reader->Finish();
+        std::cerr << "[Reporter] Stream ended: "
+                  << status.error_message() << std::endl;
+        std::cout << "[Reporter] Reconnecting in 5s..." << std::endl;
+        std::cout.flush();
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+    }
+    return 0;
+}`,
+      yaml: `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
+schemaVersion: 2
+
+publisher:
+  author: "developer@example.com"
+  company: "Example Corp"
+
+publish:
+  tlsKey: "aos-user-sp.p12"
+  domain: "aoscloud.io"
+
+items:
+  - identity:
+      type: service
+      id: 242dd4d4-7236-432d-88b9-ba9bbb3288f8
+      title: "Signal Reporter - Dashboard Relay"
+      description: "Subscribes to all 9 vehicle signals and relays to dashboard via HTTP"
+    version: "1.0.17"
+    sourceFolder: "signal-reporter"
+
+    images:
+      - sourceFolder: "src_any"
+        archInfo:
+          architecture: "any"
+
+    configuration:
+      workingDir: "/"
+      cmd: "/signal-reporter"
+      env:
+        - "KUKSA_DATABROKER_ADDR=172.17.0.1:55555"
+        - "SIGNAL_RELAY_URL=172.17.0.1:9100"
+      instances:
+        minInstances: 1
+        priority: 10
+      quotas:
+        cpuLimit: 1000
+        ramLimit: 10MB
+        storageLimit: 5MB
+        stateLimit: 512KB
+        tmpLimit: 256MiB`
+    },
+    batteryEnergySaverSdvRuntime: {
+      name: "Battery Energy Saver - sdv-runtime / VSS 4.0",
+      appName: "battery-energy-saver-sdv",
+      description: "Same HVAC/seat cutoff logic as the HPC variant but corrected for sdv-runtime: HVAC path is IsAirConditioningActive (bool actuator) and all actuator writes target actuator_target instead of value",
+      cpp: `/*
+ * Battery Energy Saver \u2014 sdv-runtime / VSS 4.0
+ * ===============================================
+ *
+ * WHAT THIS SERVICE DOES
+ * ----------------------
+ * Subscribes to the vehicle's State-of-Charge (SoC) via KUKSA Databroker.
+ * When SoC drops below configurable thresholds it commands actuators off:
+ *   - SoC < HVAC_OFF_THRESHOLD (default 50%) -> set IsAirConditioningActive = false
+ *   - SoC < SEAT_OFF_THRESHOLD (default 30%) -> set Seat.Row1.DriverSide.Heating = 0
+ * While the battery is low it also blocks any attempt to re-enable those actuators.
+ *
+ * ARCHITECTURE
+ * ------------
+ *
+ *   \u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510
+ *   \u2502  Host machine                       \u2502
+ *   \u2502                                     \u2502
+ *   \u2502  docker run -p 55555:55555          \u2502
+ *   \u2502    ghcr.io/eclipse-autowrx/         \u2502
+ *   \u2502    sdv-runtime:latest               \u2502
+ *   \u2502         \u2502                           \u2502
+ *   \u2502         \u2502  KUKSA Databroker :55555  \u2502
+ *   \u2502         \u2502  (gRPC, VSS 4.0)          \u2502
+ *   \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518
+ *             \u2502
+ *   \u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510
+ *   \u2502  AOS HPC VM                         \u2502
+ *   \u2502         \u2502                           \u2502
+ *   \u2502  battery-energy-saver-sdv           \u2502
+ *   \u2502  (this service, deployed via        \u2502
+ *   \u2502   AosCloud onto the HPC node)       \u2502
+ *   \u2502                                     \u2502
+ *   \u2502  env: KUKSA_DATABROKER_ADDR=        \u2502
+ *   \u2502       <host-ip>:55555               \u2502
+ *   \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518
+ *
+ * SETUP
+ * -----
+ * 1. Start sdv-runtime on the host:
+ *      docker run -d -p 55555:55555 ghcr.io/eclipse-autowrx/sdv-runtime:latest
+ *
+ * 2. Find the host IP reachable from the AOS VM.
+ *    From inside the VM the Docker bridge gateway is typically 172.17.0.1,
+ *    but if the VM is on a separate NAT network use the host's LAN IP instead
+ *    (e.g. 10.x.x.x).  Confirm reachability:
+ *      nc -zv <host-ip> 55555
+ *
+ * 3. In the YAML config below, set KUKSA_DATABROKER_ADDR to that IP:
+ *      env:
+ *        - "KUKSA_DATABROKER_ADDR=<host-ip>:55555"
+ *
+ * 4. Build and deploy via AosCloud (Build -> Deploy in this UI).
+ *
+ * VERIFYING THE COMMUNICATION (Python client on the host)
+ * -------------------------------------------------------
+ * Install:  pip install kuksa-client
+ *
+ *   from kuksa_client.grpc import VSSClient, Datapoint
+ *   import time
+ *
+ *   SOC  = 'Vehicle.Powertrain.TractionBattery.StateOfCharge.Current'
+ *   RANGE= 'Vehicle.Powertrain.Range'
+ *   HVAC = 'Vehicle.Cabin.HVAC.IsAirConditioningActive'
+ *   SEAT = 'Vehicle.Cabin.Seat.Row1.DriverSide.Heating'
+ *
+ *   with VSSClient('<host-ip>', 55555) as c:
+ *       # 1. Normal charge \u2014 no cutoff
+ *       c.set_current_values({SOC: Datapoint(80.0), RANGE: Datapoint(250)})
+ *       time.sleep(1)
+ *
+ *       # 2. Drop SoC below HVAC threshold \u2014 service sets HVAC target = False
+ *       c.set_current_values({SOC: Datapoint(40.0)})
+ *       time.sleep(1)
+ *
+ *       # 3. Try to re-enable HVAC while battery is still low
+ *       c.set_target_values({HVAC: Datapoint(True)})
+ *       time.sleep(1)
+ *       # Service detects it and forces HVAC target back to False
+ *
+ *       # 4. Read back what the service wrote
+ *       tgt = c.get_target_values([HVAC, SEAT])
+ *       print(tgt[HVAC].value)   # False  (service enforced it)
+ *
+ *       # 5. Drop below seat threshold too
+ *       c.set_current_values({SOC: Datapoint(25.0)})
+ *       time.sleep(1)
+ *       tgt = c.get_target_values([HVAC, SEAT])
+ *       print(tgt[SEAT].value)   # 0  (seat heating cut)
+ *
+ * SERVICE LOGS ON THE AOS VM
+ * --------------------------
+ * Find the service PID:
+ *   cat /run/aos/runtime/<instance-id>/.pid
+ * Stream its output:
+ *   journalctl _PID=<pid> -f
+ *
+ * You should see:
+ *   Charge: 80% | Range: 250
+ *   Charge: 40% | Range: 250
+ *   [!] SoC=40% < 50%  ->  Turning HVAC off
+ *   [!] Battery low    ->  blocking HVAC re-activation   <- after step 3
+ *   [!] SoC=25% < 30%  ->  Turning Seat Heating off
+ *   [+] SoC=55%        ->  HVAC restriction lifted
+ */
+
+#include <iostream>
+#include <string>
+#include <thread>
+#include <chrono>
+#include <cstdlib>
+#include <csignal>
+#include <atomic>
+
+#include <grpcpp/grpcpp.h>
+#include "kuksa/val/v1/val.grpc.pb.h"
+#include "kuksa/val/v1/types.pb.h"
+
+#define VERSION "1.0.0"
+#define DEFAULT_HVAC_OFF_THRESHOLD 50.0f
+#define DEFAULT_SEAT_OFF_THRESHOLD 30.0f
+
+static const char* RANGE_PATH     = "Vehicle.Powertrain.Range";
+static const char* SOC_PATH       = "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current";
+static const char* HVAC_PATH      = "Vehicle.Cabin.HVAC.IsAirConditioningActive";
+static const char* SEAT_HEAT_PATH = "Vehicle.Cabin.Seat.Row1.DriverSide.Heating";
+
+static std::atomic<bool> g_running{true};
+
+static float as_float(const kuksa::val::v1::Datapoint& dp) {
+    switch (dp.value_case()) {
+        case kuksa::val::v1::Datapoint::kFloat:  return dp.float_();
+        case kuksa::val::v1::Datapoint::kDouble: return static_cast<float>(dp.double_());
+        case kuksa::val::v1::Datapoint::kInt32:  return static_cast<float>(dp.int32());
+        case kuksa::val::v1::Datapoint::kUint32: return static_cast<float>(dp.uint32());
+        default: return 0.0f;
+    }
+}
+
+static bool as_bool(const kuksa::val::v1::Datapoint& dp) {
+    switch (dp.value_case()) {
+        case kuksa::val::v1::Datapoint::kBool:   return dp.bool_();
+        case kuksa::val::v1::Datapoint::kInt32:  return dp.int32() != 0;
+        case kuksa::val::v1::Datapoint::kUint32: return dp.uint32() != 0;
+        case kuksa::val::v1::Datapoint::kFloat:  return dp.float_() != 0.0f;
+        default: return false;
+    }
+}
+
+static int as_int(const kuksa::val::v1::Datapoint& dp) {
+    switch (dp.value_case()) {
+        case kuksa::val::v1::Datapoint::kInt32:  return dp.int32();
+        case kuksa::val::v1::Datapoint::kUint32: return static_cast<int>(dp.uint32());
+        case kuksa::val::v1::Datapoint::kFloat:  return static_cast<int>(dp.float_());
+        case kuksa::val::v1::Datapoint::kBool:   return dp.bool_() ? 1 : 0;
+        default: return 0;
+    }
+}
+
+// sdv-runtime requires actuator writes to go to actuator_target, not value
+static bool set_bool(kuksa::val::v1::VAL::Stub* stub,
+                     const std::string& path, bool value) {
+    kuksa::val::v1::SetRequest request;
+    auto* update = request.add_updates();
+    update->mutable_entry()->set_path(path);
+    update->mutable_entry()->mutable_actuator_target()->set_bool_(value);
+    update->add_fields(kuksa::val::v1::FIELD_ACTUATOR_TARGET);
+    kuksa::val::v1::SetResponse response;
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(3));
+    return stub->Set(&context, request, &response).ok();
+}
+
+static bool set_int(kuksa::val::v1::VAL::Stub* stub,
+                    const std::string& path, int value) {
+    kuksa::val::v1::SetRequest request;
+    auto* update = request.add_updates();
+    update->mutable_entry()->set_path(path);
+    update->mutable_entry()->mutable_actuator_target()->set_int32(value);
+    update->add_fields(kuksa::val::v1::FIELD_ACTUATOR_TARGET);
+    kuksa::val::v1::SetResponse response;
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(3));
+    return stub->Set(&context, request, &response).ok();
+}
+
+static void run(kuksa::val::v1::VAL::Stub* stub,
+                float hvac_threshold, float seat_threshold) {
+    float soc = 100.0f, vehicle_range = 0.0f;
+    bool  hvac_cut = false, seat_cut = false;
+
+    kuksa::val::v1::SubscribeRequest sub_req;
+    // Sensors: read current value
+    for (const char* path : { RANGE_PATH, SOC_PATH }) {
+        auto* entry = sub_req.add_entries();
+        entry->set_path(path);
+        entry->set_view(kuksa::val::v1::VIEW_CURRENT_VALUE);
+        entry->add_fields(kuksa::val::v1::FIELD_VALUE);
+    }
+    // Actuators: watch actuator_target to block re-activation while battery is low
+    for (const char* path : { HVAC_PATH, SEAT_HEAT_PATH }) {
+        auto* entry = sub_req.add_entries();
+        entry->set_path(path);
+        entry->set_view(kuksa::val::v1::VIEW_TARGET_VALUE);
+        entry->add_fields(kuksa::val::v1::FIELD_ACTUATOR_TARGET);
+    }
+
+    while (g_running) {
+        grpc::ClientContext ctx;
+        auto reader = stub->Subscribe(&ctx, sub_req);
+        kuksa::val::v1::SubscribeResponse response;
+
+        while (g_running && reader->Read(&response)) {
+            for (const auto& update : response.updates()) {
+                const std::string& path = update.entry().path();
+
+                if (path == RANGE_PATH) {
+                    vehicle_range = as_float(update.entry().value());
+                } else if (path == SOC_PATH) {
+                    soc = as_float(update.entry().value());
+                    std::cout << "Charge: " << soc << "% | Range: " << vehicle_range << std::endl;
+
+                    if (soc < hvac_threshold && !hvac_cut) {
+                        std::cout << "[!] SoC=" << soc << "% < " << hvac_threshold << "%  ->  Turning HVAC off" << std::endl;
+                        set_bool(stub, HVAC_PATH, false);
+                        hvac_cut = true;
+                    } else if (soc >= hvac_threshold && hvac_cut) {
+                        std::cout << "[+] SoC=" << soc << "%  ->  HVAC restriction lifted" << std::endl;
+                        hvac_cut = false;
+                    }
+                    if (soc < seat_threshold && !seat_cut) {
+                        std::cout << "[!] SoC=" << soc << "% < " << seat_threshold << "%  ->  Turning Seat Heating off" << std::endl;
+                        set_int(stub, SEAT_HEAT_PATH, 0);
+                        seat_cut = true;
+                    } else if (soc >= seat_threshold && seat_cut) {
+                        std::cout << "[+] SoC=" << soc << "%  ->  Seat restriction lifted" << std::endl;
+                        seat_cut = false;
+                    }
+                } else if (path == HVAC_PATH && hvac_cut) {
+                    if (as_bool(update.entry().actuator_target())) {
+                        std::cout << "[!] Battery low  ->  blocking HVAC re-activation" << std::endl;
+                        set_bool(stub, HVAC_PATH, false);
+                    }
+                } else if (path == SEAT_HEAT_PATH && seat_cut) {
+                    if (as_int(update.entry().actuator_target()) != 0) {
+                        std::cout << "[!] Battery low  ->  blocking Seat Heating re-activation" << std::endl;
+                        set_int(stub, SEAT_HEAT_PATH, 0);
+                    }
+                }
+            }
+        }
+
+        if (!g_running) break;
+        auto status = reader->Finish();
+        std::cerr << "[EnergySaver] Stream ended: " << status.error_message() << std::endl;
+        std::cout << "[EnergySaver] Reconnecting in 5s..." << std::endl;
+        std::cout.flush();
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+    }
+}
+
+int main(int argc, char* argv[]) {
+    std::string target   = "172.17.0.1:55555";
+    float hvac_threshold = DEFAULT_HVAC_OFF_THRESHOLD;
+    float seat_threshold = DEFAULT_SEAT_OFF_THRESHOLD;
+
+    if (auto t = std::getenv("KUKSA_DATABROKER_ADDR")) target         = t;
+    if (auto h = std::getenv("HVAC_OFF_THRESHOLD"))    hvac_threshold = std::atof(h);
+    if (auto s = std::getenv("SEAT_OFF_THRESHOLD"))    seat_threshold = std::atof(s);
+    if (argc > 1) target         = argv[1];
+    if (argc > 2) hvac_threshold = std::atof(argv[2]);
+    if (argc > 3) seat_threshold = std::atof(argv[3]);
+
+    std::signal(SIGINT,  [](int) { g_running = false; });
+    std::signal(SIGTERM, [](int) { g_running = false; });
+
+    std::cout << "======================================================" << std::endl;
+    std::cout << "  Battery Energy Saver (sdv-runtime / VSS 4.0)" << std::endl;
+    std::cout << "  Version:         " << VERSION << std::endl;
+    std::cout << "  Databroker:      " << target << std::endl;
+    std::cout << "  HVAC off below:  " << hvac_threshold << "%" << std::endl;
+    std::cout << "  Seat off below:  " << seat_threshold << "%" << std::endl;
+    std::cout << "  HVAC signal:     IsAirConditioningActive (bool actuator)" << std::endl;
+    std::cout << "  TLS:             Disabled (insecure)" << std::endl;
+    std::cout << "======================================================" << std::endl;
+    std::cout.flush();
+
+    auto channel = grpc::CreateChannel(target, grpc::InsecureChannelCredentials());
+    auto stub = kuksa::val::v1::VAL::NewStub(channel);
+
+    for (int r = 1; r <= 15; r++) {
+        kuksa::val::v1::GetServerInfoRequest req;
+        kuksa::val::v1::GetServerInfoResponse resp;
+        grpc::ClientContext ctx;
+        ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(3));
+        auto st = stub->GetServerInfo(&ctx, req, &resp);
+        if (st.ok()) {
+            std::cout << "[EnergySaver] Connected: " << resp.name()
+                      << " " << resp.version() << std::endl;
+            break;
+        }
+        if (r == 15) { std::cerr << "[EnergySaver] Unreachable: " << target << std::endl; return 1; }
+        std::cout << "[EnergySaver] Waiting (" << r << "/15)..." << std::endl;
+        std::cout.flush();
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+    }
+
+    std::cout << "[EnergySaver] Subscribing to signals..." << std::endl;
+    std::cout.flush();
+
+    run(stub.get(), hvac_threshold, seat_threshold);
+
+    std::cout << "Battery Energy Saver: shutdown, no signal reset needed." << std::endl;
+    return 0;
+}`,
+      yaml: `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
+schemaVersion: 2
+
+publisher:
+  author: "developer@example.com"
+  company: "Example Corp"
+
+publish:
+  tlsKey: "aos-user-sp.p12"
+  domain: "aoscloud.io"
+
+items:
+  - identity:
+      type: "service"
+      codename: "battery-energy-saver-sdv"
+      title: "Battery Energy Saver - sdv-runtime / VSS 4.0"
+      description: "HVAC/seat cutoff logic corrected for sdv-runtime with actuator_target writes"
+    version: "1.0.0"
+    sourceFolder: "battery-energy-saver-sdv"
+
+    images:
+      - sourceFolder: "src_any"
+        archInfo:
+          architecture: "any"
+
+    configuration:
+      workingDir: "/"
+      cmd: "/battery-energy-saver-sdv"
+      env:
+        - "KUKSA_DATABROKER_ADDR=172.17.0.1:55555"
+        - "HVAC_OFF_THRESHOLD=50.0"
+        - "SEAT_OFF_THRESHOLD=30.0"
+      instances:
+        minInstances: 1
+        priority: 10
+      quotas:
+        cpuLimit: 1000
+        ramLimit: 10MB
+        storageLimit: 5MB
+        stateLimit: 512KB
+        tmpLimit: 256MiB`
+    },
     // ── Python Presets ──
     helloPython: {
       name: "Hello Python",
@@ -3866,728 +5252,393 @@ items:
         stateLimit: 1MiB         # 100 MiB
         tmpLimit: 256MiB         # 256 MiB`
     },
-    // ── Python equivalents of C++ presets ──
-    kuksaWriterPython: {
-      name: "Signal Writer (Python)",
-      appName: "signal-writer-py",
-      description: "Writes Speed, SoC, AmbientTemp to KUKSA Databroker via kuksa-client",
+    seatEcu: {
+      name: "Seat ECU (EV Range Extender)",
+      appName: "demo-ev-range-extender-seat-ecu",
+      description: "Seat Control Module \u2014 consumes dashboard seat heating/cooling commands over Zenoh, writes to Kuksa Databroker",
       language: "python",
-      python: `#!/usr/bin/env python3
+      python: `"""Seat ECU (SCM) service.
+
+Consumes the host dashboard's seat heating/cooling commands over Zenoh,
+writes corresponding values directly into the shared Kuksa Databroker on
+the primary node, and sends status updates back to the dashboard's
+indicator panel.
+
+Connectivity: runs as a Zenoh *client* that dials the router on the
+primary node (no inbound listener), and a Kuksa gRPC client pointed at
+the single broker. The service is stateless and may migrate between
+nodes; both endpoints are fixed on the primary node, so its current
+node does not matter.
+
+Signal flow (inbound \u2014 dashboard control)
+-----------------------------------------
+  pytk_dashboard.py
+    \u251C\u2500 sim/cabin/seat/heating \u2500\u2510
+    \u2514\u2500 sim/cabin/seat/hc       \u2534\u2500Zenoh\u2500\u25BA router \u2500\u25BA seat_ecu.py
+                                                       \u2502
+                                           write VSS over gRPC \u25BC
+                      Kuksa: Vehicle.Cabin.Seat.Row1.DriverSide.Heating
+                             Vehicle.Cabin.Seat.Row1.DriverSide.HeatingCooling
+
+Dashboard update
+----------------
+    Kuksa change (this ECU's write, or any other writer)
+        \u2514\u2500\u25BA _dashboard_forwarder (Kuksa subscription)
+                \u2514\u2500\u25BA Zenoh dash/status/seat \u2500\u25BA router \u2500\u25BA dashboard indicator
+
+Note: heating is 0\u2013100 %; hc is \u2013100 (cooling) to +100 (heating).
 """
-KUKSA Signal Writer (Python) for AosEdge.
-Writes Speed, SoC, and AmbientTemp signals to KUKSA Databroker.
-Uses kuksa-client VSSClient for gRPC communication.
-"""
-import time
-import sys
-import os
-import math
 
-VERSION = "1.0.0"
-
-# kuksa-client may not be pre-installed; install with: pip install kuksa-client
-try:
-    from kuksa_client.grpc import VSSClient, Datapoint
-except ImportError:
-    print("[Writer] kuksa-client not found. Install: pip install kuksa-client", flush=True)
-    sys.exit(1)
-
-def main():
-    target = os.environ.get("KUKSA_DATABROKER_ADDR", "172.17.0.1:55555")
-    interval = int(os.environ.get("WRITE_INTERVAL", "2"))
-    if len(sys.argv) > 1:
-        target = sys.argv[1]
-    if len(sys.argv) > 2:
-        interval = int(sys.argv[2])
-
-    host, port = target.rsplit(":", 1) if ":" in target else (target, "55555")
-
-    print("=" * 50, flush=True)
-    print("  KUKSA Signal Writer (Python)", flush=True)
-    print(f"  Version:    {VERSION}", flush=True)
-    print(f"  Databroker: {target}", flush=True)
-    print(f"  Interval:   {interval}s", flush=True)
-    print("=" * 50, flush=True)
-
-    # Connect with retry
-    client = VSSClient(host, int(port))
-    for attempt in range(1, 16):
-        try:
-            client.connect()
-            info = client.get_server_info()
-            print(f"[Writer] Connected: {info.name} {info.version}", flush=True)
-            break
-        except Exception as e:
-            if attempt == 15:
-                print(f"[Writer] Unreachable: {target} \u2014 {e}", flush=True)
-                sys.exit(1)
-            print(f"[Writer] Waiting ({attempt}/15)...", flush=True)
-            time.sleep(2)
-
-    t = 0
-    while True:
-        speed = 40.0 + 30.0 * math.sin(t * 0.1)
-        temp = 22.0 + 5.0 * math.sin(t * 0.05)
-        soc = max(0.0, min(100.0, 80.0 - t * 0.01))
-
-        try:
-            client.set_current_values({
-                "Vehicle.Speed": Datapoint(speed),
-                "Vehicle.Cabin.HVAC.AmbientAirTemperature": Datapoint(temp),
-                "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current": Datapoint(soc),
-            })
-        except Exception as e:
-            print(f"[Writer] Set error: {e}", flush=True)
-
-        if t % 5 == 0:
-            print(f"[Writer] t={t} Speed={speed:.1f} Temp={temp:.1f} SoC={soc:.1f}", flush=True)
-
-        t += 1
-        time.sleep(interval)
-
-if __name__ == "__main__":
-    main()
-`,
-      yaml: `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
-# Python service \u2014 architecture-independent
-schemaVersion: 2
-
-publisher:
-  author: "developer@example.com"
-  company: "Example Corp"
-
-publish:
-  tlsKey: "aos-user-sp.p12"
-  domain: "aoscloud.io"
-
-items:
-  - identity:
-      type: service
-      codename: "signal-writer-py"
-      title: "Signal Writer (Python)"
-      description: "Writes Speed, SoC, AmbientTemp to KUKSA Databroker via kuksa-client"
-    version: "1.0.0"
-    sourceFolder: "signal-writer-py"
-
-    images:
-      - sourceFolder: "src_any"
-        archInfo:
-          architecture: "any"
-
-    configuration:
-      workingDir: "/"
-      cmd: /usr/bin/python3 -u /main.py
-      env:
-        - "KUKSA_DATABROKER_ADDR=172.17.0.1:55556"
-      instances:
-        minInstances: 1
-        priority: 10
-      quotas:
-        cpuLimit: 5000
-        ramLimit: 512MiB
-        storageLimit: 32MiB
-        stateLimit: 1MiB
-        tmpLimit: 256MiB`
-    },
-    kuksaReaderPython: {
-      name: "KUKSA Reader (Python)",
-      appName: "kuksa-reader-py",
-      description: "Subscribes to vehicle signals from KUKSA Databroker via kuksa-client",
-      language: "python",
-      python: `#!/usr/bin/env python3
-"""
-KUKSA Signal Reader (Python) for AosEdge.
-Subscribes to Speed, SoC, and AmbientTemp from KUKSA Databroker.
-Uses kuksa-client VSSClient subscribe() for streaming updates.
-"""
-import time
-import sys
-import os
-
-VERSION = "1.0.0"
-
-try:
-    from kuksa_client.grpc import VSSClient, Datapoint
-except ImportError:
-    print("[Reader] kuksa-client not found. Install: pip install kuksa-client", flush=True)
-    sys.exit(1)
-
-SIGNALS = [
-    "Vehicle.Speed",
-    "Vehicle.Cabin.HVAC.AmbientAirTemperature",
-    "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current",
-]
-
-def format_value(dp):
-    """Extract a human-readable value from a Datapoint."""
-    if dp is None:
-        return "N/A"
-    # Datapoint stores the value in .value attribute
-    val = dp.value
-    if isinstance(val, bool):
-        return "true" if val else "false"
-    return str(val)
-
-def main():
-    target = os.environ.get("KUKSA_DATABROKER_ADDR", "172.17.0.1:55555")
-    if len(sys.argv) > 1:
-        target = sys.argv[1]
-
-    host, port = target.rsplit(":", 1) if ":" in target else (target, "55555")
-
-    print("=" * 50, flush=True)
-    print("  KUKSA Signal Reader (Python)", flush=True)
-    print(f"  Version:    {VERSION}", flush=True)
-    print(f"  Databroker: {target}", flush=True)
-    print("=" * 50, flush=True)
-
-    client = VSSClient(host, int(port))
-    for attempt in range(1, 16):
-        try:
-            client.connect()
-            info = client.get_server_info()
-            print(f"[Reader] Connected: {info.name} {info.version}", flush=True)
-            break
-        except Exception as e:
-            if attempt == 15:
-                print(f"[Reader] Unreachable: {target} \u2014 {e}", flush=True)
-                sys.exit(1)
-            print(f"[Reader] Waiting ({attempt}/15)...", flush=True)
-            time.sleep(2)
-
-    print(f"[Reader] Subscribing to {len(SIGNALS)} signals...", flush=True)
-
-    msg_count = 0
-    while True:
-        try:
-            for updates in client.subscribe_current_values(SIGNALS):
-                msg_count += 1
-                parts = [f"[Reader] #{msg_count}:"]
-                for update in updates:
-                    parts.append(f" {update.entry.path}={format_value(update.entry.value)}")
-                print("".join(parts), flush=True)
-        except Exception as e:
-            print(f"[Reader] Stream ended: {e}", flush=True)
-            print("[Reader] Reconnecting in 5s...", flush=True)
-            time.sleep(5)
-
-if __name__ == "__main__":
-    main()
-`,
-      yaml: `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
-# Python service \u2014 architecture-independent
-schemaVersion: 2
-
-publisher:
-  author: "developer@example.com"
-  company: "Example Corp"
-
-publish:
-  tlsKey: "aos-user-sp.p12"
-  domain: "aoscloud.io"
-
-items:
-  - identity:
-      type: service
-      codename: "kuksa-reader-py"
-      title: "KUKSA Reader (Python)"
-      description: "Subscribes to vehicle signals from KUKSA Databroker via kuksa-client"
-    version: "1.0.0"
-    sourceFolder: "kuksa-reader-py"
-
-    images:
-      - sourceFolder: "src_any"
-        archInfo:
-          architecture: "any"
-
-    configuration:
-      workingDir: "/"
-      cmd: /usr/bin/python3 -u /main.py
-      env:
-        - "KUKSA_DATABROKER_ADDR=172.17.0.1:55555"
-      instances:
-        minInstances: 1
-        priority: 10
-      quotas:
-        cpuLimit: 5000
-        ramLimit: 512MiB
-        storageLimit: 32MiB
-        stateLimit: 1MiB
-        tmpLimit: 256MiB`
-    },
-    evRangeExtenderPython: {
-      name: "EV Range Extender (Python)",
-      appName: "ev-range-extender-py",
-      description: "Battery management, range computation, power-saving mode control via kuksa-client",
-      language: "python",
-      python: `#!/usr/bin/env python3
-"""
-EV Range Extender (Python) for AosEdge.
-Reads SoC and temperature from KUKSA Databroker, computes range,
-and switches between NORMAL and POWER_SAVE modes.
-"""
-import time
-import sys
-import os
-import math
-
-VERSION = "1.0.0"
-SOC_THRESHOLD = 20.0
-NORMAL_EFFICIENCY = 5.5
-DEGRADED_EFFICIENCY = 4.0
-
-try:
-    from kuksa_client.grpc import VSSClient, Datapoint
-except ImportError:
-    print("[RangeExt] kuksa-client not found. Install: pip install kuksa-client", flush=True)
-    sys.exit(1)
-
-SOC_PATH   = "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current"
-TEMP_PATH  = "Vehicle.Cabin.HVAC.AmbientAirTemperature"
-RANGE_PATH = "Vehicle.Powertrain.Range"
-LIGHT_PATH = "Vehicle.Cabin.Lights.AmbientLight.Intensity"
-SEAT_PATH  = "Vehicle.Cabin.Seat.Heating"
-
-def get_float(client, path):
-    try:
-        entries = client.get_current_values([path])
-        if entries:
-            dp = entries[path]
-            return float(dp.value) if dp.value is not None else -1.0
-    except Exception:
-        pass
-    return -1.0
-
-def main():
-    target = os.environ.get("KUKSA_DATABROKER_ADDR", "172.17.0.1:55555")
-    interval = int(os.environ.get("CHECK_INTERVAL", "2"))
-    soc_threshold = float(os.environ.get("SOC_THRESHOLD", str(SOC_THRESHOLD)))
-    if len(sys.argv) > 1:
-        target = sys.argv[1]
-    if len(sys.argv) > 2:
-        interval = int(sys.argv[2])
-
-    host, port = target.rsplit(":", 1) if ":" in target else (target, "55555")
-
-    print("=" * 50, flush=True)
-    print("  EV Range Extender (Python)", flush=True)
-    print(f"  Version:       {VERSION}", flush=True)
-    print(f"  Databroker:    {target}", flush=True)
-    print(f"  Interval:      {interval}s", flush=True)
-    print(f"  SoC threshold: {soc_threshold}%", flush=True)
-    print("=" * 50, flush=True)
-
-    client = VSSClient(host, int(port))
-    for attempt in range(1, 16):
-        try:
-            client.connect()
-            info = client.get_server_info()
-            print(f"[RangeExt] Connected: {info.name} {info.version}", flush=True)
-            break
-        except Exception as e:
-            if attempt == 15:
-                print(f"[RangeExt] Unreachable: {target} \u2014 {e}", flush=True)
-                sys.exit(1)
-            print(f"[RangeExt] Waiting ({attempt}/15)...", flush=True)
-            time.sleep(2)
-
-    prev_mode = ""
-    cycle = 0
-
-    while True:
-        cycle += 1
-
-        soc = get_float(client, SOC_PATH)
-        if soc < 0:
-            soc = 50.0
-
-        if soc < soc_threshold:
-            mode = "POWER_SAVE"
-            range_km = soc * DEGRADED_EFFICIENCY
-            light_intensity = 30.0
-            seat_heating = 0.0
-        else:
-            mode = "NORMAL"
-            range_km = soc * NORMAL_EFFICIENCY
-            light_intensity = 100.0
-            seat_heating = 1.0
-
-        try:
-            client.set_current_values({
-                RANGE_PATH: Datapoint(range_km),
-                LIGHT_PATH: Datapoint(light_intensity),
-                SEAT_PATH: Datapoint(seat_heating),
-            })
-        except Exception as e:
-            print(f"[RangeExt] Set error: {e}", flush=True)
-
-        if mode != prev_mode:
-            print(f"[RangeExt] *** MODE CHANGE: {mode} ***", flush=True)
-            prev_mode = mode
-
-        if cycle % 5 == 1:
-            temp = get_float(client, TEMP_PATH)
-            temp_str = f"{int(temp)}C" if temp >= 0 else "N/A"
-            print(f"[RangeExt] cycle={cycle} mode={mode} SoC={soc:.0f}% Temp={temp_str} Range={range_km:.0f}km Lights={light_intensity:.0f} SeatHeat={seat_heating:.0f}", flush=True)
-
-        time.sleep(interval)
-
-if __name__ == "__main__":
-    main()
-`,
-      yaml: `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
-# Python service \u2014 architecture-independent
-schemaVersion: 2
-
-publisher:
-  author: "developer@example.com"
-  company: "Example Corp"
-
-publish:
-  tlsKey: "aos-user-sp.p12"
-  domain: "aoscloud.io"
-
-items:
-  - identity:
-      type: service
-      codename: "ev-range-extender-py"
-      title: "EV Range Extender (Python)"
-      description: "Battery management, range computation, power-saving mode control"
-    version: "1.0.0"
-    sourceFolder: "ev-range-extender-py"
-
-    images:
-      - sourceFolder: "src_any"
-        archInfo:
-          architecture: "any"
-
-    configuration:
-      workingDir: "/"
-      cmd: /usr/bin/python3 -u /main.py
-      env:
-        - "KUKSA_DATABROKER_ADDR=172.17.0.1:55555"
-      instances:
-        minInstances: 1
-        priority: 10
-      quotas:
-        cpuLimit: 5000
-        ramLimit: 512MiB
-        storageLimit: 32MiB
-        stateLimit: 1MiB
-        tmpLimit: 256MiB`
-    },
-    batteryEnergySaverPython: {
-      name: "Battery Energy Saver (Python)",
-      appName: "battery-energy-saver-py",
-      description: "Forces HVAC and seat heating off when SoC drops below thresholds via kuksa-client",
-      language: "python",
-      python: `#!/usr/bin/env python3
-"""
-Battery Energy Saver (Python) for AosEdge.
-Subscribes to SoC and forces HVAC/seat heating off when battery is low.
-Blocks re-activation while SoC remains below thresholds.
-"""
-import time
-import sys
-import os
-import signal as sig_module
-
-VERSION = "1.0.0"
-DEFAULT_HVAC_OFF_THRESHOLD = 50.0
-DEFAULT_SEAT_OFF_THRESHOLD = 30.0
-
-try:
-    from kuksa_client.grpc import VSSClient, Datapoint
-except ImportError:
-    print("[EnergySaver] kuksa-client not found. Install: pip install kuksa-client", flush=True)
-    sys.exit(1)
-
-RANGE_PATH     = "Vehicle.Powertrain.Range"
-SOC_PATH       = "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current"
-HVAC_PATH      = "Vehicle.Cabin.HVAC.IsAirConditioningActive"
-SEAT_HEAT_PATH = "Vehicle.Cabin.Seat.Row1.DriverSide.Heating"
-
-g_running = True
-
-def signal_handler(signum, frame):
-    global g_running
-    g_running = False
-
-def main():
-    global g_running
-    target = os.environ.get("KUKSA_DATABROKER_ADDR", "172.17.0.1:55555")
-    hvac_threshold = float(os.environ.get("HVAC_OFF_THRESHOLD", str(DEFAULT_HVAC_OFF_THRESHOLD)))
-    seat_threshold = float(os.environ.get("SEAT_OFF_THRESHOLD", str(DEFAULT_SEAT_OFF_THRESHOLD)))
-    if len(sys.argv) > 1:
-        target = sys.argv[1]
-    if len(sys.argv) > 2:
-        hvac_threshold = float(sys.argv[2])
-    if len(sys.argv) > 3:
-        seat_threshold = float(sys.argv[3])
-
-    sig_module.signal(sig_module.SIGINT, signal_handler)
-    sig_module.signal(sig_module.SIGTERM, signal_handler)
-
-    host, port = target.rsplit(":", 1) if ":" in target else (target, "55555")
-
-    print("=" * 60, flush=True)
-    print("  Battery Energy Saver (Python)", flush=True)
-    print(f"  Version:         {VERSION}", flush=True)
-    print(f"  Databroker:      {target}", flush=True)
-    print(f"  HVAC off below:  {hvac_threshold}%", flush=True)
-    print(f"  Seat off below:  {seat_threshold}%", flush=True)
-    print("=" * 60, flush=True)
-
-    client = VSSClient(host, int(port))
-    for attempt in range(1, 16):
-        try:
-            client.connect()
-            info = client.get_server_info()
-            print(f"[EnergySaver] Connected: {info.name} {info.version}", flush=True)
-            break
-        except Exception as e:
-            if attempt == 15:
-                print(f"[EnergySaver] Unreachable: {target} \u2014 {e}", flush=True)
-                sys.exit(1)
-            print(f"[EnergySaver] Waiting ({attempt}/15)...", flush=True)
-            time.sleep(2)
-
-    print("[EnergySaver] Subscribing to signals...", flush=True)
-
-    soc = 100.0
-    vehicle_range = 0.0
-    hvac_cut = False
-    seat_cut = False
-
-    while g_running:
-        try:
-            for updates in client.subscribe_current_values([
-                RANGE_PATH, SOC_PATH, HVAC_PATH, SEAT_HEAT_PATH
-            ]):
-                if not g_running:
-                    break
-
-                for update in updates:
-                    path = update.entry.path
-                    dp = update.entry.value
-
-                    if path == RANGE_PATH:
-                        vehicle_range = float(dp.value) if dp.value is not None else 0.0
-                    elif path == SOC_PATH:
-                        soc = float(dp.value) if dp.value is not None else 100.0
-                        print(f"Charge: {soc:.0f}% | Range: {vehicle_range:.0f}", flush=True)
-
-                        if soc < hvac_threshold and not hvac_cut:
-                            print(f"[!] SoC={soc:.0f}% < {hvac_threshold:.0f}%  ->  Turning HVAC off", flush=True)
-                            client.set_target_values({HVAC_PATH: Datapoint(False)})
-                            hvac_cut = True
-                        elif soc >= hvac_threshold and hvac_cut:
-                            print(f"[+] SoC={soc:.0f}%  ->  HVAC restriction lifted", flush=True)
-                            hvac_cut = False
-
-                        if soc < seat_threshold and not seat_cut:
-                            print(f"[!] SoC={soc:.0f}% < {seat_threshold:.0f}%  ->  Turning Seat Heating off", flush=True)
-                            client.set_target_values({SEAT_HEAT_PATH: Datapoint(0)})
-                            seat_cut = True
-                        elif soc >= seat_threshold and seat_cut:
-                            print(f"[+] SoC={soc:.0f}%  ->  Seat restriction lifted", flush=True)
-                            seat_cut = False
-
-                    elif path == HVAC_PATH and hvac_cut:
-                        val = dp.value
-                        if val is not None and bool(val):
-                            print("[!] Battery low  ->  blocking HVAC re-activation", flush=True)
-                            client.set_target_values({HVAC_PATH: Datapoint(False)})
-
-                    elif path == SEAT_HEAT_PATH and seat_cut:
-                        val = dp.value
-                        if val is not None and int(val) != 0:
-                            print("[!] Battery low  ->  blocking Seat Heating re-activation", flush=True)
-                            client.set_target_values({SEAT_HEAT_PATH: Datapoint(0)})
-
-        except Exception as e:
-            if not g_running:
-                break
-            print(f"[EnergySaver] Stream ended: {e}", flush=True)
-            print("[EnergySaver] Reconnecting in 5s...", flush=True)
-            time.sleep(5)
-
-    print("Battery Energy Saver: shutdown, no signal reset needed.", flush=True)
-
-if __name__ == "__main__":
-    main()
-`,
-      yaml: `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
-# Python service \u2014 architecture-independent
-schemaVersion: 2
-
-publisher:
-  author: "developer@example.com"
-  company: "Example Corp"
-
-publish:
-  tlsKey: "aos-user-sp.p12"
-  domain: "aoscloud.io"
-
-items:
-  - identity:
-      type: service
-      codename: "battery-energy-saver-py"
-      title: "Battery Energy Saver (Python)"
-      description: "Forces HVAC and seat heating off when SoC drops below thresholds"
-    version: "1.0.0"
-    sourceFolder: "battery-energy-saver-py"
-
-    images:
-      - sourceFolder: "src_any"
-        archInfo:
-          architecture: "any"
-
-    configuration:
-      workingDir: "/"
-      cmd: /usr/bin/python3 -u /main.py
-      env:
-        - "KUKSA_DATABROKER_ADDR=172.17.0.1:55555"
-        - "HVAC_OFF_THRESHOLD=50.0"
-        - "SEAT_OFF_THRESHOLD=30.0"
-      instances:
-        minInstances: 1
-        priority: 10
-      quotas:
-        cpuLimit: 5000
-        ramLimit: 512MiB
-        storageLimit: 32MiB
-        stateLimit: 1MiB
-        tmpLimit: 256MiB`
-    },
-    signalReporterPython: {
-      name: "Signal Reporter (Python)",
-      appName: "signal-reporter-py",
-      description: "Subscribes to 9 vehicle signals and relays to dashboard via HTTP",
-      language: "python",
-      python: `#!/usr/bin/env python3
-"""
-Signal Reporter (Python) for AosEdge.
-Subscribes to 9 vehicle signals from KUKSA Databroker and relays
-them as JSON to a dashboard HTTP endpoint.
-"""
-import time
-import sys
-import os
+import argparse
+import asyncio
 import json
-import urllib.request
+import sys
+import threading
+from datetime import datetime, timezone
+from typing import Any
 
-VERSION = "1.0.0"
+import zenoh
+from kuksa_client.grpc import Datapoint
+from kuksa_client.grpc.aio import VSSClient
 
-try:
-    from kuksa_client.grpc import VSSClient, Datapoint
-except ImportError:
-    print("[Reporter] kuksa-client not found. Install: pip install kuksa-client", flush=True)
-    sys.exit(1)
+DEFAULT_ROUTER = "tcp/zenoh:7447"  # zenoh router (resolves to primary node)
+DEFAULT_KUKSA_HOST = "kuksa"
+DEFAULT_KUKSA_PORT = 55555
+SEAT_HEAT_VSS_PATH = "Vehicle.Cabin.Seat.Row1.DriverSide.Heating"
+SEAT_HC_VSS_PATH = "Vehicle.Cabin.Seat.Row1.DriverSide.HeatingCooling"
 
-SIGNALS = [
-    "Vehicle.Speed",
-    "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current",
-    "Vehicle.Powertrain.Range",
-    "Vehicle.Cabin.HVAC.AmbientAirTemperature",
-    "Vehicle.Cabin.HVAC.TargetTemperature",
-    "Vehicle.Cabin.Lights.AmbientLight.Intensity",
-    "Vehicle.Cabin.Seat.Heating",
-    "Vehicle.Cabin.Seat.VentilationLevel",
-    "Vehicle.Infotainment.Display.Brightness",
-]
+SOURCE_LABEL = "vm2"  # embedded in every outgoing envelope
+DASH_STATUS_KEY = "dash/status/seat"  # reverse channel to dashboard
 
-def http_post(url, body):
-    """Send a JSON POST request. Returns True on success."""
+
+KEY_TO_VSS = {
+    "sim/cabin/seat/heating": (
+        SEAT_HEAT_VSS_PATH,
+        int,
+    ),
+    "sim/cabin/seat/hc": (
+        SEAT_HC_VSS_PATH,
+        int,
+    ),
+}
+
+KEY_PREFIX = "sim/cabin/seat/**"
+
+
+# VSS path -> dashboard indicator key used by IndicatorPanel.
+VSS_TO_DASH_KEY = {
+   # SEAT_HEAT_VSS_PATH: "seat.heating",   # SEAT_HEAT_VSS_PATH is broken (absent in VSS spec)
+    SEAT_HC_VSS_PATH: "seat.heating_cooling",
+}
+
+
+def _seat_status(vss_path: str, value: Any) -> str:
+    """Map a (path, value) pair to the dashboard indicator state.
+
+    Indicator semantics (see module docstring):
+       Heating          > 0  -> "heating"  (dashboard renders red)
+       HeatingCooling   > 0  -> "heating"  (dashboard renders red)
+       HeatingCooling   < 0  -> "cooling"  (dashboard renders blue)
+       all other (=== 0)     -> "off"      (dashboard renders blue/idle)
+    """
     try:
-        data = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        urllib.request.urlopen(req, timeout=2)
-        return True
-    except Exception:
-        return False
+        v = float(value)
+    except (TypeError, ValueError):
+        return "off"
+    if v > 0:
+        return "heating"
+    if vss_path.endswith("HeatingCooling") and v < 0:
+        return "cooling"
+    return "off"
 
-def main():
-    kuksa_target = os.environ.get("KUKSA_DATABROKER_ADDR", "172.17.0.1:55555")
-    relay_url = os.environ.get("SIGNAL_RELAY_URL", "http://172.17.0.1:9100/signal")
-    if len(sys.argv) > 1:
-        kuksa_target = sys.argv[1]
-    if len(sys.argv) > 2:
-        relay_url = sys.argv[2]
 
-    host, port = kuksa_target.rsplit(":", 1) if ":" in kuksa_target else (kuksa_target, "55555")
+def log(msg: str) -> None:
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    print(f"[{ts}] [seat] {msg}", flush=True)
 
-    print("=" * 50, flush=True)
-    print("  Signal Reporter (Python)", flush=True)
-    print(f"  Version:    {VERSION}", flush=True)
-    print(f"  Databroker: {kuksa_target}", flush=True)
-    print(f"  Relay:      {relay_url}", flush=True)
-    print("=" * 50, flush=True)
 
-    client = VSSClient(host, int(port))
-    for attempt in range(1, 16):
-        try:
-            client.connect()
-            info = client.get_server_info()
-            print(f"[Reporter] Connected: {info.name} {info.version}", flush=True)
-            break
-        except Exception as e:
-            if attempt == 15:
-                print(f"[Reporter] Unreachable: {kuksa_target} \u2014 {e}", flush=True)
-                sys.exit(1)
-            print(f"[Reporter] Waiting ({attempt}/15)...", flush=True)
-            time.sleep(2)
+def build_zenoh_config(router_endpoint: str) -> zenoh.Config:
+    # Client mode: dial the router on the primary node and open NO
+    # inbound listener. Pub/sub still flows both ways over the outbound
+    # link, so no inbound port is exposed and the ECU stays reachable
+    # no matter which node it migrates to.
+    #
+    # Scouting is disabled so the client connects ONLY to the configured
+    # router and never auto-discovers or meshes with other peers/routers
+    # (deterministic connectivity; no rogue-router vector). Verify these
+    # key names against the Zenoh version in the runtime image.
+    config = zenoh.Config()
+    config.insert_json5("mode", '"client"')
+    config.insert_json5("connect/endpoints", f'["{router_endpoint}"]')
+    config.insert_json5("scouting/multicast/enabled", "false")
+    config.insert_json5("scouting/gossip/enabled", "false")
+    return config
 
-    print(f"[Reporter] Subscribing to {len(SIGNALS)} signals...", flush=True)
 
-    msg_count = 0
-    post_ok = 0
-    post_fail = 0
+class _LatestValueQueue:
+    """Coalescing latest-value queue for a small number of VSS paths.
 
+    Producers (the Zenoh worker thread) call \`offer(path, value, cast,
+    src)\` on every incoming sample. When multiple samples for the same
+    path arrive before the consumer drains, only the LAST one survives.
+    The single consumer (one asyncio task) calls \`take()\` and gets a
+    snapshot of all pending paths, then clears the slot.
+
+    For seat the queue is especially useful because Heating and
+    HeatingCooling toggles can flip near-simultaneously (the host
+    dashboard's mutex publishes them in quick succession). Both end
+    up in the same snapshot and are written to Kuksa in a single
+    batched RPC.
+    """
+
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+        self._lock = threading.Lock()
+        self._pending: dict[str, tuple[Any, Any, str]] = {}
+        self._evt = asyncio.Event()
+
+    def offer(self, path: str, value: Any, cast: Any, src: str) -> None:
+        """Producer side. Safe to call from any thread; never blocks."""
+        with self._lock:
+            self._pending[path] = (value, cast, src)
+        self._loop.call_soon_threadsafe(self._evt.set)
+
+    async def take(self) -> dict[str, tuple[Any, Any, str]]:
+        """Consumer side. Awaits at least one offered value, returns snapshot."""
+        while True:
+            await self._evt.wait()
+            with self._lock:
+                if self._pending:
+                    snapshot = self._pending
+                    self._pending = {}
+                    self._evt.clear()
+                    return snapshot
+                self._evt.clear()
+
+
+async def _consumer(
+    queue: "_LatestValueQueue",
+    kuksa: VSSClient,
+) -> None:
+    """Drain the latest-value queue and write to Kuksa with dedup.
+
+    Only writes to Kuksa. Dashboard updates come exclusively from
+    _dashboard_forwarder (Kuksa subscription), which fires for any
+    write to the path regardless of which writer made it.
+    """
+    last_sent: dict[str, Any] = {}
     while True:
-        try:
-            for updates in client.subscribe_current_values(SIGNALS):
-                msg_count += 1
+        pending = await queue.take()
+        updates: dict[str, Datapoint] = {}
+        log_lines: list[str] = []
+        for path, (raw_value, cast, src) in pending.items():
+            try:
+                coerced = cast(raw_value)
+            except (TypeError, ValueError) as exc:
+                log(
+                    f"WARN cannot cast {raw_value!r} -> {cast.__name__} for {path}: {exc}"
+                )
+                continue
+            if last_sent.get(path) == coerced:
+                continue
+            updates[path] = Datapoint(coerced)
+            last_sent[path] = coerced
+            log_lines.append(f"OK   {path} = {coerced} (from {src})")
+        if updates:
+            try:
+                await kuksa.set_current_values(updates)
+            except Exception as exc:
+                log(f"ERROR writing {len(updates)} key(s) to Kuksa: {exc}")
+                continue
+        for line in log_lines:
+            log(line)
 
-                for update in updates:
-                    path = update.entry.path
-                    dp = update.entry.value
-                    val = dp.value if dp is not None else None
 
-                    payload = {
-                        "signal": path,
-                        "value": val,
-                        "ts": int(time.time() * 1000),
-                    }
+async def _dashboard_forwarder(
+    kuksa: VSSClient,
+    dash_pub: "zenoh.Publisher",
+) -> None:
+    """Subscribe to both seat VSS paths on local Kuksa and forward each
+    change to the host dashboard as a \`{key, value, status}\` envelope.
 
-                    if http_post(relay_url, payload):
-                        post_ok += 1
-                    else:
-                        post_fail += 1
+    See module docstring for the surface contract; semantics are kept
+    intentionally tiny on this side so the dashboard can stay a dumb
+    renderer that just maps \`status\` to a color.
+    """
+    last_status: dict[str, str] = {}
+    paths = list(VSS_TO_DASH_KEY.keys())  # Vehicle.Cabin.Seat.Row1.DriverSide.Heating is absent
+    async for updates in kuksa.subscribe_current_values(paths):
+        for path, dp in updates.items():
+            if dp is None or dp.value is None:
+                continue
+            dash_key = VSS_TO_DASH_KEY.get(path)
+            if dash_key is None:
+                continue
+            status = _seat_status(path, dp.value)
+            payload = json.dumps(
+                {
+                    "key": dash_key,
+                    "value": (
+                        int(dp.value)
+                        if isinstance(dp.value, (int, float))
+                        else dp.value
+                    ),
+                    "status": status,
+                    "source": SOURCE_LABEL,
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                }
+            ).encode("utf-8")
+            try:
+                dash_pub.put(payload)
+            except Exception as exc:
+                log(f"ERROR forwarding {path} to dashboard: {exc}")
+                continue
+            changed = last_status.get(path) != status
+            last_status[path] = status
+            tag = "ACT " if changed else "act "
+            log(f"{tag} {path} = {dp.value}  -> dashboard {dash_key} (status={status})")
 
-                if msg_count % 50 == 0:
-                    print(f"[Reporter] msgs={msg_count} posted={post_ok} failed={post_fail}", flush=True)
 
-        except Exception as e:
-            print(f"[Reporter] Stream ended: {e}", flush=True)
-            print("[Reporter] Reconnecting in 5s...", flush=True)
-            time.sleep(5)
+async def run(router: str, kuksa_host: str, kuksa_port: int) -> None:
+    # Single shared Kuksa broker on the primary node: the ECU writes
+    # seat values straight into Kuksa over gRPC. No kuksa-bridge.
+    await _run_with_kuksa(router, kuksa_host, kuksa_port)
+
+
+async def _run_with_kuksa(router: str, kuksa_host: str, kuksa_port: int) -> None:
+    log(f"Connecting to Kuksa Databroker at {kuksa_host}:{kuksa_port}...")
+    async with VSSClient(kuksa_host, kuksa_port) as kuksa:
+        log("Connected to Kuksa.")
+        log("Subscribed Zenoh keys -> VSS paths:")
+        for k, (vss, cast) in KEY_TO_VSS.items():
+            log(f"    {k}  ->  {vss}  ({cast.__name__})")
+
+        loop = asyncio.get_running_loop()
+        queue = _LatestValueQueue(loop)
+        log(
+            f"Opening Zenoh session (client mode) -> router {router}, subscribed to '{KEY_PREFIX}'"
+        )
+        with zenoh.open(build_zenoh_config(router)) as session:
+
+            def listener(sample: zenoh.Sample) -> None:
+                key = str(sample.key_expr)
+                cfg = KEY_TO_VSS.get(key)
+                if cfg is None:
+                    log(f"WARN ignoring unknown key '{key}'")
+                    return
+                vss_path, cast = cfg
+                try:
+                    raw = sample.payload.to_string()
+                    msg = json.loads(raw)
+                except Exception as exc:
+                    log(f"WARN bad payload on '{key}': {exc}")
+                    return
+                value = msg.get("value")
+                src = msg.get("source", "?")
+                if value is None:
+                    log(f"WARN payload missing 'value' on '{key}': {msg}")
+                    return
+                queue.offer(vss_path, value, cast, src)
+
+            # Retain the subscriber handle for the session's lifetime. If
+            # this reference is dropped, Zenoh garbage-collects the
+            # subscription and ingest stops with no error. Kept in a list
+            # (and referenced below) so it survives lint/autoflake passes.
+            subscribers = [session.declare_subscriber(KEY_PREFIX, listener)]
+
+            # Reverse channel to the host dashboard - declared on the SAME
+            # Zenoh session so it shares the ECU's single client connection
+            # to the router (command and status ride the one outbound link).
+            dash_pub = session.declare_publisher(DASH_STATUS_KEY)
+            log(
+                f"Reverse channel publisher on '{DASH_STATUS_KEY}' ready "
+                f"({len(subscribers)} subscriber active)."
+            )
+
+            consumer_task = asyncio.create_task(_consumer(queue, kuksa))
+
+            forwarder_task = asyncio.create_task(_dashboard_forwarder(kuksa, dash_pub))
+            log(
+                f"Kuksa->dashboard forwarder subscribed to: "
+                f"{', '.join(VSS_TO_DASH_KEY.keys())}"
+            )
+
+            log(
+                "Seat ECU running. Drive values from the host PyTk dashboard. Ctrl+C to stop."
+            )
+            tasks = {consumer_task, forwarder_task}
+            try:
+                # Fail fast: if either task exits \u2014 almost always because
+                # the Kuksa subscribe stream broke \u2014 surface the error so
+                # main() logs FATAL and the process exits for the
+                # supervisor to restart. A dead task must never be left
+                # running unobserved (which would be a half-working ECU
+                # with no crash and no restart).
+                done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            except asyncio.CancelledError:
+                done = set()
+            finally:
+                for t in tasks:
+                    t.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+            for t in done:
+                exc = t.exception()
+                if exc is not None:
+                    raise exc
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="Seat Control Module. Connects (Zenoh client mode) to "
+        "the router on the primary node for sim/cabin/seat/* "
+        "samples driven by the host PyTk dashboard, and writes "
+        "the values into the shared Kuksa Databroker. Opens no "
+        "inbound listener."
+    )
+    p.add_argument(
+        "--router",
+        default=DEFAULT_ROUTER,
+        help=f"Zenoh router endpoint on the primary node "
+        f"(default: {DEFAULT_ROUTER})",
+    )
+    p.add_argument(
+        "--kuksa-host",
+        default=DEFAULT_KUKSA_HOST,
+        help=f"Kuksa Databroker host (default: {DEFAULT_KUKSA_HOST})",
+    )
+    p.add_argument(
+        "--kuksa-port",
+        type=int,
+        default=DEFAULT_KUKSA_PORT,
+        help=f"Kuksa Databroker port (default: {DEFAULT_KUKSA_PORT})",
+    )
+    return p.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        asyncio.run(run(args.router, args.kuksa_host, args.kuksa_port))
+    except KeyboardInterrupt:
+        log("Stopping.")
+        return 0
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        log(f"FATAL: {exc} type={type(exc)}")
+        return 1
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
 `,
-      yaml: `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
-# Python service \u2014 architecture-independent
+      yaml: `# Seat ECU \u2014 EV Range Extender (schemaVersion: 2)
 schemaVersion: 2
 
 publisher:
-  author: "developer@example.com"
-  company: "Example Corp"
+  author: "AosCloud team"
+  company: "EPAM Systems"
 
 publish:
   tlsKey: "aos-user-sp.p12"
@@ -4596,11 +5647,11 @@ publish:
 items:
   - identity:
       type: service
-      codename: "signal-reporter-py"
-      title: "Signal Reporter (Python)"
-      description: "Subscribes to 9 vehicle signals and relays to dashboard via HTTP"
-    version: "1.0.0"
-    sourceFolder: "signal-reporter-py"
+      codename: "demo-ev-range-extender-seat-ecu"
+      title: "Demo EV Range Extender Seat ECU"
+      description: "Seat Control Module \u2014 consumes dashboard commands over Zenoh, writes to Kuksa"
+    version: "2.0.0"
+    sourceFolder: "demo-ev-range-extender-seat-ecu"
 
     images:
       - sourceFolder: "src_any"
@@ -4610,30 +5661,1025 @@ items:
     configuration:
       workingDir: "/"
       cmd: /usr/bin/python3 -u /main.py
-      env:
-        - "KUKSA_DATABROKER_ADDR=172.17.0.1:55555"
-        - "SIGNAL_RELAY_URL=http://172.17.0.1:9100/signal"
       instances:
         minInstances: 1
         priority: 10
+        labels:
+          - secondary
       quotas:
-        cpuLimit: 5000
-        ramLimit: 512MiB
+        cpuLimit: 1000
+        ramLimit: 128MiB
         storageLimit: 32MiB
-        stateLimit: 1MiB
-        tmpLimit: 256MiB`
+      resources:
+        - name: kuksa
+          mode: rw
+        - name: zenoh
+          mode: rw
+    dependencies:
+      - identity:
+          type: layer
+          codename: kuksa-client
+        versions: '>=6.1.0-bosch.2'
+      - identity:
+          type: layer
+          codename: zenoh-client
+        versions: '>=6.1.0-bosch.2'`
+    },
+    hvacEcu: {
+      name: "HVAC ECU (EV Range Extender)",
+      appName: "demo-ev-range-extender-hvac-ecu",
+      description: "HVAC ECU \u2014 consumes dashboard fan-speed commands over Zenoh, writes to Kuksa Databroker",
+      language: "python",
+      python: `"""HVAC ECU service.
+
+Consumes the host dashboard's fan-speed command over Zenoh, writes it
+directly into the shared Kuksa Databroker on the primary node, and sends
+status updates back to the dashboard's indicator panel.
+
+Connectivity: runs as a Zenoh *client* that dials the router on the
+primary node (no inbound listener), and a Kuksa gRPC client pointed at
+the single broker. The service is stateless and may migrate between
+nodes; both endpoints are fixed on the primary node, so its current
+node does not matter.
+
+Signal flow (inbound \u2014 dashboard control)
+-----------------------------------------
+  pytk_dashboard.py \u2500Zenoh sim/cabin/temp\u2500\u25BA router \u2500\u25BA hvac_ecu.py
+                                                          \u2502
+                                              write VSS over gRPC \u25BC
+                      Kuksa: Vehicle.Cabin.HVAC.AmbientAirTemperature
+
+Dashboard update
+----------------
+    Kuksa change (this ECU's write, or any other writer)
+        \u2514\u2500\u25BA _dashboard_forwarder (Kuksa subscription)
+                \u2514\u2500\u25BA Zenoh dash/status/hvac \u2500\u25BA router \u2500\u25BA dashboard indicator
+
+Note: 'sim/cabin/temp' carries a 0\u2013100 fan-speed % value.
+"""
+
+import argparse
+import asyncio
+import json
+import sys
+import threading
+from datetime import datetime, timezone
+from typing import Any
+
+import zenoh
+from kuksa_client.grpc import Datapoint
+from kuksa_client.grpc.aio import VSSClient
+
+
+DEFAULT_ROUTER = "tcp/zenoh:7447"  # zenoh router (resolves to primary node)
+DEFAULT_KUKSA_HOST = "kuksa"
+DEFAULT_KUKSA_PORT = 55555
+HVAC_VSS_PATH = "Vehicle.Cabin.HVAC.AmbientAirTemperature"
+
+SOURCE_LABEL = "vm2"           # embedded in every outgoing envelope
+DASH_STATUS_KEY = "dash/status/hvac"  # reverse channel to dashboard
+DASH_KEY_PAIR = "hvac.fan_speed"      # logical key used by dashboard indicator
+
+
+KEY_TO_VSS = {
+    "sim/cabin/temp": (
+        HVAC_VSS_PATH,
+        float,
+    ),
+}
+
+KEY_PREFIX = "sim/cabin/temp"
+
+
+# VSS paths the ECU subscribes to on its local Kuksa to drive the
+# dashboard indicator. Listed separately from KEY_TO_VSS because the
+# dashboard-forward path is independent of the host-Zenoh ingest path.
+VSS_TO_DASH = (HVAC_VSS_PATH,)
+
+
+def _hvac_status(value: float) -> str:
+    """Map a fan-speed value (0..100) to the dashboard indicator state.
+
+    Per the demo narrative the HVAC indicator is binary:
+       fan > 0  -> "on"   (dashboard renders green)
+       fan == 0 -> "off"  (dashboard renders red)
+    """
+    try:
+        return "on" if float(value) > 0 else "off"
+    except (TypeError, ValueError):
+        return "off"
+
+
+def log(msg: str) -> None:
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    print(f"[{ts}] [hvac] {msg}", flush=True)
+
+
+def build_zenoh_config(router_endpoint: str) -> zenoh.Config:
+    # Client mode: dial the router on the primary node and open NO
+    # inbound listener. Pub/sub still flows both ways over the outbound
+    # link, so no inbound port is exposed and the ECU stays reachable
+    # no matter which node it migrates to.
+    #
+    # Scouting is disabled so the client connects ONLY to the configured
+    # router and never auto-discovers or meshes with other peers/routers
+    # (deterministic connectivity; no rogue-router vector). Verify these
+    # key names against the Zenoh version in the runtime image.
+    config = zenoh.Config()
+    config.insert_json5("mode", '"client"')
+    config.insert_json5("connect/endpoints", f'["{router_endpoint}"]')
+    config.insert_json5("scouting/multicast/enabled", "false")
+    config.insert_json5("scouting/gossip/enabled", "false")
+    return config
+
+
+class _LatestValueQueue:
+    """Coalescing latest-value queue for a small number of VSS paths.
+
+    Producers (the Zenoh worker thread) call \`offer(path, value, cast,
+    src)\` on every incoming sample. When multiple samples for the same
+    path arrive before the consumer drains, only the LAST one survives.
+    The single consumer (one asyncio task) calls \`take()\` and gets a
+    snapshot of all pending paths, then clears the slot.
+
+    This caps Kuksa RPC traffic at the asyncio loop tick rate, no matter
+    how fast the dashboard's slider drags fire, so a fast drag never
+    queues up a backlog of stale writes - the user always sees the
+    most recent value land in Kuksa with ~asyncio-tick latency.
+    """
+
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+        self._lock = threading.Lock()
+        self._pending: dict[str, tuple[Any, Any, str]] = {}
+        self._evt = asyncio.Event()
+
+    def offer(self, path: str, value: Any, cast: Any, src: str) -> None:
+        """Producer side. Safe to call from any thread; never blocks."""
+        with self._lock:
+            self._pending[path] = (value, cast, src)
+        # Wake the consumer task on the asyncio loop thread.
+        self._loop.call_soon_threadsafe(self._evt.set)
+
+    async def take(self) -> dict[str, tuple[Any, Any, str]]:
+        """Consumer side. Awaits at least one offered value, returns snapshot."""
+        while True:
+            await self._evt.wait()
+            with self._lock:
+                if self._pending:
+                    snapshot = self._pending
+                    self._pending = {}
+                    self._evt.clear()
+                    return snapshot
+                # Spurious wake-up (offer raced with a previous take's
+                # critical section). Clear and re-await.
+                self._evt.clear()
+
+
+async def _consumer(
+    queue: "_LatestValueQueue",
+    kuksa: VSSClient,
+) -> None:
+    """Drain the latest-value queue and write to Kuksa with dedup.
+
+    Only writes to Kuksa. Dashboard updates come exclusively from
+    _dashboard_forwarder (Kuksa subscription), which fires for any
+    write to the path regardless of which writer made it.
+    """
+    last_sent: dict[str, Any] = {}
+    while True:
+        pending = await queue.take()
+        updates: dict[str, Datapoint] = {}
+        log_lines: list[str] = []
+        for path, (raw_value, cast, src) in pending.items():
+            try:
+                coerced = cast(raw_value)
+            except (TypeError, ValueError) as exc:
+                log(f"WARN cannot cast {raw_value!r} -> {cast.__name__} for {path}: {exc}")
+                continue
+            if last_sent.get(path) == coerced:
+                continue
+            updates[path] = Datapoint(coerced)
+            last_sent[path] = coerced
+            log_lines.append(f"OK   {path} = {coerced} (from {src})")
+        if updates:
+            try:
+                await kuksa.set_current_values(updates)
+            except Exception as exc:
+                log(f"ERROR writing {len(updates)} key(s) to Kuksa: {exc}")
+                continue
+        for line in log_lines:
+            log(line)
+
+
+async def _dashboard_forwarder(
+    kuksa: VSSClient,
+    dash_pub: "zenoh.Publisher",
+) -> None:
+    """Subscribe to the HVAC VSS path on local Kuksa and forward
+    each change to the host dashboard as a \`{key, value, status}\`
+    envelope. Logs an \`ACT\` line per change so the actuation is
+    visible in the ECU log.
+
+    This is the path that surfaces writes made by the range-compute
+    app: it writes to Kuksa, this subscriber fires, the dashboard
+    indicator updates. Since cabin values now land in Kuksa directly
+    (this ECU writes them over gRPC), a single broker holds the truth
+    and every writer is reflected the same way.
+
+    For the host-dashboard slider path the same subscriber also
+    fires (since we write to Kuksa from \`_consumer\`), which means
+    every slider movement results in a single dashboard-side echo.
+    That is intentional: the indicator should reflect the current
+    Kuksa state regardless of who wrote it.
+    """
+    last_status: dict[str, str] = {}
+    async for updates in kuksa.subscribe_current_values(list(VSS_TO_DASH)):
+        for path, dp in updates.items():
+            if dp is None or dp.value is None:
+                continue
+            status = _hvac_status(dp.value)
+            payload = json.dumps({
+                "key": DASH_KEY_PAIR,
+                "value": float(dp.value),
+                "status": status,
+                "source": SOURCE_LABEL,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }).encode("utf-8")
+            try:
+                dash_pub.put(payload)
+            except Exception as exc:
+                log(f"ERROR forwarding {path} to dashboard: {exc}")
+                continue
+            changed = last_status.get(path) != status
+            last_status[path] = status
+            tag = "ACT " if changed else "act "
+            log(f"{tag} {path} = {dp.value}  -> dashboard {DASH_KEY_PAIR} (status={status})")
+
+
+async def run(router: str, kuksa_host: str, kuksa_port: int) -> None:
+    # Single shared Kuksa broker on the primary node: the ECU writes
+    # cabin values straight into Kuksa over gRPC. No kuksa-bridge.
+    await _run_with_kuksa(router, kuksa_host, kuksa_port)
+
+
+async def _run_with_kuksa(router: str, kuksa_host: str, kuksa_port: int) -> None:
+    log(f"Connecting to Kuksa Databroker at {kuksa_host}:{kuksa_port}...")
+    async with VSSClient(kuksa_host, kuksa_port) as kuksa:
+        log("Connected to Kuksa.")
+        log("Subscribed Zenoh keys -> VSS paths:")
+        for k, (vss, cast) in KEY_TO_VSS.items():
+            log(f"    {k}  ->  {vss}  ({cast.__name__})")
+
+        loop = asyncio.get_running_loop()
+        queue = _LatestValueQueue(loop)
+        log(f"Opening Zenoh session (client mode) -> router {router}, subscribed to '{KEY_PREFIX}'")
+        with zenoh.open(build_zenoh_config(router)) as session:
+
+            def listener(sample: zenoh.Sample) -> None:
+                key = str(sample.key_expr)
+                cfg = KEY_TO_VSS.get(key)
+                if cfg is None:
+                    log(f"WARN ignoring unknown key '{key}'")
+                    return
+                vss_path, cast = cfg
+                try:
+                    raw = sample.payload.to_string()
+                    msg = json.loads(raw)
+                except Exception as exc:
+                    log(f"WARN bad payload on '{key}': {exc}")
+                    return
+                value = msg.get("value")
+                src = msg.get("source", "?")
+                if value is None:
+                    log(f"WARN payload missing 'value' on '{key}': {msg}")
+                    return
+                queue.offer(vss_path, value, cast, src)
+
+            # Retain the subscriber handle for the session's lifetime. If
+            # this reference is dropped, Zenoh garbage-collects the
+            # subscription and ingest stops with no error. Kept in a list
+            # (and referenced below) so it survives lint/autoflake passes.
+            subscribers = [session.declare_subscriber(KEY_PREFIX, listener)]
+
+            # Reverse channel to the host dashboard - declared on the SAME
+            # Zenoh session so it shares the ECU's single client connection
+            # to the router (command and status ride the one outbound link).
+            dash_pub = session.declare_publisher(DASH_STATUS_KEY)
+            log(f"Reverse channel publisher on '{DASH_STATUS_KEY}' ready "
+                f"({len(subscribers)} subscriber active).")
+
+            consumer_task = asyncio.create_task(_consumer(queue, kuksa))
+
+            forwarder_task = asyncio.create_task(
+                _dashboard_forwarder(kuksa, dash_pub)
+            )
+            log(f"Kuksa->dashboard forwarder subscribed to: "
+                f"{', '.join(VSS_TO_DASH)}")
+
+            log("HVAC ECU running. Drive values from the host PyTk dashboard. Ctrl+C to stop.")
+            tasks = {consumer_task, forwarder_task}
+            try:
+                # Fail fast: if either task exits \u2014 almost always because
+                # the Kuksa subscribe stream broke \u2014 surface the error so
+                # main() logs FATAL and the process exits for the
+                # supervisor to restart. A dead task must never be left
+                # running unobserved (which would be a half-working ECU
+                # with no crash and no restart).
+                done, _ = await asyncio.wait(
+                    tasks, return_when=asyncio.FIRST_COMPLETED
+                )
+            except asyncio.CancelledError:
+                done = set()
+            finally:
+                for t in tasks:
+                    t.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+            for t in done:
+                exc = t.exception()
+                if exc is not None:
+                    raise exc
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="HVAC ECU. Connects (Zenoh client mode) to the router "
+                    "on the primary node for sim/cabin/temp samples driven "
+                    "by the host PyTk dashboard, and writes the values into "
+                    "the shared Kuksa Databroker. Opens no inbound listener."
+    )
+    p.add_argument("--router", default=DEFAULT_ROUTER,
+                   help=f"Zenoh router endpoint on the primary node "
+                        f"(default: {DEFAULT_ROUTER})")
+    p.add_argument("--kuksa-host", default=DEFAULT_KUKSA_HOST,
+                   help=f"Kuksa Databroker host (default: {DEFAULT_KUKSA_HOST})")
+    p.add_argument("--kuksa-port", type=int, default=DEFAULT_KUKSA_PORT,
+                   help=f"Kuksa Databroker port (default: {DEFAULT_KUKSA_PORT})")
+    return p.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        asyncio.run(run(args.router, args.kuksa_host, args.kuksa_port))
+    except KeyboardInterrupt:
+        log("Stopping.")
+        return 0
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        log(f"FATAL: {exc}")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+`,
+      yaml: `# HVAC ECU \u2014 EV Range Extender (schemaVersion: 2)
+schemaVersion: 2
+
+publisher:
+  author: "AosCloud team"
+  company: "EPAM Systems"
+
+publish:
+  tlsKey: "aos-user-sp.p12"
+  domain: "aoscloud.io"
+
+items:
+  - identity:
+      type: service
+      codename: "demo-ev-range-extender-hvac-ecu"
+      title: "Demo EV Range Extender HVAC ECU"
+      description: "HVAC ECU \u2014 consumes dashboard fan-speed commands over Zenoh, writes to Kuksa"
+    version: "2.0.0"
+    sourceFolder: "demo-ev-range-extender-hvac-ecu"
+
+    images:
+      - sourceFolder: "src_any"
+        archInfo:
+          architecture: "any"
+
+    configuration:
+      workingDir: "/"
+      cmd: /usr/bin/python3 -u /main.py
+      instances:
+        minInstances: 1
+        priority: 10
+        labels:
+          - secondary
+      quotas:
+        cpuLimit: 1000
+        ramLimit: 128MiB
+        storageLimit: 32MiB
+      resources:
+        - name: kuksa
+          mode: rw
+        - name: zenoh
+          mode: rw
+    dependencies:
+      - identity:
+          type: layer
+          codename: kuksa-client
+        versions: '>=6.1.0-bosch.2'
+      - identity:
+          type: layer
+          codename: zenoh-client
+        versions: '>=6.1.0-bosch.2'`
+    },
+    bms: {
+      name: "BMS (EV Range Extender)",
+      appName: "demo-ev-range-extender-bms",
+      description: "Battery Monitoring System \u2014 receives battery telemetry over Zenoh, writes to Kuksa Databroker",
+      language: "python",
+      python: `"""BMS (Battery Monitoring System) service.
+
+Receives raw battery telemetry from the host dashboard over Zenoh and
+writes it to the shared Kuksa Databroker (sdv-runtime).
+
+Signal flow
+-----------
+  pytk_dashboard.py (host)
+    \u251C\u2500 sim/battery/voltage  \u2500\u2510
+    \u251C\u2500 sim/battery/current  \u2500\u253C\u2500Zenoh\u2500\u25BA  bms.py (this)
+    \u2514\u2500 sim/battery/soc      \u2500\u2518              \u2502
+                                write VSS over gRPC \u25BC
+                             Kuksa: Vehicle.Powertrain.TractionBattery.*
+                                            \u2502
+                                            \u25BC
+                             range_ai.py \u2500\u25BA Vehicle.Powertrain.Range
+
+Zenoh wire format: {"value": <number>, "source": "host", "ts": "<iso>"}
+"""
+
+import argparse
+import asyncio
+import json
+import sys
+from datetime import datetime
+
+import zenoh
+from kuksa_client.grpc import Datapoint
+from kuksa_client.grpc.aio import VSSClient
+
+DEFAULT_ROUTER = "tcp/zenoh:7447"  # zenoh router (resolves to primary node)
+DEFAULT_KUKSA_HOST = "kuksa"
+DEFAULT_KUKSA_PORT = 55555
+
+
+# Zenoh key -> (VSS path, cast). Keep in sync with pytk_dashboard.py PUBLISHED_KEYS.
+KEY_TO_VSS = {
+    "sim/battery/voltage": (
+        "Vehicle.Powertrain.TractionBattery.CurrentVoltage",
+        float,
+    ),
+    "sim/battery/current": (
+        "Vehicle.Powertrain.TractionBattery.CurrentCurrent",
+        float,
+    ),
+    "sim/battery/soc": (
+        "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current",
+        float,
+    ),
+}
+
+KEY_PREFIX = "sim/battery/**"
+
+
+def log(msg: str) -> None:
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    print(f"[{ts}] [bms] {msg}", flush=True)
+
+
+def build_zenoh_config(router_endpoint: str) -> zenoh.Config:
+    # Client mode: dial the router on the primary node and open NO
+    # inbound listener. Pub/sub still flows both ways over the outbound
+    # link, so no inbound port is exposed and the service stays
+    # reachable no matter which node it migrates to.
+    #
+    # Scouting is disabled so the client connects ONLY to the configured
+    # router and never auto-discovers or meshes with other peers/routers
+    # (deterministic connectivity; no rogue-router vector). Verify these
+    # key names against the Zenoh version in the runtime image.
+    config = zenoh.Config()
+    config.insert_json5("mode", '"client"')
+    config.insert_json5("connect/endpoints", f'["{router_endpoint}"]')
+    config.insert_json5("scouting/multicast/enabled", "false")
+    config.insert_json5("scouting/gossip/enabled", "false")
+    return config
+
+
+async def push_to_kuksa(client: VSSClient, path: str, value, cast, src: str) -> None:
+    try:
+        coerced = cast(value)
+    except (TypeError, ValueError) as exc:
+        log(f"WARN cannot cast {value!r} -> {cast.__name__} for {path}: {exc}")
+        return
+    try:
+        await client.set_current_values({path: Datapoint(coerced)})
+    except Exception as exc:
+        log(f"ERROR writing {path}={coerced} to Kuksa: {exc}")
+        return
+    log(f"OK   {path} = {coerced} (from {src})")
+
+
+async def run(router: str, kuksa_host: str, kuksa_port: int) -> None:
+    log(f"Connecting to Kuksa Databroker at {kuksa_host}:{kuksa_port}...")
+    async with VSSClient(kuksa_host, kuksa_port) as kuksa:
+        log("Connected to Kuksa.")
+        log("Subscribed Zenoh keys -> VSS paths:")
+        for k, (vss, cast) in KEY_TO_VSS.items():
+            log(f"    {k}  ->  {vss}  ({cast.__name__})")
+
+        loop = asyncio.get_running_loop()
+        log(f"Opening Zenoh session (client mode) -> router {router}, subscribed to '{KEY_PREFIX}'")
+        with zenoh.open(build_zenoh_config(router)) as session:
+            stop_event = asyncio.Event()
+
+            def listener(sample: zenoh.Sample) -> None:
+                key = str(sample.key_expr)
+                cfg = KEY_TO_VSS.get(key)
+                if cfg is None:
+                    log(f"WARN ignoring unknown key '{key}'")
+                    return
+                vss_path, cast = cfg
+                try:
+                    raw = sample.payload.to_string()
+                    msg = json.loads(raw)
+                except Exception as exc:
+                    log(f"WARN bad payload on '{key}': {exc}")
+                    return
+                value = msg.get("value")
+                src = msg.get("source", "?")
+                if value is None:
+                    log(f"WARN payload missing 'value' on '{key}': {msg}")
+                    return
+                asyncio.run_coroutine_threadsafe(
+                    push_to_kuksa(kuksa, vss_path, value, cast, src), loop
+                )
+
+            # Retain the subscriber handle for the session's lifetime. If
+            # this reference is dropped, Zenoh garbage-collects the
+            # subscription and ingest stops with no error. Kept in a list
+            # (and referenced below) so it survives lint/autoflake passes.
+            subscribers = [session.declare_subscriber(KEY_PREFIX, listener)]
+            log(f"BMS running ({len(subscribers)} subscriber). Drive values "
+                f"from the host PyTk dashboard. Ctrl+C to stop.")
+            try:
+                await stop_event.wait()
+            except asyncio.CancelledError:
+                pass
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="Battery Monitoring System (BMS). Connects (Zenoh "
+                    "client mode) to the router on the primary node for "
+                    "sim/battery/* keys driven by the host PyTk dashboard, "
+                    "and writes the values into the ev-range Kuksa "
+                    "Databroker. Opens no inbound listener."
+    )
+    p.add_argument("--router", default=DEFAULT_ROUTER,
+                   help=f"Zenoh router endpoint on the primary node "
+                        f"(default: {DEFAULT_ROUTER})")
+    p.add_argument("--kuksa-host", default=DEFAULT_KUKSA_HOST,
+                   help=f"Kuksa Databroker host (default: {DEFAULT_KUKSA_HOST})")
+    p.add_argument("--kuksa-port", type=int, default=DEFAULT_KUKSA_PORT,
+                   help=f"Kuksa Databroker port (default: {DEFAULT_KUKSA_PORT})")
+    return p.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        asyncio.run(run(args.router, args.kuksa_host, args.kuksa_port))
+    except KeyboardInterrupt:
+        log("Stopping.")
+        return 0
+    except Exception as exc:
+        log(f"FATAL: {exc}")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+`,
+      yaml: `# BMS \u2014 EV Range Extender (schemaVersion: 2)
+schemaVersion: 2
+
+publisher:
+  author: "AosCloud team"
+  company: "EPAM Systems"
+
+publish:
+  tlsKey: "aos-user-sp.p12"
+  domain: "aoscloud.io"
+
+items:
+  - identity:
+      type: service
+      codename: "demo-ev-range-extender-bms"
+      title: "Demo EV Range Extender BMS"
+      description: "Battery Monitoring System \u2014 receives battery telemetry over Zenoh, writes to Kuksa"
+    version: "2.0.0"
+    sourceFolder: "demo-ev-range-extender-bms"
+
+    images:
+      - sourceFolder: "src_any"
+        archInfo:
+          architecture: "any"
+
+    configuration:
+      workingDir: "/"
+      cmd: /usr/bin/python3 -u /main.py
+      instances:
+        minInstances: 1
+        priority: 10
+        labels:
+          - main
+      quotas:
+        cpuLimit: 1000
+        ramLimit: 128MiB
+        storageLimit: 32MiB
+      resources:
+        - name: kuksa
+          mode: rw
+        - name: zenoh
+          mode: rw
+    dependencies:
+      - identity:
+          type: layer
+          codename: kuksa-client
+        versions: '>=6.1.0-bosch.2'
+      - identity:
+          type: layer
+          codename: zenoh-client
+        versions: '>=6.1.0-bosch.2'`
+    },
+    rangeAi: {
+      name: "Range AI (EV Range Extender)",
+      appName: "demo-ev-range-extender-range-ai",
+      description: "Range Compute AI \u2014 subscribes to battery/cabin signals from Kuksa, computes driving range",
+      language: "python",
+      python: `# Copyright (c) 2026 Eclipse Foundation.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License which is available at
+# https://opensource.org/licenses/MIT.
+#
+# SPDX-License-Identifier: MIT
+"""Range Compute AI service.
+
+Subscribes to battery and cabin VSS signals from the shared Kuksa
+Databroker (sdv-runtime), computes estimated driving range, and writes
+the result back as Vehicle.Powertrain.Range.
+
+Signal flow
+-----------
+  Kuksa Databroker (shared, on the primary node)
+    \u251C\u2500 Vehicle.Powertrain.TractionBattery.CurrentVoltage      (written by bms.py)
+    \u251C\u2500 Vehicle.Powertrain.TractionBattery.CurrentCurrent      (written by bms.py)
+    \u251C\u2500 Vehicle.Powertrain.TractionBattery.StateOfCharge.Current  (written by bms.py)
+    \u251C\u2500 Vehicle.Cabin.HVAC.AmbientAirTemperature               (written by hvac_ecu.py)
+    \u251C\u2500 Vehicle.Cabin.Seat.Row1.DriverSide.Heating             (written by seat_ecu.py)
+    \u2514\u2500 Vehicle.Cabin.Seat.Row1.DriverSide.HeatingCooling      (written by seat_ecu.py)
+          \u2502
+          \u25BC
+      range_ai.py  computes  range_km = available_kWh / effective_consumption
+          \u2502
+          \u25BC
+      Vehicle.Powertrain.Range  (Uint32, km)
+
+Note: AmbientAirTemperature (0\u2013100 %) is reused as HVAC fan-speed for the
+demo; a higher fan value increases cabin power draw and lowers range.
+"""
+
+import argparse
+import asyncio
+import sys
+from datetime import datetime
+
+from kuksa_client.grpc import Datapoint
+from kuksa_client.grpc.aio import VSSClient
+
+
+# Battery signals (written by bms.py)
+SIGNAL_CURRENT = "Vehicle.Powertrain.TractionBattery.CurrentCurrent"
+SIGNAL_VOLTAGE = "Vehicle.Powertrain.TractionBattery.CurrentVoltage"
+SIGNAL_SOC     = "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current"
+
+# Cabin signals (written to Kuksa directly by the cabin ECUs; fan speed uses AmbientAirTemperature)
+SIGNAL_HVAC_FAN  = "Vehicle.Cabin.HVAC.AmbientAirTemperature"
+SIGNAL_SEAT_HEAT = "Vehicle.Cabin.Seat.Row1.DriverSide.Heating"
+SIGNAL_SEAT_HC   = "Vehicle.Cabin.Seat.Row1.DriverSide.HeatingCooling"
+
+BATTERY_SIGNALS    = [SIGNAL_CURRENT, SIGNAL_VOLTAGE, SIGNAL_SOC]
+# CABIN_SIGNALS      = [SIGNAL_HVAC_FAN, SIGNAL_SEAT_HEAT, SIGNAL_SEAT_HC]
+CABIN_SIGNALS      = [SIGNAL_HVAC_FAN, SIGNAL_SEAT_HC]
+SUBSCRIBED_SIGNALS = BATTERY_SIGNALS + CABIN_SIGNALS
+
+RANGE_SIGNAL = "Vehicle.Powertrain.Range"
+
+# ---- Vehicle model parameters ----------------------------------------
+BATTERY_CAPACITY_KWH = 75.0
+NOMINAL_CONSUMPTION_KWH_PER_KM = 0.18
+NOMINAL_CRUISE_POWER_KW = 18.0
+
+# Cabin actuator power model. Each load is additive in kW and converted
+# to kWh/km via AVG_SPEED_KMH so it can be folded into the per-km
+# consumption term.
+#
+#   * HVAC fan : aggregate of A/C compressor + heater core + blower for
+#                the driver-side HVAC station. ~2 kW at 100 % is realistic
+#                for a passenger EV with the climate system at full tilt.
+#   * Seat     : driver-zone aggregate (seat pad + footwell PTC heater +
+#                steering-wheel heater + cabin fan budget for that zone).
+#                Higher than a bare seat element on purpose so the demo
+#                visibly moves the range number.
+HVAC_FAN_FULL_KW    = 2.0
+SEAT_HEATER_FULL_KW = 2.0
+SEAT_VENT_FULL_KW   = 0.5
+AVG_SPEED_KMH       = 60.0
+
+
+def log(msg: str) -> None:
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    print(f"[{ts}] [range-ai] {msg}", flush=True)
+
+
+def _format(value) -> str:
+    if value is None:
+        return "<unset>"
+    if isinstance(value, float):
+        return f"{value:.3f}"
+    return str(value)
+
+
+class VehicleState:
+    """Latest values for everything range_ai cares about."""
+
+    def __init__(self) -> None:
+        self.current = None          # battery current (A)
+        self.voltage = None          # battery voltage (V)
+        self.state_of_charge = None  # SoC (%)
+        self.hvac_fan = None         # HVAC fan speed (%, 0..100), by hvac_ecu.py
+                                     # (carried on AmbientAirTemperature; see docstring)
+        self.seat_heat = None        # seat heating (%, 0..100), by seat_ecu.py
+        self.seat_hc = None          # seat HeatingCooling (%, -100..100), by seat_ecu.py
+
+    def update(self, path: str, value) -> None:
+        if path == SIGNAL_CURRENT:
+            self.current = value
+        elif path == SIGNAL_VOLTAGE:
+            self.voltage = value
+        elif path == SIGNAL_SOC:
+            self.state_of_charge = value
+        elif path == SIGNAL_HVAC_FAN:
+            self.hvac_fan = value
+        elif path == SIGNAL_SEAT_HEAT:
+            self.seat_heat = value
+        elif path == SIGNAL_SEAT_HC:
+            self.seat_hc = value
+
+
+def hvac_load_kw(state: "VehicleState") -> float:
+    """HVAC station power draw scaled by fan speed (kW). Always >= 0.
+
+    Fan speed is the dashboard's relabel of \`AmbientAirTemperature\`
+    (0..100). Values outside that range are clamped, not rejected,
+    so the model degrades gracefully if a stray reading slips in.
+    """
+    if state.hvac_fan is None:
+        return 0.0
+    try:
+        pct = max(0.0, min(100.0, float(state.hvac_fan)))
+    except (TypeError, ValueError):
+        return 0.0
+    return HVAC_FAN_FULL_KW * (pct / 100.0)
+
+
+def seat_load_kw(state: "VehicleState") -> float:
+    """Seat-zone actuator power (kW). Always >= 0.
+
+    * Seat.Heating         : 0..100 %  -> 0..SEAT_HEATER_FULL_KW
+    * Seat.HeatingCooling  : -100..100 %
+        positive (heating) -> SEAT_HEATER_FULL_KW * pct/100
+        negative (cooling) -> SEAT_VENT_FULL_KW   * |pct|/100
+
+    The dashboard's mutex guarantees Heating and HeatingCooling are
+    never both non-zero at the same time, so this can't double-count
+    in practice, but the formula handles both being set independently
+    in case someone drives Kuksa directly.
+    """
+    total = 0.0
+    if state.seat_heat is not None:
+        try:
+            pct = max(0.0, min(100.0, float(state.seat_heat)))
+            total += SEAT_HEATER_FULL_KW * (pct / 100.0)
+        except (TypeError, ValueError):
+            pass
+    if state.seat_hc is not None:
+        try:
+            hc = max(-100.0, min(100.0, float(state.seat_hc)))
+            if hc > 0:
+                total += SEAT_HEATER_FULL_KW * (hc / 100.0)
+            elif hc < 0:
+                total += SEAT_VENT_FULL_KW * (-hc / 100.0)
+        except (TypeError, ValueError):
+            pass
+    return total
+
+
+def cabin_load_kw(state: "VehicleState") -> float:
+    """Total cabin draw (kW) = HVAC fan + seat actuators."""
+    return hvac_load_kw(state) + seat_load_kw(state)
+
+
+def compute_range(state: VehicleState):
+    """Return estimated remaining range in km, or None if SoC is unknown."""
+    if state.state_of_charge is None:
+        return None
+
+    try:
+        soc = float(state.state_of_charge)
+    except (TypeError, ValueError):
+        return None
+
+    soc = max(0.0, min(100.0, soc))
+    available_kwh = (soc / 100.0) * BATTERY_CAPACITY_KWH
+
+    consumption = NOMINAL_CONSUMPTION_KWH_PER_KM
+
+    # Hard-acceleration penalty (instantaneous traction power).
+    if state.current is not None and state.voltage is not None:
+        try:
+            power_kw = abs(float(state.current) * float(state.voltage)) / 1000.0
+            if power_kw > NOMINAL_CRUISE_POWER_KW:
+                load_factor = power_kw / NOMINAL_CRUISE_POWER_KW
+                consumption = NOMINAL_CONSUMPTION_KWH_PER_KM * load_factor
+        except (TypeError, ValueError):
+            pass
+
+    # Cabin actuator load (additive - HVAC fan + seat heater + ventilation).
+    consumption += cabin_load_kw(state) / AVG_SPEED_KMH
+
+    if consumption <= 0:
+        return None
+
+    return available_kwh / consumption
+
+
+async def run(host: str, port: int) -> None:
+    log(f"Connecting to Kuksa Databroker at {host}:{port}...")
+    async with VSSClient(host, port) as client:
+        log("Connected.")
+        log(f"  Subscribing to {len(SUBSCRIBED_SIGNALS)} signal(s):")
+        for s in BATTERY_SIGNALS:
+            log(f"    - {s}                     (battery, written by bms.py)")
+        for s in CABIN_SIGNALS:
+            log(f"    - {s}     (cabin, written by the cabin ECUs)")
+        log("  Will publish to:")
+        log(f"    - {RANGE_SIGNAL}")
+        log(
+            f"  Model: capacity={BATTERY_CAPACITY_KWH} kWh, "
+            f"consumption={NOMINAL_CONSUMPTION_KWH_PER_KM} kWh/km, "
+            f"cruise={NOMINAL_CRUISE_POWER_KW} kW, "
+            f"hvac-fan-max={HVAC_FAN_FULL_KW * 1000:.0f} W, "
+            f"seat-heater-max={SEAT_HEATER_FULL_KW * 1000:.0f} W, "
+            f"seat-vent-max={SEAT_VENT_FULL_KW * 1000:.0f} W"
+        )
+
+        state = VehicleState()
+        async for updates in client.subscribe_current_values(SUBSCRIBED_SIGNALS):
+            for path, dp in updates.items():
+                value = dp.value if dp is not None else None
+                state.update(path, value)
+                log(f"input  : {path} = {_format(value)}")
+
+            range_km = compute_range(state)
+            if range_km is None:
+                log("output : <waiting for StateOfCharge to be set>")
+                continue
+
+            # Vehicle.Powertrain.Range is declared as Uint32 in the
+            # ev-range VSS catalog, so we must publish an int (not a
+            # float) - otherwise the broker rejects the write.
+            range_km_int = max(0, int(round(range_km)))
+            hvac_kw = hvac_load_kw(state)
+            seat_kw = seat_load_kw(state)
+
+            try:
+                await client.set_current_values({
+                    RANGE_SIGNAL: Datapoint(range_km_int),
+                })
+            except Exception as exc:
+                log(f"ERROR publishing {RANGE_SIGNAL}: {exc}")
+                continue
+
+            log(
+                f"output : {RANGE_SIGNAL} = {range_km_int} km "
+                f"(computed {range_km:.1f} km; "
+                f"SoC={_format(state.state_of_charge)} %, "
+                f"I={_format(state.current)} A, "
+                f"U={_format(state.voltage)} V, "
+                f"fan={_format(state.hvac_fan)} %, hvac={hvac_kw * 1000:.0f} W, "
+                f"seatHeat={_format(state.seat_heat)} %, "
+                f"seatHC={_format(state.seat_hc)} %, seat={seat_kw * 1000:.0f} W)"
+            )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="EV Range Extender - Range Compute AI"
+    )
+    parser.add_argument(
+        "--host",
+        default="kuksa",
+        help="Kuksa Databroker host (default: kuksa)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=55555,
+        help="Kuksa Databroker port (default: 55555)",
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        asyncio.run(run(args.host, args.port))
+    except KeyboardInterrupt:
+        log("Stopping.")
+        return 0
+    except Exception as exc:
+        log(f"FATAL: {exc}")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+`,
+      yaml: `# Range AI \u2014 EV Range Extender (schemaVersion: 2)
+schemaVersion: 2
+
+publisher:
+  author: "AosCloud team"
+  company: "EPAM Systems"
+
+publish:
+  tlsKey: "aos-user-sp.p12"
+  domain: "aoscloud.io"
+
+items:
+  - identity:
+      type: service
+      codename: "demo-ev-range-extender-range-ai"
+      title: "Demo EV Range Extender Range AI"
+      description: "Range Compute AI \u2014 subscribes to battery/cabin signals from Kuksa, computes driving range"
+    version: "2.0.0"
+    sourceFolder: "demo-ev-range-extender-range-ai"
+
+    images:
+      - sourceFolder: "src_any"
+        archInfo:
+          architecture: "any"
+
+    configuration:
+      workingDir: "/"
+      cmd: /usr/bin/python3 -u /main.py
+      instances:
+        minInstances: 1
+        priority: 10
+        labels:
+          - main
+      quotas:
+        cpuLimit: 1000
+        ramLimit: 128MiB
+        storageLimit: 32MiB
+      resources:
+        - name: kuksa
+          mode: rw
+    dependencies:
+      - identity:
+          type: layer
+          codename: kuksa-client
+        versions: '>=6.1.0-bosch.2'`
     }
   };
 
   // src/components/Page.tsx
   var React = globalThis.React;
   function Page({ data, config }) {
-    const forcedLanguage = config?.language;
-    const [languageMode, setLanguageMode] = React.useState(forcedLanguage || "python");
-    const [cppCode, setCppCode] = React.useState(forcedLanguage === "cpp" ? PRESETS.helloAos.cpp : "");
-    const [pythonCode, setPythonCode] = React.useState(forcedLanguage === "cpp" ? "" : PRESETS.helloPython?.python || "");
-    const [yamlConfig, setYamlConfig] = React.useState(forcedLanguage === "cpp" ? PRESETS.helloAos.yaml : PRESETS.helloPython?.yaml || PRESETS.helloAos.yaml);
-    const [appName, setAppName] = React.useState(forcedLanguage === "cpp" ? "hello-aos" : "hello-python");
+    const [languageMode, setLanguageMode] = React.useState("python");
+    const [cppCode, setCppCode] = React.useState(PRESETS.helloAos?.cpp || "");
+    const [pythonCode, setPythonCode] = React.useState(PRESETS.helloPython?.python || "");
+    const [yamlConfig, setYamlConfig] = React.useState(PRESETS.helloPython?.yaml || PRESETS.helloAos?.yaml || "");
+    const [appName, setAppName] = React.useState("hello-world-python");
     const [isBuilding, setIsBuilding] = React.useState(false);
     const [buildStatus, setBuildStatus] = React.useState("");
     const [buildLogs, setBuildLogs] = React.useState([]);
@@ -4642,7 +6688,7 @@ items:
     const [selectedPreset, setSelectedPreset] = React.useState("custom");
     const [autoIncVersion, setAutoIncVersion] = React.useState(true);
     const [autoSyncServiceUid, setAutoSyncServiceUid] = React.useState(true);
-    const [activeEditorTab, setActiveEditorTab] = React.useState(forcedLanguage === "cpp" ? "cpp" : "python");
+    const [activeEditorTab, setActiveEditorTab] = React.useState("python");
     const cppCodeRef = React.useRef(cppCode);
     const pythonCodeRef = React.useRef(pythonCode);
     const yamlConfigRef = React.useRef(yamlConfig);
@@ -5471,6 +7517,7 @@ items:
             setSelectedMonitorUnit(firstUid);
             setSelectedUnitUid(firstUid);
             loadUnitMonitoring(firstUid);
+            loadUnitInfo(firstUid);
           }
         }
         if (!selectedSubjectId && aosServiceRef.current) {
@@ -5491,6 +7538,7 @@ items:
       setServiceUnits([]);
       setServiceVersions([]);
       setUnitMonitoring(null);
+      setShowAllUnits(false);
       const svc = aosServices.find((s) => s.uuid === uuid);
       const codename = svc?.codename || "";
       setSelectedServiceCodename(codename);
@@ -5498,7 +7546,8 @@ items:
         setYamlConfig((prev) => {
           let next = prev;
           let synced = false;
-          if (codename) {
+          const isUuidLike = (s) => /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(s);
+          if (codename && !isUuidLike(codename)) {
             if (/(\s+)id:\s*["']?[a-f0-9-]+["']?/i.test(next)) {
               next = next.replace(/(\s+)id:\s*["']?[a-f0-9-]+["']?/i, `$1codename: "${codename}"`);
               synced = true;
@@ -5507,11 +7556,15 @@ items:
               next = next.replace(/service_uid:\s*["']?[a-f0-9-]+["']?/i, `codename: "${codename}"`);
               synced = true;
             }
-            if (/codename:\s*["']?[^"'\n]+["']?/.test(next)) {
-              next = next.replace(/codename:\s*["']?[^"'\n]+["']?/, `codename: "${codename}"`);
-              synced = true;
+            const currentCodenameMatch = next.match(/codename:\s*["']?([^"'\n]+)["']?/);
+            if (currentCodenameMatch) {
+              const currentCodename = currentCodenameMatch[1];
+              if (!currentCodename || isUuidLike(currentCodename)) {
+                next = next.replace(/codename:\s*["']?[^"'\n]+["']?/, `codename: "${codename}"`);
+                synced = true;
+              }
             }
-          } else {
+          } else if (!codename) {
             if (/(\s+)id:\s*["']?[a-f0-9-]+["']?/i.test(next)) {
               next = next.replace(/(\s+)id:\s*["']?[a-f0-9-]+["']?/i, `$1id: ${uuid}`);
               synced = true;
@@ -5544,6 +7597,27 @@ items:
           setUnitMonitoring({ status: "error", message: res.message || "Unavailable" });
       } catch (err) {
         setUnitMonitoring({ status: "error", message: err.message || "Unavailable" });
+      }
+    };
+    const loadUnitInfo = async (uid) => {
+      if (!aosServiceRef.current || !uid)
+        return;
+      try {
+        const res = await aosServiceRef.current.getUnitInfo(uid);
+        if (res.status === "success") {
+          setUnitInfo({
+            name: res.name,
+            onlineStatus: res.onlineStatus,
+            versions: res.versions,
+            nodeCount: res.nodeCount
+          });
+          const verParts = res.versions && Object.keys(res.versions).length > 0 ? Object.entries(res.versions).map(([k, v]) => `${k}=${v}`).join(", ") : "no version fields";
+          addLog(`[Unit] ${res.name || uid}: ${verParts}, ${res.nodeCount} node(s), ${res.onlineStatus}`);
+          if (res._rawKeys) {
+            addLog(`[Unit] API response keys: ${res._rawKeys.join(", ")}`);
+          }
+        }
+      } catch (err) {
       }
     };
     const requestServiceLog = async () => {
@@ -5583,6 +7657,10 @@ items:
       }
     };
     const [workerInfo, setWorkerInfo] = React.useState(null);
+    const [toolchainVersions, setToolchainVersions] = React.useState(null);
+    const [showAllUnits, setShowAllUnits] = React.useState(false);
+    const [allUnits, setAllUnits] = React.useState([]);
+    const [unitInfo, setUnitInfo] = React.useState(null);
     const handleCertUpload = async (e) => {
       const file = e.target.files?.[0];
       if (!file || !aosServiceRef.current)
@@ -5608,6 +7686,15 @@ items:
           if (result.worker) {
             setWorkerInfo(result.worker);
             addLog(`[Worker] Dedicated environment ready on port ${result.worker.port}`);
+          }
+          try {
+            const tcInfo = await aosServiceRef.current.getToolchainInfo();
+            if (tcInfo.status === "success" && tcInfo.packages) {
+              setToolchainVersions(tcInfo.packages);
+              addLog(`[Toolchain] aos-signer ${tcInfo.packages["aos-signer"] || "?"}, aos-keys ${tcInfo.packages["aos-keys"] || "?"}, aos-prov ${tcInfo.packages["aos-prov"] || "?"}`);
+            }
+          } catch (tcErr) {
+            addLog(`[Toolchain] Version check skipped: ${tcErr.message}`);
           }
           addLog(`[AosCloud] Refreshing services...`);
           fetchAosCloudServices();
@@ -5636,6 +7723,7 @@ items:
           addLog(`[Cert] ${result.message}`);
           setCertStatus({ loaded: false, source: "none", message: result.message, identity: null });
           setWorkerInfo(null);
+          setToolchainVersions(null);
         } else {
           setCertError(result.message || "Remove failed");
         }
@@ -5668,16 +7756,18 @@ items:
         upload: "Publish",
         error: "Error"
       };
+      let activeExecutionId;
       try {
         const response = await aosServiceRef.current.buildAndDeploy({
-          name: appName,
-          displayName: appName,
           language: languageMode,
           cppCode: languageMode === "cpp" ? finalCode : void 0,
           pythonCode: languageMode === "python" ? finalCode : void 0,
-          yamlConfig: finalYaml,
-          serviceUuid: selectedServiceUuid || void 0
+          yamlConfig: finalYaml
         });
+        if (response.executionId) {
+          activeExecutionId = response.executionId;
+          localStorage.setItem("aos_build_id", response.executionId);
+        }
         if (response.message && response.message.includes("\n")) {
           const lines = response.message.split("\n").filter((l) => l.trim());
           for (let i = 0; i < lines.length; i++) {
@@ -5693,6 +7783,7 @@ items:
         if (response.status === "success") {
           setBuildStatus("Build completed successfully!");
           setIsBuilding(false);
+          localStorage.removeItem("aos_build_id");
           refreshApps();
           if (selectedServiceUuid) {
             setTimeout(() => {
@@ -5704,9 +7795,11 @@ items:
           const lastLog = (response.message || "").split("\n").filter((l) => l.trim()).pop() || "Unknown error";
           setBuildStatus(`Build failed: ${lastLog.replace(/^\[.*?\]\s*/, "").slice(0, 80)}`);
           setIsBuilding(false);
+          localStorage.removeItem("aos_build_id");
         } else {
           setBuildStatus("Build completed");
           setIsBuilding(false);
+          localStorage.removeItem("aos_build_id");
         }
       } catch (err) {
         const msg = err.message || "Unknown error";
@@ -5715,8 +7808,58 @@ items:
         } else {
           addLog(`[Error] ${msg}`);
         }
+        if (msg.includes("timeout") || msg.includes("Timeout")) {
+          addLog("[Build] Request timed out \u2014 the build may still be running. Checking status...");
+          setBuildStatus("Build timed out \u2014 checking if build is still running...");
+          try {
+            const statusRes = await aosServiceRef.current.getBuildStatus(activeExecutionId);
+            const build = statusRes.build || (statusRes.builds && statusRes.builds.length > 0 ? statusRes.builds[statusRes.builds.length - 1] : null);
+            if (build) {
+              if (build.status === "success") {
+                addLog("[Build] Build completed successfully on the server!");
+                setBuildStatus("Build completed successfully!");
+                setIsBuilding(false);
+                localStorage.removeItem("aos_build_id");
+                refreshApps();
+                if (selectedServiceUuid) {
+                  setTimeout(() => {
+                    loadServiceDetails(selectedServiceUuid);
+                    addLog("[AosCloud] Refreshed service versions and units");
+                  }, 1e3);
+                }
+                return;
+              } else if (build.status === "building" || build.status === "running") {
+                addLog("[Build] Build is still in progress on the server. It will complete shortly.");
+                setBuildStatus("Build still running on server \u2014 check back soon");
+                localStorage.removeItem("aos_build_id");
+                return;
+              } else if (build.status === "error") {
+                addLog(`[Build] Build failed on server: ${build.message || "Unknown error"}`);
+                setBuildStatus("Build failed on server");
+              } else {
+                addLog(`[Build] Unexpected build status: ${build.status}`);
+                setBuildStatus(`Build status: ${build.status}`);
+              }
+            } else {
+              addLog("[Build] No build status available \u2014 the build may not have started.");
+              setBuildStatus("Build timed out \u2014 no status available");
+            }
+          } catch (statusErr) {
+            addLog(`[Build] Could not check build status: ${statusErr.message}`);
+            setBuildStatus("Build timed out \u2014 could not check status");
+          }
+          setIsBuilding(false);
+          localStorage.removeItem("aos_build_id");
+          return;
+        }
         const lastLine = msg.split("\n").filter((l) => l.trim()).pop() || msg;
-        setBuildStatus(`Build failed: ${lastLine.replace(/^\[.*?\]\s*/, "").slice(0, 80)}`);
+        let statusText = `Build failed: ${lastLine.replace(/^\[.*?\]\s*/, "").slice(0, 80)}`;
+        if (msg.includes("re-upload")) {
+          statusText += " \u2192 Go to Setup panel and upload your .p12 again";
+        } else if (msg.includes("No certificate uploaded")) {
+          statusText += " \u2192 Go to Setup panel and upload your .p12 first";
+        }
+        setBuildStatus(statusText);
         setIsBuilding(false);
       }
     };
@@ -5742,6 +7885,30 @@ items:
         refreshApps();
       } catch (err) {
         addLog(`[Error] Failed to stop app: ${err.message}`);
+      }
+    };
+    const switchLanguage = (lang) => {
+      if (lang === languageMode)
+        return;
+      setLanguageMode(lang);
+      if (lang === "cpp") {
+        const preset = PRESETS.helloAos;
+        if (preset) {
+          setCppCode(preset.cpp || "");
+          setYamlConfig(preset.yaml || "");
+          setAppName(preset.appName || "hello-aos");
+          setActiveEditorTab("cpp");
+          setSelectedPreset("helloAos");
+        }
+      } else {
+        const preset = PRESETS.helloPython;
+        if (preset) {
+          setPythonCode(preset.python || "");
+          setYamlConfig(preset.yaml || "");
+          setAppName(preset.appName || "hello-world-python");
+          setActiveEditorTab("python");
+          setSelectedPreset("helloPython");
+        }
       }
     };
     const handlePresetChange = (presetName) => {
@@ -5883,85 +8050,69 @@ items:
           React.createElement(
             "div",
             { style: { fontSize: "13px", lineHeight: 1.8, color: "#374151" } },
-            React.createElement("h3", { style: { fontSize: "14px", marginTop: 0, marginBottom: "8px" } }, "1. Pick a Docker Instance"),
-            React.createElement(
-              "p",
-              { style: { color: "#6b7280", marginBottom: "8px" } },
-              "In the left panel, pick an online Docker instance from the dropdown. This is the build server that compiles, signs, and uploads your service to AosCloud. Switching instances clears the cards below and reloads everything from the newly-selected broadcaster."
-            ),
-            React.createElement(
-              "p",
-              { style: { color: "#6b7280", marginBottom: "16px", fontSize: "12px" } },
-              React.createElement("strong", null, "Tip: "),
-              "Use ",
-              React.createElement("strong", null, "AET-CLOUD-001"),
-              " for builds that should be signed with the shared SP cert; use ",
-              React.createElement("strong", null, "AET-CLOUD-002"),
-              " if you want to upload your own personal cert without affecting other users."
-            ),
-            React.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "2. Check or upload your Certificate"),
+            React.createElement("h3", { style: { fontSize: "14px", marginTop: 0, marginBottom: "8px" } }, "1. Upload your certificate"),
             React.createElement(
               "p",
               { style: { color: "#6b7280", marginBottom: "16px" } },
-              "The Certificate card shows whether the selected instance has a .p12 loaded. Click ",
-              React.createElement("strong", null, "Manage"),
-              " to expand it. There you can see the loaded cert\u2019s CN, upload or replace a .p12, or remove the current one. ",
-              "Uploading a cert replaces the active signing identity on that broadcaster."
+              "Click ",
+              React.createElement("strong", null, "Choose File"),
+              " in the Setup card and select your .p12 certificate. ",
+              "The orchestrator extracts your identity (CN) and creates a dedicated, isolated build environment just for you. ",
+              "Once loaded, the Certificate card shows your CN, toolchain versions (aos-signer, aos-keys, aos-prov), and unit info when a unit is selected. ",
+              "If your worker becomes unresponsive, Remove and re-upload the certificate to get a fresh environment."
             ),
-            React.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "3. Choose an AosCloud Service"),
+            React.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "2. Choose an AosCloud Service"),
             React.createElement(
               "p",
               { style: { color: "#6b7280", marginBottom: "16px" } },
-              "Pick a service from the AosCloud Service dropdown. The chosen service\u2019s UUID is automatically written into ",
+              "Pick a service from the AosCloud Service dropdown. The service\u2019s codename is synced into ",
               React.createElement("code", null, "config.yaml"),
-              " (toggle ",
-              React.createElement("strong", null, "Auto-sync codename"),
-              " to disable). ",
-              "The version pills below the dropdown show the latest versions deployed; with ",
-              React.createElement("strong", null, "Auto-increment version after build"),
-              " enabled, the editor bumps to the next patch number after each successful build."
+              ". ",
+              "Version pills show deployed versions; enable ",
+              React.createElement("strong", null, "Auto-increment version"),
+              " to bump the patch number after each build."
             ),
-            React.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "4. Edit your code"),
+            React.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "3. Edit your code"),
             React.createElement(
               "p",
               { style: { color: "#6b7280", marginBottom: "4px" } },
-              "The middle column has a tabbed editor. Use the preset dropdown (top-right header) to load a starting point, then edit the tabs:"
+              "Use the preset dropdown in the header to load a starting point, then edit:"
             ),
             React.createElement(
               "ul",
               { style: { color: "#6b7280", marginBottom: "16px", paddingLeft: "20px" } },
-              React.createElement("li", null, React.createElement("strong", null, "main.py"), " \u2014 your Python application source code"),
-              React.createElement("li", null, React.createElement("strong", null, "config.yaml"), " \u2014 service metadata: architecture, version, resource quotas, entry point")
+              React.createElement("li", null, React.createElement("strong", null, "main.py"), " \u2014 your Python application"),
+              React.createElement("li", null, React.createElement("strong", null, "config.yaml"), " \u2014 service metadata: codename, version, quotas, entry point")
             ),
-            React.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "5. Build & Deploy"),
+            React.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "4. Build & Deploy"),
             React.createElement(
               "p",
               { style: { color: "#6b7280", marginBottom: "16px" } },
               "Click ",
               React.createElement("strong", null, "Build & Deploy"),
-              ". The selected broadcaster compiles your code, signs the package with its loaded cert, and uploads it to AosCloud. The edge unit picks up the new version via OTA. ",
-              "Watch the right column for live progress: the Build Status banner pulses while running, the Build Logs card streams output, and a thin progress bar across the top of that card animates during long silent steps (uploading, signing). ",
-              "After success, the AosCloud Service card auto-refreshes with the new version pill."
+              ". Your code is packaged, signed with your certificate, and uploaded to AosCloud. ",
+              "The target unit picks up the new version via OTA. Watch the Build Log for live progress."
             ),
-            React.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "6. Inspect a unit"),
+            React.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "5. Inspect units"),
             React.createElement(
               "p",
               { style: { color: "#6b7280", marginBottom: "16px" } },
-              "In the Units card, click any unit row to open a detail overlay with that unit\u2019s hardware specs, live CPU/RAM/disk usage, and the latest alerts. ",
+              "The Units card shows units assigned to the selected service. Toggle ",
+              React.createElement("strong", null, "All units"),
+              " to see every unit. ",
+              "Click any unit row to open a detail overlay with hardware specs, live CPU/RAM/disk, and alerts. ",
               React.createElement("em", null, "Note: "),
-              'AosCloud only shares device-level monitoring with the unit\u2019s OEM account, so units provisioned by someone else will show "Hardware monitoring not available" \u2014 services still deploy and run normally.'
+              'monitoring requires the unit\u2019s OEM account; units from other accounts show "Hardware monitoring not available".'
             ),
             React.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "Available Presets"),
             React.createElement(
               "ul",
               { style: { color: "#6b7280", paddingLeft: "20px", marginBottom: 0 } },
-              React.createElement("li", null, React.createElement("strong", null, "Hello AOS"), " \u2014 simple C++ hello world service"),
-              React.createElement("li", null, React.createElement("strong", null, "Hello Python"), " \u2014 simple Python hello world service"),
-              React.createElement("li", null, React.createElement("strong", null, "Signal Writer"), " \u2014 writes vehicle signals to KUKSA Databroker (C++ and Python)"),
-              React.createElement("li", null, React.createElement("strong", null, "KUKSA Reader"), " \u2014 subscribes to vehicle signals (C++ and Python)"),
-              React.createElement("li", null, React.createElement("strong", null, "EV Range Extender"), " \u2014 battery management with power-save mode (C++ and Python)"),
-              React.createElement("li", null, React.createElement("strong", null, "Battery Energy Saver"), " \u2014 forces HVAC/seat off below SoC thresholds (C++ and Python)"),
-              React.createElement("li", null, React.createElement("strong", null, "Signal Reporter"), " \u2014 relays signals to the live dashboard (C++ and Python)")
+              React.createElement("li", null, React.createElement("strong", null, "Hello Python"), " \u2014 simple Python hello world"),
+              React.createElement("li", null, React.createElement("strong", null, "Seat ECU"), " \u2014 seat heating/cooling control via Zenoh + Kuksa"),
+              React.createElement("li", null, React.createElement("strong", null, "HVAC ECU"), " \u2014 HVAC fan-speed control via Zenoh + Kuksa"),
+              React.createElement("li", null, React.createElement("strong", null, "BMS"), " \u2014 battery monitoring (voltage, current, SoC) via Zenoh + Kuksa"),
+              React.createElement("li", null, React.createElement("strong", null, "Range AI"), " \u2014 range computation from battery + cabin signals")
             )
           )
         )
@@ -6119,7 +8270,10 @@ items:
                   "Resource Monitoring"
                 ),
                 React.createElement("button", {
-                  onClick: () => loadUnitMonitoring(detailUnitUid),
+                  onClick: () => {
+                    loadUnitMonitoring(detailUnitUid);
+                    loadUnitInfo(detailUnitUid);
+                  },
                   style: { ...styles.iconButton, width: "22px", height: "22px", fontSize: "12px" },
                   title: "Refresh"
                 }, "\u21BB")
@@ -6361,6 +8515,45 @@ items:
         React.createElement(
           "div",
           { style: styles.headerRight },
+          // Language toggle — segmented pill
+          React.createElement(
+            "div",
+            {
+              style: {
+                display: "inline-flex",
+                borderRadius: "6px",
+                overflow: "hidden",
+                border: "1px solid #d1d5db",
+                flexShrink: 0
+              }
+            },
+            React.createElement("button", {
+              onClick: () => switchLanguage("cpp"),
+              style: {
+                padding: "5px 12px",
+                fontSize: "12px",
+                fontWeight: 600,
+                border: "none",
+                cursor: "pointer",
+                backgroundColor: languageMode === "cpp" ? "#3b82f6" : "white",
+                color: languageMode === "cpp" ? "white" : "#6b7280",
+                transition: "all 0.15s ease"
+              }
+            }, "C++"),
+            React.createElement("button", {
+              onClick: () => switchLanguage("python"),
+              style: {
+                padding: "5px 12px",
+                fontSize: "12px",
+                fontWeight: 600,
+                border: "none",
+                cursor: "pointer",
+                backgroundColor: languageMode === "python" ? "#3b82f6" : "white",
+                color: languageMode === "python" ? "white" : "#6b7280",
+                transition: "all 0.15s ease"
+              }
+            }, "Python")
+          ),
           React.createElement("button", {
             onClick: () => setShowGuide(!showGuide),
             style: {
@@ -6387,16 +8580,26 @@ items:
               style: styles.select
             },
             React.createElement("option", { value: "custom" }, "Write your own code"),
-            React.createElement(
+            languageMode === "cpp" ? React.createElement(
+              "optgroup",
+              { label: "C++ Presets" },
+              React.createElement("option", { value: "helloAos" }, "Hello AOS \u2014 simple C++ starter"),
+              React.createElement("option", { value: "kuksaWriter" }, "Signal Writer \u2014 write vehicle signals"),
+              React.createElement("option", { value: "kuksaReader" }, "KUKSA Reader \u2014 read vehicle signals"),
+              React.createElement("option", { value: "evRangeExtender" }, "EV Range Extender \u2014 battery management"),
+              React.createElement("option", { value: "batteryEnergySaver" }, "Battery Energy Saver \u2014 HVAC/seat cutoff"),
+              React.createElement("option", { value: "batteryEnergySaverSdvRuntime" }, "Battery Energy Saver \u2014 sdv-runtime / VSS 4.0"),
+              React.createElement("option", { value: "signalReporter" }, "Signal Reporter \u2014 relay to dashboard")
+            ) : null,
+            languageMode === "python" ? React.createElement(
               "optgroup",
               { label: "Python Presets" },
               React.createElement("option", { value: "helloPython" }, "Hello Python \u2014 simple Python starter"),
-              React.createElement("option", { value: "kuksaWriterPython" }, "Signal Writer \u2014 write vehicle signals"),
-              React.createElement("option", { value: "kuksaReaderPython" }, "KUKSA Reader \u2014 read vehicle signals"),
-              React.createElement("option", { value: "evRangeExtenderPython" }, "EV Range Extender \u2014 battery management"),
-              React.createElement("option", { value: "batteryEnergySaverPython" }, "Battery Energy Saver \u2014 HVAC/seat cutoff"),
-              React.createElement("option", { value: "signalReporterPython" }, "Signal Reporter \u2014 relay to dashboard")
-            )
+              React.createElement("option", { value: "seatEcu" }, "Seat ECU \u2014 seat heating/cooling control"),
+              React.createElement("option", { value: "hvacEcu" }, "HVAC ECU \u2014 fan speed / climate control"),
+              React.createElement("option", { value: "bms" }, "BMS \u2014 battery monitoring system"),
+              React.createElement("option", { value: "rangeAi" }, "Range AI \u2014 driving range computation")
+            ) : null
           ),
           React.createElement("span", {
             style: { fontSize: "12px", color: "#6b7280", fontWeight: 500 },
@@ -6455,6 +8658,37 @@ items:
                 { style: { fontSize: "11px", color: "#6b7280", display: "flex", justifyContent: "space-between" } },
                 React.createElement("span", null, "Your port"),
                 React.createElement("span", { style: { fontWeight: 600, color: "#374151", fontFamily: "monospace" } }, String(workerInfo.port))
+              )
+            )
+          ),
+          // ── No-cert banner ──────────────────────────────────────────────────
+          !certStatus?.loaded && React.createElement(
+            "div",
+            {
+              style: {
+                ...styles.card,
+                backgroundColor: "#fffbeb",
+                border: "1px solid #fcd34d",
+                padding: "10px 14px",
+                marginBottom: "10px",
+                display: "flex",
+                alignItems: "center",
+                gap: "10px"
+              }
+            },
+            React.createElement("span", { style: { fontSize: "18px", flexShrink: 0 } }, "\u{1F510}"),
+            React.createElement(
+              "div",
+              { style: { flex: 1 } },
+              React.createElement(
+                "div",
+                { style: { fontSize: "13px", fontWeight: 600, color: "#92400e" } },
+                "Your .p12 is private \u2014 upload it to create your isolated workspace"
+              ),
+              React.createElement(
+                "div",
+                { style: { fontSize: "11px", color: "#a16207", marginTop: "2px" } },
+                "Your certificate is yours alone. It creates a private, isolated build environment just for you. Without it, deployment is not possible."
               )
             )
           ),
@@ -6573,8 +8807,17 @@ items:
                   React.createElement("div", { style: { fontSize: "12px", fontWeight: 600, color: "#374151" } }, "Environment"),
                   step2Done ? React.createElement(
                     "div",
-                    { style: { fontSize: "11px", color: "#16a34a", marginTop: "2px" } },
-                    `Ready \u2014 port ${workerInfo.port}`
+                    null,
+                    React.createElement(
+                      "div",
+                      { style: { fontSize: "11px", color: "#16a34a", marginTop: "2px" } },
+                      `Ready \u2014 port ${workerInfo.port}`
+                    ),
+                    React.createElement(
+                      "div",
+                      { style: { fontSize: "10px", color: "#9ca3af", marginTop: "3px", lineHeight: "1.4" } },
+                      "If the worker becomes unresponsive, Remove your certificate below and re-upload it to get a fresh environment."
+                    )
                   ) : step2Active ? React.createElement("div", { style: { fontSize: "11px", color: "#d97706", marginTop: "2px" } }, "Creating...") : React.createElement(
                     "div",
                     { style: { fontSize: "11px", color: "#9ca3af", marginTop: "2px" } },
@@ -6646,6 +8889,67 @@ items:
               React.createElement("span", { style: { color: "#6b7280", flexShrink: 0 } }, "CN:"),
               React.createElement("span", { style: { color: "#111827", overflowWrap: "anywhere", wordBreak: "break-word" } }, certStatus.identity.cn)
             ),
+            toolchainVersions && React.createElement(
+              "div",
+              {
+                style: {
+                  fontSize: "11px",
+                  backgroundColor: "#f0fdf4",
+                  border: "1px solid #bbf7d0",
+                  borderRadius: "4px",
+                  padding: "6px 10px",
+                  marginBottom: "8px",
+                  fontFamily: "ui-monospace, Menlo, Consolas, monospace",
+                  display: "flex",
+                  gap: "8px",
+                  alignItems: "baseline",
+                  flexWrap: "wrap"
+                }
+              },
+              React.createElement("span", { style: { color: "#6b7280", flexShrink: 0 } }, "Toolchain:"),
+              React.createElement("span", { style: { color: "#065f46" } }, `aos-signer ${toolchainVersions["aos-signer"] || "?"}`),
+              React.createElement("span", { style: { color: "#065f46" } }, `aos-keys ${toolchainVersions["aos-keys"] || "?"}`),
+              React.createElement("span", { style: { color: "#065f46" } }, `aos-prov ${toolchainVersions["aos-prov"] || "?"}`)
+            ),
+            unitInfo && (Object.keys(unitInfo.versions || {}).length > 0 ? React.createElement(
+              "div",
+              {
+                style: {
+                  fontSize: "11px",
+                  backgroundColor: "#eff6ff",
+                  border: "1px solid #bfdbfe",
+                  borderRadius: "4px",
+                  padding: "6px 10px",
+                  marginBottom: "8px",
+                  fontFamily: "ui-monospace, Menlo, Consolas, monospace",
+                  display: "flex",
+                  gap: "8px",
+                  alignItems: "baseline",
+                  flexWrap: "wrap"
+                }
+              },
+              React.createElement("span", { style: { color: "#6b7280", flexShrink: 0 } }, "Unit:"),
+              ...Object.entries(unitInfo.versions).map(
+                ([k, v]) => React.createElement("span", { key: k, style: { color: "#1e40af" } }, `${k}=${v}`)
+              ),
+              React.createElement("span", { style: { color: "#6b7280" } }, `(${unitInfo.nodeCount} node(s))`)
+            ) : unitInfo.name && React.createElement(
+              "div",
+              {
+                style: {
+                  fontSize: "11px",
+                  backgroundColor: "#eff6ff",
+                  border: "1px solid #bfdbfe",
+                  borderRadius: "4px",
+                  padding: "6px 10px",
+                  marginBottom: "8px",
+                  fontFamily: "ui-monospace, Menlo, Consolas, monospace"
+                }
+              },
+              React.createElement("span", { style: { color: "#6b7280" } }, "Unit: "),
+              React.createElement("span", { style: { color: "#1e40af" } }, unitInfo.name),
+              React.createElement("span", { style: { color: "#9ca3af" } }, " \u2014 no version fields in API response")
+            )),
             certError && React.createElement("div", { style: { fontSize: "12px", color: "#dc2626", marginBottom: "8px" } }, certError),
             React.createElement(
               "div",
@@ -6880,8 +9184,8 @@ items:
               )
             )
           ),
-          // Units running this service
-          serviceUnits.length > 0 && React.createElement(
+          // Units card — always visible, toggle between service units and all units
+          React.createElement(
             "div",
             { style: styles.card },
             React.createElement(
@@ -6891,87 +9195,175 @@ items:
                 "div",
                 { style: styles.cardTitle },
                 React.createElement(Icon, { name: "server", size: 16, color: "#6366f1" }),
-                `Units (${serviceUnits.length})`,
-                React.createElement("span", {
-                  style: { fontSize: "10px", fontWeight: 400, color: "#9ca3af", marginLeft: "4px" }
-                }, "\u2014 click for details")
+                "Units"
+              ),
+              // Toggle pills: This service | All units
+              React.createElement(
+                "div",
+                {
+                  style: {
+                    display: "flex",
+                    border: "1px solid #d1d5db",
+                    borderRadius: "4px",
+                    overflow: "hidden",
+                    marginRight: "6px"
+                  }
+                },
+                React.createElement("button", {
+                  onClick: () => setShowAllUnits(false),
+                  style: {
+                    border: "none",
+                    padding: "2px 8px",
+                    fontSize: "10px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    backgroundColor: !showAllUnits ? "#6366f1" : "transparent",
+                    color: !showAllUnits ? "#fff" : "#6b7280"
+                  }
+                }, "This service"),
+                React.createElement("button", {
+                  onClick: async () => {
+                    setShowAllUnits(true);
+                    if (!aosServiceRef.current)
+                      return;
+                    try {
+                      const res = await aosServiceRef.current.listUnits();
+                      if (res.status === "success" && res.items?.length) {
+                        setAllUnits(res.items.map((u) => ({
+                          uid: u.uid || u.systemUid,
+                          systemUid: u.system_uid || u.systemUid || u.uid || "",
+                          name: u.name || u.system_uid || u.systemUid || "Unknown",
+                          online: u.online,
+                          status: u.status || "Unknown",
+                          runState: "",
+                          version: "",
+                          error: "",
+                          ip: ""
+                        })));
+                      }
+                    } catch (err) {
+                    }
+                  },
+                  style: {
+                    border: "none",
+                    padding: "2px 8px",
+                    fontSize: "10px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    backgroundColor: showAllUnits ? "#6366f1" : "transparent",
+                    color: showAllUnits ? "#fff" : "#6b7280"
+                  }
+                }, "All units")
               ),
               React.createElement("button", {
                 onClick: () => {
-                  if (selectedServiceUuid)
+                  if (showAllUnits) {
+                    setShowAllUnits(true);
+                    if (aosServiceRef.current) {
+                      aosServiceRef.current.listUnits().then((res) => {
+                        if (res.status === "success" && res.items?.length) {
+                          setAllUnits(res.items.map((u) => ({
+                            uid: u.uid || u.systemUid,
+                            systemUid: u.system_uid || u.systemUid || u.uid || "",
+                            name: u.name || u.system_uid || u.systemUid || "Unknown",
+                            online: u.online,
+                            status: u.status || "Unknown",
+                            runState: "",
+                            version: "",
+                            error: "",
+                            ip: ""
+                          })));
+                        }
+                      }).catch(() => {
+                      });
+                    }
+                  } else if (selectedServiceUuid) {
                     loadServiceDetails(selectedServiceUuid);
+                  }
                 },
                 style: styles.iconButton,
-                title: "Refresh units status"
+                title: "Refresh"
               }, "\u21BB")
             ),
-            React.createElement(
-              "div",
-              { style: { maxHeight: "150px", overflowY: "auto" } },
-              ...serviceUnits.map(
-                (u) => React.createElement(
+            (() => {
+              const units = showAllUnits ? allUnits : serviceUnits;
+              if (units.length === 0) {
+                return React.createElement(
                   "div",
                   {
-                    key: u.uid,
-                    onClick: () => {
-                      loadUnitMonitoring(u.uid);
-                      setDetailUnitUid(u.uid);
-                    },
-                    onMouseEnter: (e) => {
-                      if (selectedMonitorUnit !== u.uid)
-                        e.currentTarget.style.backgroundColor = "#f9fafb";
-                    },
-                    onMouseLeave: (e) => {
-                      e.currentTarget.style.backgroundColor = selectedMonitorUnit === u.uid ? "#f0f7ff" : "transparent";
-                    },
-                    title: "Click to view monitoring + alerts",
-                    style: {
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      padding: "8px 12px",
-                      cursor: "pointer",
-                      borderBottom: "1px solid #f3f4f6",
-                      backgroundColor: selectedMonitorUnit === u.uid ? "#f0f7ff" : "transparent",
-                      transition: "background-color 0.15s"
-                    }
+                    style: { padding: "14px", textAlign: "center", fontSize: "11px", color: "#9ca3af" }
                   },
-                  React.createElement(
+                  showAllUnits ? "No units available" : !certStatus?.loaded ? "Upload a certificate and select a service to see units" : !selectedServiceUuid ? "Select a service to see its assigned units" : "No units assigned to this service"
+                );
+              }
+              return React.createElement(
+                "div",
+                { style: { maxHeight: "150px", overflowY: "auto" } },
+                ...units.map(
+                  (u) => React.createElement(
                     "div",
-                    { style: { display: "flex", alignItems: "center", gap: "6px", flex: 1, minWidth: 0 } },
-                    React.createElement("span", {
-                      style: { width: "8px", height: "8px", borderRadius: "50%", flexShrink: 0, backgroundColor: u.online ? "#16a34a" : "#dc2626" }
-                    }),
-                    React.createElement("span", { style: { fontSize: "12px", fontWeight: 500 } }, u.name),
-                    React.createElement("button", {
-                      onClick: (e) => {
-                        e.stopPropagation();
-                        navigator.clipboard.writeText(u.systemUid || u.uid);
-                        addLog(`[Copied] Unit UID: ${u.systemUid || u.uid}`);
+                    {
+                      key: u.uid,
+                      onClick: () => {
+                        loadUnitMonitoring(u.uid);
+                        loadUnitInfo(u.uid);
+                        setDetailUnitUid(u.uid);
                       },
-                      style: { ...styles.iconButton, width: "18px", height: "18px", fontSize: "10px", flexShrink: 0 },
-                      title: u.systemUid || u.uid
-                    }, "\u{1F4CB}")
-                  ),
-                  React.createElement(
-                    "div",
-                    { style: { display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 } },
-                    u.version && React.createElement("span", {
-                      style: { fontSize: "10px", padding: "1px 5px", borderRadius: "6px", backgroundColor: "#e7f3ff", color: "#2563eb" }
-                    }, `v${u.version}`),
-                    u.error && React.createElement("span", {
-                      style: { fontSize: "10px", color: "#dc2626" },
-                      title: u.error
-                    }, "\u26A0"),
-                    // Click affordance — chevron makes the row obviously expandable
-                    React.createElement("span", {
-                      style: { fontSize: "12px", color: "#9ca3af", flexShrink: 0, marginLeft: "2px" },
-                      title: "Click to open details"
-                    }, "\u203A")
+                      onMouseEnter: (e) => {
+                        if (selectedMonitorUnit !== u.uid)
+                          e.currentTarget.style.backgroundColor = "#f9fafb";
+                      },
+                      onMouseLeave: (e) => {
+                        e.currentTarget.style.backgroundColor = selectedMonitorUnit === u.uid ? "#f0f7ff" : "transparent";
+                      },
+                      title: "Click to view monitoring + alerts",
+                      style: {
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "8px 12px",
+                        cursor: "pointer",
+                        borderBottom: "1px solid #f3f4f6",
+                        backgroundColor: selectedMonitorUnit === u.uid ? "#f0f7ff" : "transparent",
+                        transition: "background-color 0.15s"
+                      }
+                    },
+                    React.createElement(
+                      "div",
+                      { style: { display: "flex", alignItems: "center", gap: "6px", flex: 1, minWidth: 0 } },
+                      React.createElement("span", {
+                        style: { width: "8px", height: "8px", borderRadius: "50%", flexShrink: 0, backgroundColor: u.online ? "#16a34a" : "#dc2626" }
+                      }),
+                      React.createElement("span", { style: { fontSize: "12px", fontWeight: 500 } }, u.name),
+                      React.createElement("button", {
+                        onClick: (e) => {
+                          e.stopPropagation();
+                          navigator.clipboard.writeText(u.systemUid || u.uid);
+                          addLog(`[Copied] Unit UID: ${u.systemUid || u.uid}`);
+                        },
+                        style: { ...styles.iconButton, width: "18px", height: "18px", fontSize: "10px", flexShrink: 0 },
+                        title: u.systemUid || u.uid
+                      }, "\u{1F4CB}")
+                    ),
+                    React.createElement(
+                      "div",
+                      { style: { display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 } },
+                      u.version && React.createElement("span", {
+                        style: { fontSize: "10px", padding: "1px 5px", borderRadius: "6px", backgroundColor: "#e7f3ff", color: "#2563eb" }
+                      }, `v${u.version}`),
+                      u.error && React.createElement("span", {
+                        style: { fontSize: "10px", color: "#dc2626" },
+                        title: u.error
+                      }, "\u26A0"),
+                      React.createElement("span", {
+                        style: { fontSize: "12px", color: "#9ca3af", flexShrink: 0, marginLeft: "2px" },
+                        title: "Click to open details"
+                      }, "\u203A")
+                    )
                   )
                 )
-              )
-            )
+              );
+            })()
           )
           // Monitoring + Alerts moved to the Unit Detail overlay (opens on
           // unit-row click) to avoid duplication with the inline cards.
@@ -6985,17 +9377,35 @@ items:
           React.createElement(
             "div",
             { style: { ...styles.card, ...styles.editorCard, flex: 1, display: "flex", flexDirection: "column" } },
-            // Tab bar — Python only
+            // Tab bar — shows only the active language's code tab + shared YAML tab
             React.createElement(
               "div",
               { style: { display: "flex", borderBottom: "1px solid #e5e7eb", background: "#f9fafb" } },
-              React.createElement(
+              languageMode === "cpp" ? React.createElement(
                 "button",
                 {
-                  onClick: () => {
-                    setActiveEditorTab("python");
-                    setLanguageMode("python");
-                  },
+                  onClick: () => setActiveEditorTab("cpp"),
+                  style: {
+                    padding: "8px 16px",
+                    fontSize: "13px",
+                    fontWeight: 500,
+                    border: "none",
+                    cursor: "pointer",
+                    background: activeEditorTab === "cpp" ? "#fff" : "transparent",
+                    color: activeEditorTab === "cpp" ? "#2563eb" : "#6b7280",
+                    borderBottom: activeEditorTab === "cpp" ? "2px solid #2563eb" : "2px solid transparent",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px"
+                  }
+                },
+                React.createElement(Icon, { name: "file-code", size: 14 }),
+                "main.cpp"
+              ) : null,
+              languageMode === "python" ? React.createElement(
+                "button",
+                {
+                  onClick: () => setActiveEditorTab("python"),
                   style: {
                     padding: "8px 16px",
                     fontSize: "13px",
@@ -7012,7 +9422,7 @@ items:
                 },
                 React.createElement(Icon, { name: "file-code", size: 14 }),
                 "main.py"
-              ),
+              ) : null,
               React.createElement(
                 "button",
                 {
