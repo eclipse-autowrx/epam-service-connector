@@ -9,6 +9,9 @@ Docker toolkit for AosEdge Python service development: build, sign, upload, and 
 docker build -t aos-edge-toolchain:latest .
 
 # 2. Start the orchestrator (multi-tenant mode)
+#    IMPORTANT: BROADCASTER_SCRIPT_HOST must be a HOST path (not a container path).
+#    The scripts volume mount below maps $(pwd)/scripts → /usr/local/bin inside the container,
+#    so the host path is $(pwd)/scripts/aos-broadcaster.js, NOT /usr/local/bin/aos-broadcaster.js.
 docker run -d --network host --restart unless-stopped \
   --name aos-orchestrator \
   -v /var/run/docker.sock:/var/run/docker.sock \
@@ -20,7 +23,7 @@ docker run -d --network host --restart unless-stopped \
   -e IDLE_TIMEOUT_MINUTES=30 \
   -e AOSCLOUD_URL=https://aoscloud.io:10000 \
   -e NODE_TLS_REJECT_UNAUTHORIZED=0 \
-  -e BROADCASTER_SCRIPT_HOST=/usr/local/bin/aos-broadcaster.js \
+  -e BROADCASTER_SCRIPT_HOST=$(pwd)/scripts/aos-broadcaster.js \
   --entrypoint sh \
   aos-edge-toolchain:latest \
   -c 'unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && exec node /usr/local/bin/aos-orchestrator.js'
@@ -183,7 +186,7 @@ docker run -e AZURE_KEY_VAULT_NAME=<your-vault-name> ...
 | `WORKER_PORT_START` | `9101` | Start of worker port pool |
 | `WORKER_PORT_END` | `9199` | End of worker port pool |
 | `WORKER_IMAGE` | `aos-edge-toolchain:latest` | Image for worker containers |
-| `BROADCASTER_SCRIPT_HOST` | _(unset)_ | Host path to bind-mount broadcaster script into workers (keeps workers in sync with host edits) |
+| `BROADCASTER_SCRIPT_HOST` | _(unset)_ | **Host** filesystem path to `aos-broadcaster.js` (e.g. `/home/fsti/epam-service-connector/aos-edge-toolchain/scripts/aos-broadcaster.js`). Bind-mounted into worker containers so they pick up script changes without an image rebuild. **Must be a host path, not a container path.** If unset, workers use the script baked into the image. |
 | `AOSCLOUD_URL` | `https://aoscloud.io:10000` | AosCloud API URL |
 | `NODE_TLS_REJECT_UNAUTHORIZED` | `1` | Set to `0` for corporate proxy |
 
