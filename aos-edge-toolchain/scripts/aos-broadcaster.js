@@ -313,6 +313,9 @@ async function routeCommand(data) {
           signals: signalHistory.slice(-(data.limit || 100))
         };
         break;
+      case 'aos_get_toolchain_info':
+        response = await handleGetToolchainInfo(data);
+        break;
       default:
         response = {
           id: data.id,
@@ -805,6 +808,41 @@ function getBuildStatus(buildId) {
     all.push({ buildId: id, appName: b.appName, status: b.status, startedAt: b.startedAt, finishedAt: b.finishedAt, logCount: b.logs.length });
   }
   return all;
+}
+
+async function handleGetToolchainInfo(data) {
+  try {
+    const { stdout } = await execAsync(
+      'pip3 show aos-signer aos-keys aos-prov 2>/dev/null',
+      { timeout: 10000 }
+    );
+    // Parse pip show output into a map of package -> version
+    const packages = {};
+    let currentPkg = '';
+    for (const line of stdout.split('\n')) {
+      const nameMatch = line.match(/^Name:\s*(.+)/);
+      const versionMatch = line.match(/^Version:\s*(.+)/);
+      if (nameMatch) currentPkg = nameMatch[1].trim();
+      if (versionMatch && currentPkg) {
+        packages[currentPkg] = versionMatch[1].trim();
+        currentPkg = '';
+      }
+    }
+    return {
+      kit_id: instanceId,
+      type: 'aos_get_toolchain_info',
+      status: 'success',
+      packages,
+      python: process.env.PYTHON_VERSION || null
+    };
+  } catch (error) {
+    return {
+      kit_id: instanceId,
+      type: 'aos_get_toolchain_info',
+      status: 'error',
+      message: error.message
+    };
+  }
 }
 
 async function handleBuildDeploy(data, buildId) {

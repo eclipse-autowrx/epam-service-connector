@@ -614,7 +614,8 @@ async function main() {
         'aos_get_service_log_status',
         'aos_get_build_status',
         'aos_get_service_stdout',
-        'aos_signal_stream'
+        'aos_signal_stream',
+        'aos_get_toolchain_info'
       ],
       type: 'aos-edge-toolchain',
       suffix: 'AET',

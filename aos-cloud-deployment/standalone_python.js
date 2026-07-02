@@ -25387,6 +25387,10 @@
     async removeCertificate(certName = "aos-user-sp") {
       return this.sendCommand("aos_remove_cert", { certName });
     }
+    // Get installed toolchain package versions (aos-signer, aos-keys, aos-prov)
+    async getToolchainInfo() {
+      return this.sendCommand("aos_get_toolchain_info", {});
+    }
     // Restart an AOS application
     async restartApp(appId) {
       return this.sendCommand("aos_restart_app", { appId });
@@ -29321,6 +29325,7 @@ items:
       }
     };
     const [workerInfo, setWorkerInfo] = React2.useState(null);
+    const [toolchainVersions, setToolchainVersions] = React2.useState(null);
     const handleCertUpload = async (e) => {
       const file = e.target.files?.[0];
       if (!file || !aosServiceRef.current)
@@ -29346,6 +29351,15 @@ items:
           if (result.worker) {
             setWorkerInfo(result.worker);
             addLog(`[Worker] Dedicated environment ready on port ${result.worker.port}`);
+          }
+          try {
+            const tcInfo = await aosServiceRef.current.getToolchainInfo();
+            if (tcInfo.status === "success" && tcInfo.packages) {
+              setToolchainVersions(tcInfo.packages);
+              addLog(`[Toolchain] aos-signer ${tcInfo.packages["aos-signer"] || "?"}, aos-keys ${tcInfo.packages["aos-keys"] || "?"}, aos-prov ${tcInfo.packages["aos-prov"] || "?"}`);
+            }
+          } catch (tcErr) {
+            addLog(`[Toolchain] Version check skipped: ${tcErr.message}`);
           }
           addLog(`[AosCloud] Refreshing services...`);
           fetchAosCloudServices();
@@ -29374,6 +29388,7 @@ items:
           addLog(`[Cert] ${result.message}`);
           setCertStatus({ loaded: false, source: "none", message: result.message, identity: null });
           setWorkerInfo(null);
+          setToolchainVersions(null);
         } else {
           setCertError(result.message || "Remove failed");
         }
@@ -30511,6 +30526,28 @@ items:
               },
               React2.createElement("span", { style: { color: "#6b7280", flexShrink: 0 } }, "CN:"),
               React2.createElement("span", { style: { color: "#111827", overflowWrap: "anywhere", wordBreak: "break-word" } }, certStatus.identity.cn)
+            ),
+            toolchainVersions && React2.createElement(
+              "div",
+              {
+                style: {
+                  fontSize: "11px",
+                  backgroundColor: "#f0fdf4",
+                  border: "1px solid #bbf7d0",
+                  borderRadius: "4px",
+                  padding: "6px 10px",
+                  marginBottom: "8px",
+                  fontFamily: "ui-monospace, Menlo, Consolas, monospace",
+                  display: "flex",
+                  gap: "8px",
+                  alignItems: "baseline",
+                  flexWrap: "wrap"
+                }
+              },
+              React2.createElement("span", { style: { color: "#6b7280", flexShrink: 0 } }, "Toolchain:"),
+              React2.createElement("span", { style: { color: "#065f46" } }, `aos-signer ${toolchainVersions["aos-signer"] || "?"}`),
+              React2.createElement("span", { style: { color: "#065f46" } }, `aos-keys ${toolchainVersions["aos-keys"] || "?"}`),
+              React2.createElement("span", { style: { color: "#065f46" } }, `aos-prov ${toolchainVersions["aos-prov"] || "?"}`)
             ),
             certError && React2.createElement("div", { style: { fontSize: "12px", color: "#dc2626", marginBottom: "8px" } }, certError),
             React2.createElement(

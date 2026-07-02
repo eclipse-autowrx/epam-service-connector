@@ -1035,6 +1035,9 @@ export default function Page({ data, config }: PluginProps) {
   // Worker info returned by coordinator after cert upload
   const [workerInfo, setWorkerInfo] = React.useState<{ instanceId?: string; port?: number; userCN?: string } | null>(null)
 
+  // Toolchain package versions (fetched after cert upload)
+  const [toolchainVersions, setToolchainVersions] = React.useState<Record<string, string> | null>(null)
+
   const handleCertUpload = async (e: any) => {
     const file = e.target.files?.[0]
     if (!file || !aosServiceRef.current) return
@@ -1063,6 +1066,16 @@ export default function Page({ data, config }: PluginProps) {
           setWorkerInfo(result.worker)
           addLog(`[Worker] Dedicated environment ready on port ${result.worker.port}`)
         }
+        // Fetch toolchain package versions
+        try {
+          const tcInfo = await aosServiceRef.current.getToolchainInfo()
+          if (tcInfo.status === 'success' && tcInfo.packages) {
+            setToolchainVersions(tcInfo.packages)
+            addLog(`[Toolchain] aos-signer ${tcInfo.packages['aos-signer'] || '?'}, aos-keys ${tcInfo.packages['aos-keys'] || '?'}, aos-prov ${tcInfo.packages['aos-prov'] || '?'}`)
+          }
+        } catch (tcErr: any) {
+          addLog(`[Toolchain] Version check skipped: ${tcErr.message}`)
+        }
         addLog(`[AosCloud] Refreshing services...`)
         fetchAosCloudServices()
       } else {
@@ -1090,6 +1103,7 @@ export default function Page({ data, config }: PluginProps) {
         addLog(`[Cert] ${result.message}`)
         setCertStatus({ loaded: false, source: 'none', message: result.message, identity: null })
         setWorkerInfo(null)
+        setToolchainVersions(null)
       } else {
         setCertError(result.message || 'Remove failed')
       }
@@ -1947,8 +1961,13 @@ export default function Page({ data, config }: PluginProps) {
               React.createElement('div', { style: { flex: 1, minWidth: 0 } },
                 React.createElement('div', { style: { fontSize: '12px', fontWeight: 600, color: '#374151' } }, 'Environment'),
                 step2Done
-                  ? React.createElement('div', { style: { fontSize: '11px', color: '#16a34a', marginTop: '2px' } },
-                      `Ready — port ${workerInfo.port}`
+                  ? React.createElement('div', null,
+                      React.createElement('div', { style: { fontSize: '11px', color: '#16a34a', marginTop: '2px' } },
+                        `Ready — port ${workerInfo.port}`
+                      ),
+                      React.createElement('div', { style: { fontSize: '10px', color: '#9ca3af', marginTop: '3px', lineHeight: '1.4' } },
+                        'If the worker becomes unresponsive, Remove your certificate below and re-upload it to get a fresh environment.'
+                      )
                     )
                   : step2Active
                     ? React.createElement('div', { style: { fontSize: '11px', color: '#d97706', marginTop: '2px' } }, 'Creating...')
@@ -1998,6 +2017,19 @@ export default function Page({ data, config }: PluginProps) {
           },
             React.createElement('span', { style: { color: '#6b7280', flexShrink: 0 } }, 'CN:'),
             React.createElement('span', { style: { color: '#111827', overflowWrap: 'anywhere' as const, wordBreak: 'break-word' as const } }, certStatus.identity.cn)
+          ),
+          toolchainVersions && React.createElement('div', {
+            style: {
+              fontSize: '11px', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0',
+              borderRadius: '4px', padding: '6px 10px', marginBottom: '8px',
+              fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
+              display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' as const
+            }
+          },
+            React.createElement('span', { style: { color: '#6b7280', flexShrink: 0 } }, 'Toolchain:'),
+            React.createElement('span', { style: { color: '#065f46' } }, `aos-signer ${toolchainVersions['aos-signer'] || '?'}`),
+            React.createElement('span', { style: { color: '#065f46' } }, `aos-keys ${toolchainVersions['aos-keys'] || '?'}`),
+            React.createElement('span', { style: { color: '#065f46' } }, `aos-prov ${toolchainVersions['aos-prov'] || '?'}`)
           ),
           certError && React.createElement('div', { style: { fontSize: '12px', color: '#dc2626', marginBottom: '8px' } }, certError),
           React.createElement('div', { style: { display: 'flex', gap: '6px' } },

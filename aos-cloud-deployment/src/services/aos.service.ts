@@ -333,6 +333,11 @@ export class AosService {
     return this.sendCommand('aos_remove_cert', { certName })
   }
 
+  // Get installed toolchain package versions (aos-signer, aos-keys, aos-prov)
+  async getToolchainInfo(): Promise<any> {
+    return this.sendCommand('aos_get_toolchain_info', {})
+  }
+
   // Restart an AOS application
   async restartApp(appId: string): Promise<any> {
     return this.sendCommand('aos_restart_app', { appId })
