@@ -749,7 +749,8 @@ ${imagesBlock}
         uploadLimit: ${cfg.uploadLimit}
         downloadLimit: ${cfg.downloadLimit}
         noFileLimit: ${cfg.noFileLimit}
-        pidsLimit: ${cfg.pidsLimit}${dependenciesBlock}${resourcesBlock}
+        pidsLimit: ${cfg.pidsLimit}${resourcesBlock}
+${dependenciesBlock}
 `;
 }
 
@@ -842,7 +843,8 @@ ${imagesBlock}
         uploadLimit: ${cfg.uploadLimit}
         downloadLimit: ${cfg.downloadLimit}
         noFileLimit: ${cfg.noFileLimit}
-        pidsLimit: ${cfg.pidsLimit}${dependenciesBlock}${resourcesBlock}
+        pidsLimit: ${cfg.pidsLimit}${resourcesBlock}
+${dependenciesBlock}
 `;
 }
 
