@@ -644,6 +644,10 @@ function parseYamlConfig(yamlConfig) {
   const noFileLimit = quotas.noFileLimit != null ? quotas.noFileLimit : 1024;
   const pidsLimit = quotas.pidsLimit != null ? quotas.pidsLimit : 256;
 
+  // Dependencies (layers, services) and resources — preserve from input YAML
+  const dependencies = item.dependencies || null;
+  const resources = config.resources || null;
+
   return {
     tlsKey, domain,
     author, company, version, serviceId, codename, title, description,
@@ -653,6 +657,7 @@ function parseYamlConfig(yamlConfig) {
     cpuLimit, ramLimit, storageLimit, stateLimit,
     tmpLimit, uploadSpeedLimit, downloadSpeedLimit, uploadLimit, downloadLimit,
     noFileLimit, pidsLimit,
+    dependencies, resources,
   };
 }
 
@@ -677,6 +682,32 @@ function generateNewConfigFormat(appName, oldYamlConfig) {
   const imagesBlock = `      - sourceFolder: "src_any"
         archInfo:
           architecture: "any"`;
+
+  // Build dependencies block if present (layers, services)
+  let dependenciesBlock = '';
+  if (cfg.dependencies && cfg.dependencies.length > 0) {
+    dependenciesBlock = '\n    dependencies:\n' + cfg.dependencies.map(dep => {
+      const identity = dep.identity || {};
+      const idType = identity.type || 'layer';
+      const idCodename = identity.codename || '';
+      const versions = dep.versions || '';
+      return `      - identity:
+          type: ${idType}
+          codename: ${idCodename}
+        versions: ${versions}`;
+    }).join('\n');
+  }
+
+  // Build resources block if present (named resources like kuksa, zenoh)
+  let resourcesBlock = '';
+  if (cfg.resources && cfg.resources.length > 0) {
+    resourcesBlock = '\n      resources:\n' + cfg.resources.map(res => {
+      const name = res.name || '';
+      const mode = res.mode || 'rw';
+      return `        - name: ${name}
+          mode: ${mode}`;
+    }).join('\n');
+  }
 
   return `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
 schemaVersion: 2
@@ -718,7 +749,7 @@ ${imagesBlock}
         uploadLimit: ${cfg.uploadLimit}
         downloadLimit: ${cfg.downloadLimit}
         noFileLimit: ${cfg.noFileLimit}
-        pidsLimit: ${cfg.pidsLimit}
+        pidsLimit: ${cfg.pidsLimit}${dependenciesBlock}${resourcesBlock}
 `;
 }
 
@@ -743,6 +774,32 @@ function generatePythonConfig(appName, pyFileName, oldYamlConfig) {
   const imagesBlock = `      - sourceFolder: "src_any"
         archInfo:
           architecture: "any"`;
+
+  // Build dependencies block if present (layers, services)
+  let dependenciesBlock = '';
+  if (cfg.dependencies && cfg.dependencies.length > 0) {
+    dependenciesBlock = '\n    dependencies:\n' + cfg.dependencies.map(dep => {
+      const identity = dep.identity || {};
+      const idType = identity.type || 'layer';
+      const idCodename = identity.codename || '';
+      const versions = dep.versions || '';
+      return `      - identity:
+          type: ${idType}
+          codename: ${idCodename}
+        versions: ${versions}`;
+    }).join('\n');
+  }
+
+  // Build resources block if present (named resources like kuksa, zenoh)
+  let resourcesBlock = '';
+  if (cfg.resources && cfg.resources.length > 0) {
+    resourcesBlock = '\n      resources:\n' + cfg.resources.map(res => {
+      const name = res.name || '';
+      const mode = res.mode || 'rw';
+      return `        - name: ${name}
+          mode: ${mode}`;
+    }).join('\n');
+  }
 
   return `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
 # Python service — architecture-independent
@@ -785,7 +842,7 @@ ${imagesBlock}
         uploadLimit: ${cfg.uploadLimit}
         downloadLimit: ${cfg.downloadLimit}
         noFileLimit: ${cfg.noFileLimit}
-        pidsLimit: ${cfg.pidsLimit}
+        pidsLimit: ${cfg.pidsLimit}${dependenciesBlock}${resourcesBlock}
 `;
 }
 
