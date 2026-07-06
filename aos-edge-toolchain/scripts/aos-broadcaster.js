@@ -694,7 +694,7 @@ function generateNewConfigFormat(appName, oldYamlConfig) {
       return `      - identity:
           type: ${idType}
           codename: ${idCodename}
-        versions: ${versions}`;
+        versions: "${versions}"`;
     }).join('\n');
   }
 
@@ -787,7 +787,7 @@ function generatePythonConfig(appName, pyFileName, oldYamlConfig) {
       return `      - identity:
           type: ${idType}
           codename: ${idCodename}
-        versions: ${versions}`;
+        versions: "${versions}"`;
     }).join('\n');
   }
 
