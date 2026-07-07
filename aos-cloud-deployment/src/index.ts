@@ -52,7 +52,7 @@ function restoreHostElement(el: HTMLElement) {
 export function mount(el: HTMLElement, props?: any) {
   constrainHostElement(el)
   const root = ReactDOM.createRoot(el)
-  root.render(React.createElement(Page as any, props || {}))
+  root.render(React.createElement(Page as any, { ...(props || {}), config: { ...(props?.config || {}), language: 'python' } }))
   ;(el as any).__aw_root = root
 }
 

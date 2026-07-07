@@ -25,9 +25,11 @@ interface DockerInstance {
 
 export default function Page({ data, config }: PluginProps) {
 
-  const [cppCode, setCppCode] = React.useState(PRESETS.helloAos.cpp)
-  const [yamlConfig, setYamlConfig] = React.useState(PRESETS.helloAos.yaml)
-  const [appName, setAppName] = React.useState('hello-aos')
+  const [languageMode, setLanguageMode] = React.useState<'cpp' | 'python'>('python')
+  const [cppCode, setCppCode] = React.useState((PRESETS as any).helloAos?.cpp || '')
+  const [pythonCode, setPythonCode] = React.useState((PRESETS as any).helloPython?.python || '')
+  const [yamlConfig, setYamlConfig] = React.useState((PRESETS as any).helloPython?.yaml || (PRESETS as any).helloAos?.yaml || '')
+  const [appName, setAppName] = React.useState('hello-world-python')
   const [isBuilding, setIsBuilding] = React.useState(false)
   const [buildStatus, setBuildStatus] = React.useState<string>('')
   const [buildLogs, setBuildLogs] = React.useState<string[]>([])
@@ -36,15 +38,16 @@ export default function Page({ data, config }: PluginProps) {
   const [selectedPreset, setSelectedPreset] = React.useState('custom')
   const [autoIncVersion, setAutoIncVersion] = React.useState(true)
   const [autoSyncServiceUid, setAutoSyncServiceUid] = React.useState(true)
-  const [activeEditorTab, setActiveEditorTab] = React.useState<'cpp' | 'yaml'>('cpp')
+  const [activeEditorTab, setActiveEditorTab] = React.useState<'cpp' | 'python' | 'yaml'>('python')
   const cppCodeRef = React.useRef(cppCode)
+  const pythonCodeRef = React.useRef(pythonCode)
   const yamlConfigRef = React.useRef(yamlConfig)
   cppCodeRef.current = cppCode
+  pythonCodeRef.current = pythonCode
   yamlConfigRef.current = yamlConfig
 
   // Docker instances state
   const [dockerInstances, setDockerInstances] = React.useState<DockerInstance[]>([])
-  const [filterOnline, setFilterOnline] = React.useState<boolean>(true)
   const [selectedInstance, setSelectedInstance] = React.useState<string>('')
   const [showDockerPanel, setShowDockerPanel] = React.useState<boolean>(true)
 
@@ -71,11 +74,11 @@ export default function Page({ data, config }: PluginProps) {
   const [isUploadingCert, setIsUploadingCert] = React.useState<boolean>(false)
   const [isRemovingCert, setIsRemovingCert] = React.useState<boolean>(false)
   const [certError, setCertError] = React.useState<string>('')
-  const [showAdvanced, setShowAdvanced] = React.useState<boolean>(false)
 
   // AosCloud state
   const [aosServices, setAosServices] = React.useState<any[]>([])
   const [selectedServiceUuid, setSelectedServiceUuid] = React.useState<string>('')
+  const [selectedServiceCodename, setSelectedServiceCodename] = React.useState<string>('')
   const [serviceUnits, setServiceUnits] = React.useState<any[]>([])
   const [serviceVersions, setServiceVersions] = React.useState<any[]>([])
   const [serviceName, setServiceName] = React.useState<string>('')
@@ -227,7 +230,7 @@ export default function Page({ data, config }: PluginProps) {
       flexDirection: 'column' as const,
       gap: '16px',
       minWidth: 0,
-      overflowY: 'auto' as const
+      overflow: 'hidden'
     },
     dockerColumn: {
       width: '280px',
@@ -298,12 +301,11 @@ export default function Page({ data, config }: PluginProps) {
       backgroundColor: '#ffffff',
       color: '#1f2937',
       outline: 'none',
-      minHeight: '220px'
     },
     editorContainer: {
       display: 'flex',
       flex: 1,
-      overflow: 'auto',
+      overflow: 'hidden',
       backgroundColor: '#ffffff'
     },
     lineNumbers: {
@@ -607,7 +609,7 @@ export default function Page({ data, config }: PluginProps) {
   // Initialize AOS service
   React.useEffect(() => {
     const serviceUrl = config?.aosServiceUrl || config?.runtimeUrl || 'https://kit.digitalauto.tech'
-    const service = new AosService(serviceUrl, selectedInstance || 'default-aos-target')
+    const service = new AosService(serviceUrl, selectedInstance || 'AET-ORCHESTRATOR')
     aosServiceRef.current = service
 
     const stageLabels: Record<string, string> = {
@@ -736,85 +738,20 @@ export default function Page({ data, config }: PluginProps) {
   }
 
   const fetchDockerInstances = async () => {
-    try {
-      // Try to fetch from Kit Manager API
-      const kitManagerUrl = config?.aosServiceUrl || config?.runtimeUrl || 'https://kit.digitalauto.tech'
-      const listUrl = kitManagerUrl.replace(/\/$/, '') + '/listAllKits'
-      const response = await fetch(listUrl)
-      if (response.ok) {
-        const data = await response.json()
-        const kitsList = data.kits || data.content || []
-        if (Array.isArray(kitsList)) {
-          const instances: DockerInstance[] = kitsList
-            .filter((kit: any) => {
-              // Filter for AOS Edge Toolchain instances (AET- prefix) or all instances
-              const instanceId = kit.kit_id || kit.instance_id || ''
-              return instanceId.startsWith('AET-') || instanceId.startsWith('VEA-') || kit.name?.includes('AOS')
-            })
-            .map((kit: any) => ({
-              instance_id: kit.kit_id || kit.instance_id,
-              name: kit.name || 'Unknown',
-              online: kit.online !== false, // Assume online unless explicitly false
-              last_seen: kit.last_seen,
-              type: kit.type,
-              suffix: kit.suffix || (kit.kit_id || kit.instance_id || '').split('-')[0]
-            }))
-
-          // Ping each instance to verify it's actually alive
-          const verified = await Promise.all(instances.map(async (inst: DockerInstance) => {
-            try {
-              const pingResult = await new Promise<boolean>((resolve) => {
-                if (!aosServiceRef.current?.isServiceConnected()) { resolve(false); return }
-                const timeout = setTimeout(() => resolve(false), 2000)
-                const pingId = 'ping-' + inst.instance_id + '-' + Date.now()
-                const s = aosServiceRef.current as any
-                if (s.socket) {
-                  s.socket.emit('messageToKit', {
-                    id: pingId, cmd: 'aos_list_apps', to_kit_id: inst.instance_id, type: 'aos_list_apps'
-                  })
-                  const handler = (msg: any) => {
-                    if (msg.id === pingId || msg.kit_id === inst.instance_id) {
-                      clearTimeout(timeout)
-                      s.socket.off('messageToKit-kitReply', handler)
-                      resolve(true)
-                    }
-                  }
-                  s.socket.on('messageToKit-kitReply', handler)
-                  setTimeout(() => { s.socket.off('messageToKit-kitReply', handler) }, 2500)
-                } else { resolve(false) }
-              })
-              return { ...inst, online: pingResult }
-            } catch { return { ...inst, online: false } }
-          }))
-
-          setDockerInstances(verified)
-
-          // Auto-select first online instance if none selected
-          if (!selectedInstance && verified.length > 0) {
-            const firstOnline = verified.find((i: DockerInstance) => i.online)
-            if (firstOnline) {
-              setSelectedInstance(firstOnline.instance_id)
-            }
-          }
-        }
-      }
-    } catch (err) {
-      // If Kit Manager API is not available, use known instance for development
-      console.log('[AOS] Kit Manager API not available, using known instance')
-      const mockInstances: DockerInstance[] = [
-        {
-          instance_id: 'AET-TOOLCHAIN-001',
-          name: 'AOS Edge Toolchain',
-          online: true,
-          last_seen: new Date().toISOString(),
-          suffix: 'AET'
-        }
-      ]
-      setDockerInstances(mockInstances)
-      // Auto-select the first (and only) mock instance
-      if (!selectedInstance) {
-        setSelectedInstance('AET-TOOLCHAIN-001')
-      }
+    // With the orchestrator architecture, there is a single entry point.
+    // The orchestrator auto-routes to per-user workers based on cert identity.
+    const orchestratorId = 'AET-ORCHESTRATOR';
+    const orchestratorInst: DockerInstance = {
+      instance_id: orchestratorId,
+      name: 'AOS Edge Toolchain',
+      online: true,
+      last_seen: new Date().toISOString(),
+      type: 'aos-edge-toolchain',
+      suffix: 'AET'
+    };
+    setDockerInstances([orchestratorInst]);
+    if (!selectedInstance) {
+      setSelectedInstance(orchestratorId);
     }
   }
 
@@ -840,54 +777,6 @@ export default function Page({ data, config }: PluginProps) {
         return updated
       })
     }
-  }
-
-  const handleSelectDocker = (instance: DockerInstance) => {
-    if (selectedInstance === instance.instance_id) return  // no-op when re-clicking same row
-    setSelectedInstance(instance.instance_id)
-    addLog(`[Docker] Selected instance: ${instance.name} (${instance.instance_id})`)
-
-    // Update AOS service target
-    if (aosServiceRef.current) {
-      aosServiceRef.current.setTargetId(instance.instance_id)
-    }
-
-    // Reset per-instance state so we don't show stale data from the previous
-    // instance (services, units, monitoring, alerts, cert status, deployed
-    // apps, logs, open unit-detail overlay). Each broadcaster has its own
-    // cert and therefore its own AosCloud view.
-    setAosServices([])
-    setSelectedServiceUuid('')
-    setServiceUnits([])
-    setServiceVersions([])
-    setServiceName('')
-    setSelectedMonitorUnit('')
-    setSelectedUnitUid('')
-    setSelectedSubjectId('')
-    setUnitMonitoring(null)
-    setAlerts([])
-    setDeployedApps([])
-    setServiceLogs([])
-    setDetailUnitUid(null)
-    setCertStatus(null)
-    setCertError('')
-    setDeploymentStatus(null)
-    setStatusError('')
-    aosCloudLoadedRef.current = false
-
-    // Re-fetch from the new broadcaster (cert status + AosCloud services).
-    // checkCertificate is fast; fetchAosCloudServices kicks off versions/units.
-    if (aosServiceRef.current && aosServiceRef.current.isServiceConnected()) {
-      checkCertificate()
-      fetchAosCloudServices()
-    }
-  }
-
-  const getFilteredInstances = () => {
-    if (filterOnline) {
-      return dockerInstances.filter(d => d.online)
-    }
-    return dockerInstances
   }
 
   const addLog = (message: string) => {
@@ -932,6 +821,10 @@ export default function Page({ data, config }: PluginProps) {
         message: result.message,
         identity: result.identity ?? null
       })
+      // Capture worker info from orchestrator response
+      if (result.worker) {
+        setWorkerInfo(result.worker)
+      }
       setCertError('')
     } catch (err: any) {
       setCertError(err.message || 'Failed to check certificate')
@@ -944,15 +837,19 @@ export default function Page({ data, config }: PluginProps) {
     try {
       const res = await aosServiceRef.current.listServices()
       if (res.status === 'success') {
-        setAosServices(res.items || [])
+        const items = res.items || []
+        setAosServices(items)
         if (!selectedServiceUuid && res.defaults?.serviceUuid) {
           setSelectedServiceUuid(res.defaults.serviceUuid)
+          const svc = items.find((s: any) => s.uuid === res.defaults.serviceUuid)
+          if (svc?.codename) setSelectedServiceCodename(svc.codename)
           loadServiceDetails(res.defaults.serviceUuid)
-        } else if (!selectedServiceUuid && res.items?.length) {
-          setSelectedServiceUuid(res.items[0].uuid)
-          loadServiceDetails(res.items[0].uuid)
+        } else if (!selectedServiceUuid && items.length) {
+          setSelectedServiceUuid(items[0].uuid)
+          if (items[0].codename) setSelectedServiceCodename(items[0].codename)
+          loadServiceDetails(items[0].uuid)
         }
-        addLog(`[AosCloud] Loaded ${res.items?.length || 0} services`)
+        addLog(`[AosCloud] Loaded ${items.length} services`)
       }
       // Also fetch alerts
       try {
@@ -993,7 +890,12 @@ export default function Page({ data, config }: PluginProps) {
           const parts = latest.split('.')
           parts[parts.length - 1] = String(Number(parts[parts.length - 1]) + 1)
           const next = parts.join('.')
-          setCppCode(prev => prev.replace(/#define\s+VERSION\s+"[^"]+"/, `#define VERSION "${next}"`))
+          // Update version in code (C++ or Python) and YAML
+          if (languageMode === 'python') {
+            setPythonCode(prev => prev.replace(/VERSION\s*=\s*"[^"]+"/, `VERSION = "${next}"`))
+          } else {
+            setCppCode(prev => prev.replace(/#define\s+VERSION\s+"[^"]+"/, `#define VERSION "${next}"`))
+          }
           setYamlConfig(prev => prev.replace(/version:\s*"[^"]+"/, `version: "${next}"`))
           addLog(`[Version] Next: ${latest} → ${next}`)
         }
@@ -1005,6 +907,7 @@ export default function Page({ data, config }: PluginProps) {
           setSelectedMonitorUnit(firstUid)
           setSelectedUnitUid(firstUid)
           loadUnitMonitoring(firstUid)
+          loadUnitInfo(firstUid)
         }
       }
       // Auto-set subject ID from the first available subject
@@ -1026,15 +929,58 @@ export default function Page({ data, config }: PluginProps) {
     setServiceUnits([])
     setServiceVersions([])
     setUnitMonitoring(null)
+    setShowAllUnits(false)
 
-    // Auto-sync service_uid to config.yaml if enabled
+    // Look up the codename from the services list
+    const svc = aosServices.find((s: any) => s.uuid === uuid)
+    const codename = svc?.codename || ''
+    setSelectedServiceCodename(codename)
+
+    // Auto-sync: replace UUID-based identity with codename in config.yaml.
+    // When a service is selected, its codename replaces any id:/service_uid:
+    // field so the YAML uses the human-readable codename as the primary identity.
     if (uuid && autoSyncServiceUid) {
       setYamlConfig(prev => {
-        const next = prev.replace(/service_uid:\s*["']?[a-f0-9-]+["']?/i, `service_uid: ${uuid}`)
-        if (next === prev) {
-          addLog(`[Config] service_uid line not found in config.yaml — not synced`)
+        let next = prev
+        let synced = false
+
+        const isUuidLike = (s: string) => /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(s)
+        if (codename && !isUuidLike(codename)) {
+          // Replace v2 id: <uuid> with codename: "<codename>"
+          if (/(\s+)id:\s*["']?[a-f0-9-]+["']?/i.test(next)) {
+            next = next.replace(/(\s+)id:\s*["']?[a-f0-9-]+["']?/i, `$1codename: "${codename}"`)
+            synced = true
+          }
+          // Replace v1 service_uid: <uuid> with codename: "<codename>"
+          if (/service_uid:\s*["']?[a-f0-9-]+["']?/i.test(next)) {
+            next = next.replace(/service_uid:\s*["']?[a-f0-9-]+["']?/i, `codename: "${codename}"`)
+            synced = true
+          }
+          // Update existing codename only if current one is UUID-like or empty
+          const currentCodenameMatch = next.match(/codename:\s*["']?([^"'\n]+)["']?/)
+          if (currentCodenameMatch) {
+            const currentCodename = currentCodenameMatch[1]
+            if (!currentCodename || isUuidLike(currentCodename)) {
+              next = next.replace(/codename:\s*["']?[^"'\n]+["']?/, `codename: "${codename}"`)
+              synced = true
+            }
+          }
+        } else if (!codename) {
+          // No codename — fall back to UUID sync
+          if (/(\s+)id:\s*["']?[a-f0-9-]+["']?/i.test(next)) {
+            next = next.replace(/(\s+)id:\s*["']?[a-f0-9-]+["']?/i, `$1id: ${uuid}`)
+            synced = true
+          }
+          if (/service_uid:\s*["']?[a-f0-9-]+["']?/i.test(next)) {
+            next = next.replace(/service_uid:\s*["']?[a-f0-9-]+["']?/i, `service_uid: ${uuid}`)
+            synced = true
+          }
+        }
+
+        if (synced) {
+          addLog(`[Config] Auto-synced codename: ${codename || uuid}`)
         } else {
-          addLog(`[Config] Auto-synced service_uid: ${uuid}`)
+          addLog(`[Config] No id, service_uid, or codename field found in config.yaml — not synced`)
         }
         return next
       })
@@ -1052,6 +998,30 @@ export default function Page({ data, config }: PluginProps) {
       else setUnitMonitoring({ status: 'error', message: res.message || 'Unavailable' })
     } catch (err: any) {
       setUnitMonitoring({ status: 'error', message: err.message || 'Unavailable' })
+    }
+  }
+
+  const loadUnitInfo = async (uid: string) => {
+    if (!aosServiceRef.current || !uid) return
+    try {
+      const res = await aosServiceRef.current.getUnitInfo(uid)
+      if (res.status === 'success') {
+        setUnitInfo({
+          name: res.name,
+          onlineStatus: res.onlineStatus,
+          versions: res.versions,
+          nodeCount: res.nodeCount
+        })
+        const verParts = res.versions && Object.keys(res.versions).length > 0
+          ? Object.entries(res.versions).map(([k, v]) => `${k}=${v}`).join(', ')
+          : 'no version fields'
+        addLog(`[Unit] ${res.name || uid}: ${verParts}, ${res.nodeCount} node(s), ${res.onlineStatus}`)
+        if (res._rawKeys) {
+          addLog(`[Unit] API response keys: ${res._rawKeys.join(', ')}`)
+        }
+      }
+    } catch (err: any) {
+      // non-fatal — unit info is supplementary
     }
   }
 
@@ -1088,6 +1058,19 @@ export default function Page({ data, config }: PluginProps) {
     } catch (e) { /* ignore */ }
   }
 
+  // Worker info returned by coordinator after cert upload
+  const [workerInfo, setWorkerInfo] = React.useState<{ instanceId?: string; port?: number; userCN?: string } | null>(null)
+
+  // Toolchain package versions (fetched after cert upload)
+  const [toolchainVersions, setToolchainVersions] = React.useState<Record<string, string> | null>(null)
+
+  // Unit list view toggle: false = this service, true = all units
+  const [showAllUnits, setShowAllUnits] = React.useState<boolean>(false)
+  const [allUnits, setAllUnits] = React.useState<any[]>([])
+
+  // Unit version info (fetched when a unit is selected)
+  const [unitInfo, setUnitInfo] = React.useState<{ name?: string; onlineStatus?: string; versions?: Record<string, string>; nodeCount?: number } | null>(null)
+
   const handleCertUpload = async (e: any) => {
     const file = e.target.files?.[0]
     if (!file || !aosServiceRef.current) return
@@ -1111,6 +1094,21 @@ export default function Page({ data, config }: PluginProps) {
         if (result.identity?.cn) {
           addLog(`[Cert] Identity: CN=${result.identity.cn}, expires ${result.identity.notAfter || '?'}`)
         }
+        // Store worker info from orchestrator (port, instanceId, userCN)
+        if (result.worker) {
+          setWorkerInfo(result.worker)
+          addLog(`[Worker] Dedicated environment ready on port ${result.worker.port}`)
+        }
+        // Fetch toolchain package versions
+        try {
+          const tcInfo = await aosServiceRef.current.getToolchainInfo()
+          if (tcInfo.status === 'success' && tcInfo.packages) {
+            setToolchainVersions(tcInfo.packages)
+            addLog(`[Toolchain] aos-signer ${tcInfo.packages['aos-signer'] || '?'}, aos-keys ${tcInfo.packages['aos-keys'] || '?'}, aos-prov ${tcInfo.packages['aos-prov'] || '?'}`)
+          }
+        } catch (tcErr: any) {
+          addLog(`[Toolchain] Version check skipped: ${tcErr.message}`)
+        }
         addLog(`[AosCloud] Refreshing services...`)
         fetchAosCloudServices()
       } else {
@@ -1127,7 +1125,7 @@ export default function Page({ data, config }: PluginProps) {
 
   const handleCertRemove = async () => {
     if (!aosServiceRef.current) return
-    if (typeof window !== 'undefined' && !window.confirm('Remove the uploaded certificate from this broadcaster? Builds will fail until a new certificate is uploaded.')) {
+    if (typeof window !== 'undefined' && !window.confirm('Remove your certificate and shut down your build environment? Other users will not be affected.')) {
       return
     }
     setIsRemovingCert(true)
@@ -1137,6 +1135,8 @@ export default function Page({ data, config }: PluginProps) {
       if (result.status === 'success') {
         addLog(`[Cert] ${result.message}`)
         setCertStatus({ loaded: false, source: 'none', message: result.message, identity: null })
+        setWorkerInfo(null)
+        setToolchainVersions(null)
       } else {
         setCertError(result.message || 'Remove failed')
       }
@@ -1156,15 +1156,15 @@ export default function Page({ data, config }: PluginProps) {
 
     setBuildLogs([])
 
-    let finalCpp = cppCodeRef.current
+    let finalCode = languageMode === 'python' ? pythonCodeRef.current : cppCodeRef.current
     let finalYaml = yamlConfigRef.current
 
-    
+
 
     setIsBuilding(true)
     setBuildStatus('Starting build...')
     addLog(`[Build] Target: ${selectedInstance}`)
-    addLog('[Build] Starting AOS application build...')
+    addLog(`[Build] Starting AOS ${languageMode === 'python' ? 'Python' : 'C++'} application build...`)
 
     const stageLabels: Record<string, string> = {
       init: 'Init', config: 'Config', proto: 'Proto',
@@ -1172,13 +1172,23 @@ export default function Page({ data, config }: PluginProps) {
       sign: 'Sign', upload: 'Publish', error: 'Error'
     }
 
+    // Capture the build ID in a closure-level variable so the timeout
+    // recovery path can query the specific build, not just the latest.
+    let activeExecutionId: string | undefined
+
     try {
       const response = await aosServiceRef.current.buildAndDeploy({
-        name: appName,
-        displayName: appName,
-        cppCode: finalCpp,
-        yamlConfig: finalYaml
+        language: languageMode,
+        cppCode: languageMode === 'cpp' ? finalCode : undefined,
+        pythonCode: languageMode === 'python' ? finalCode : undefined,
+        yamlConfig: finalYaml,
       })
+
+      // Save build ID for recovery across page reloads
+      if (response.executionId) {
+        activeExecutionId = response.executionId
+        localStorage.setItem('aos_build_id', response.executionId)
+      }
 
       if (response.message && response.message.includes('\n')) {
         const lines = response.message.split('\n').filter((l: string) => l.trim())
@@ -1196,6 +1206,7 @@ export default function Page({ data, config }: PluginProps) {
       if (response.status === 'success') {
         setBuildStatus('Build completed successfully!')
         setIsBuilding(false)
+        localStorage.removeItem('aos_build_id')
         refreshApps()
         // Refresh the AosCloud Service card so the new version shows up
         // (and, if auto-inc is on, the editor bumps to the next version
@@ -1211,9 +1222,11 @@ export default function Page({ data, config }: PluginProps) {
         const lastLog = (response.message || '').split('\n').filter((l: string) => l.trim()).pop() || 'Unknown error'
         setBuildStatus(`Build failed: ${lastLog.replace(/^\[.*?\]\s*/, '').slice(0, 80)}`)
         setIsBuilding(false)
+        localStorage.removeItem('aos_build_id')
       } else {
         setBuildStatus('Build completed')
         setIsBuilding(false)
+        localStorage.removeItem('aos_build_id')
       }
     } catch (err: any) {
       const msg = err.message || 'Unknown error'
@@ -1222,8 +1235,73 @@ export default function Page({ data, config }: PluginProps) {
       } else {
         addLog(`[Error] ${msg}`)
       }
+
+      // If the request timed out, the build may still be running on the worker.
+      // Try to recover by polling build status for the specific execution.
+      if (msg.includes('timeout') || msg.includes('Timeout')) {
+        addLog('[Build] Request timed out — the build may still be running. Checking status...')
+        setBuildStatus('Build timed out — checking if build is still running...')
+        try {
+          const statusRes = await aosServiceRef.current.getBuildStatus(activeExecutionId)
+          // When an executionId is passed, the response has a singular "build" field;
+          // without one it returns a "builds" array.
+          const build = statusRes.build || (statusRes.builds && statusRes.builds.length > 0
+            ? statusRes.builds[statusRes.builds.length - 1]
+            : null)
+
+          if (build) {
+            if (build.status === 'success') {
+              addLog('[Build] Build completed successfully on the server!')
+              setBuildStatus('Build completed successfully!')
+              setIsBuilding(false)
+              localStorage.removeItem('aos_build_id')
+              refreshApps()
+              if (selectedServiceUuid) {
+                setTimeout(() => {
+                  loadServiceDetails(selectedServiceUuid)
+                  addLog('[AosCloud] Refreshed service versions and units')
+                }, 1000)
+              }
+              return  // Don't fall through to the error display below
+            } else if (build.status === 'building' || build.status === 'running') {
+              addLog('[Build] Build is still in progress on the server. It will complete shortly.')
+              setBuildStatus('Build still running on server — check back soon')
+              // Keep isBuilding=true so the spinner stays visible while the
+              // build is still in progress. The user can refresh the page to
+              // trigger the localStorage-based recovery path.
+              localStorage.removeItem('aos_build_id')
+              return
+            } else if (build.status === 'error') {
+              addLog(`[Build] Build failed on server: ${build.message || 'Unknown error'}`)
+              setBuildStatus('Build failed on server')
+            } else {
+              addLog(`[Build] Unexpected build status: ${build.status}`)
+              setBuildStatus(`Build status: ${build.status}`)
+            }
+          } else {
+            addLog('[Build] No build status available — the build may not have started.')
+            setBuildStatus('Build timed out — no status available')
+          }
+        } catch (statusErr: any) {
+          addLog(`[Build] Could not check build status: ${statusErr.message}`)
+          setBuildStatus('Build timed out — could not check status')
+        }
+        setIsBuilding(false)
+        localStorage.removeItem('aos_build_id')
+        return
+      }
+
       const lastLine = msg.split('\n').filter((l: string) => l.trim()).pop() || msg
-      setBuildStatus(`Build failed: ${lastLine.replace(/^\[.*?\]\s*/, '').slice(0, 80)}`)
+      let statusText = `Build failed: ${lastLine.replace(/^\[.*?\]\s*/, '').slice(0, 80)}`
+
+      // Append recovery hints for known error patterns
+      if (msg.includes('re-upload')) {
+        statusText += ' → Go to Setup panel and upload your .p12 again'
+      } else if (msg.includes('No certificate uploaded')) {
+        statusText += ' → Go to Setup panel and upload your .p12 first'
+      }
+
+      setBuildStatus(statusText)
       setIsBuilding(false)
     }
   }
@@ -1252,26 +1330,68 @@ export default function Page({ data, config }: PluginProps) {
     }
   }
 
+  // Switch between C++ and Python mode — resets editor to the default preset
+  const switchLanguage = (lang: 'cpp' | 'python') => {
+    if (lang === languageMode) return
+    setLanguageMode(lang)
+    if (lang === 'cpp') {
+      const preset = (PRESETS as any).helloAos
+      if (preset) {
+        setCppCode(preset.cpp || '')
+        setYamlConfig(preset.yaml || '')
+        setAppName(preset.appName || 'hello-aos')
+        setActiveEditorTab('cpp')
+        setSelectedPreset('helloAos')
+      }
+    } else {
+      const preset = (PRESETS as any).helloPython
+      if (preset) {
+        setPythonCode(preset.python || '')
+        setYamlConfig(preset.yaml || '')
+        setAppName(preset.appName || 'hello-world-python')
+        setActiveEditorTab('python')
+        setSelectedPreset('helloPython')
+      }
+    }
+  }
+
   const handlePresetChange = (presetName: string) => {
     setSelectedPreset(presetName)
     const preset = (PRESETS as any)[presetName]
     if (preset) {
-      let cpp = preset.cpp
+      const isPython = preset.language === 'python' || !!preset.python
+      let code = isPython ? preset.python : preset.cpp
       let yaml = preset.yaml
+
+      if (isPython) {
+        setLanguageMode('python')
+        setActiveEditorTab('python')
+      } else {
+        setLanguageMode('cpp')
+        setActiveEditorTab('cpp')
+      }
 
       if (autoIncVersion && serviceVersions.length > 0) {
         const latest = serviceVersions[0].version
         const parts = latest.split('.')
         parts[parts.length - 1] = String(Number(parts[parts.length - 1]) + 1)
         const next = parts.join('.')
-        cpp = cpp.replace(/#define\s+VERSION\s+"[^"]+"/, `#define VERSION "${next}"`)
+        if (isPython) {
+          code = code.replace(/VERSION\s*=\s*"[^"]+"/, `VERSION = "${next}"`)
+        } else {
+          code = code.replace(/#define\s+VERSION\s+"[^"]+"/, `#define VERSION "${next}"`)
+        }
         yaml = yaml.replace(/version:\s*"[^"]+"/, `version: "${next}"`)
         addLog(`[Preset] Loaded: ${preset.name || presetName} (version: ${next})`)
       } else {
         addLog(`[Preset] Loaded: ${preset.name || presetName}`)
       }
 
-      setCppCode(cpp)
+      if (isPython) {
+        setPythonCode(code)
+      } else {
+        setCppCode(code)
+      }
       setYamlConfig(yaml)
       setAppName(preset.appName || presetName)
     }
@@ -1298,9 +1418,6 @@ export default function Page({ data, config }: PluginProps) {
       default: return 'status-stopped'
     }
   }
-
-  const filteredInstances = getFilteredInstances()
-  const onlineCount = dockerInstances.filter(d => d.online).length
 
   if (!data?.prototype?.name) {
     return React.createElement('div', { style: styles.page },
@@ -1348,61 +1465,51 @@ export default function Page({ data, config }: PluginProps) {
 
         React.createElement('div', { style: { fontSize: '13px', lineHeight: 1.8, color: '#374151' } },
 
-          React.createElement('h3', { style: { fontSize: '14px', marginTop: 0, marginBottom: '8px' } }, '1. Pick a Docker Instance'),
-          React.createElement('p', { style: { color: '#6b7280', marginBottom: '8px' } },
-            'In the left panel, pick an online Docker instance from the dropdown. This is the build server that compiles, signs, and uploads your service to AosCloud. Switching instances clears the cards below and reloads everything from the newly-selected broadcaster.'
-          ),
-          React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px', fontSize: '12px' } },
-            React.createElement('strong', null, 'Tip: '),
-            'Use ', React.createElement('strong', null, 'AET-CLOUD-001'), ' for builds that should be signed with the shared SP cert; use ',
-            React.createElement('strong', null, 'AET-CLOUD-002'), ' if you want to upload your own personal cert without affecting other users.'
-          ),
-
-          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '2. Check or upload your Certificate'),
+          React.createElement('h3', { style: { fontSize: '14px', marginTop: 0, marginBottom: '8px' } }, '1. Upload your certificate'),
           React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px' } },
-            'The Certificate card shows whether the selected instance has a .p12 loaded. Click ',
-            React.createElement('strong', null, 'Manage'), ' to expand it. There you can see the loaded cert\u2019s CN, upload or replace a .p12, or remove the current one. ',
-            'Uploading a cert replaces the active signing identity on that broadcaster.'
+            'Click ', React.createElement('strong', null, 'Choose File'), ' in the Setup card and select your .p12 certificate. ',
+            'The orchestrator extracts your identity (CN) and creates a dedicated, isolated build environment just for you. ',
+            'Once loaded, the Certificate card shows your CN, toolchain versions (aos-signer, aos-keys, aos-prov), and unit info when a unit is selected. ',
+            'If your worker becomes unresponsive, Remove and re-upload the certificate to get a fresh environment.'
           ),
 
-          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '3. Choose an AosCloud Service'),
+          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '2. Choose an AosCloud Service'),
           React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px' } },
-            'Pick a service from the AosCloud Service dropdown. The chosen service\u2019s UUID is automatically written into ',
-            React.createElement('code', null, 'config.yaml'), ' (toggle ',
-            React.createElement('strong', null, 'Auto-sync service_uid'), ' to disable). ',
-            'The version pills below the dropdown show the latest versions deployed; with ',
-            React.createElement('strong', null, 'Auto-increment version after build'), ' enabled, the editor bumps to the next patch number after each successful build.'
+            'Pick a service from the AosCloud Service dropdown. The service\u2019s codename is synced into ',
+            React.createElement('code', null, 'config.yaml'), '. ',
+            'Version pills show deployed versions; enable ',
+            React.createElement('strong', null, 'Auto-increment version'), ' to bump the patch number after each build.'
           ),
 
-          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '4. Edit your code'),
+          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '3. Edit your code'),
           React.createElement('p', { style: { color: '#6b7280', marginBottom: '4px' } },
-            'The middle column has a tabbed editor. Use the preset dropdown (top-right header) to load a starting point, then edit the two tabs:'
+            'Use the preset dropdown in the header to load a starting point, then edit:'
           ),
           React.createElement('ul', { style: { color: '#6b7280', marginBottom: '16px', paddingLeft: '20px' } },
-            React.createElement('li', null, React.createElement('strong', null, 'main.cpp'), ' \u2014 your C++ application source code'),
-            React.createElement('li', null, React.createElement('strong', null, 'config.yaml'), ' \u2014 service metadata: architecture, version, resource quotas, entry point')
+            React.createElement('li', null, React.createElement('strong', null, 'main.py'), ' \u2014 your Python application'),
+            React.createElement('li', null, React.createElement('strong', null, 'config.yaml'), ' \u2014 service metadata: codename, version, quotas, entry point')
           ),
 
-          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '5. Build & Deploy'),
+          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '4. Build & Deploy'),
           React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px' } },
-            'Click ', React.createElement('strong', null, 'Build & Deploy'), '. The selected broadcaster compiles your code, signs the package with its loaded cert, and uploads it to AosCloud. The edge unit picks up the new version via OTA. ',
-            'Watch the right column for live progress: the Build Status banner pulses while running, the Build Logs card streams output, and a thin progress bar across the top of that card animates during long silent steps (uploading, signing). ',
-            'After success, the AosCloud Service card auto-refreshes with the new version pill.'
+            'Click ', React.createElement('strong', null, 'Build & Deploy'), '. Your code is packaged, signed with your certificate, and uploaded to AosCloud. ',
+            'The target unit picks up the new version via OTA. Watch the Build Log for live progress.'
           ),
 
-          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '6. Inspect a unit'),
+          React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '5. Inspect units'),
           React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px' } },
-            'In the Units card, click any unit row to open a detail overlay with that unit\u2019s hardware specs, live CPU/RAM/disk usage, and the latest alerts. ',
-            React.createElement('em', null, 'Note: '), 'AosCloud only shares device-level monitoring with the unit\u2019s OEM account, so units provisioned by someone else will show "Hardware monitoring not available" \u2014 services still deploy and run normally.'
+            'The Units card shows units assigned to the selected service. Toggle ', React.createElement('strong', null, 'All units'), ' to see every unit. ',
+            'Click any unit row to open a detail overlay with hardware specs, live CPU/RAM/disk, and alerts. ',
+            React.createElement('em', null, 'Note: '), 'monitoring requires the unit\u2019s OEM account; units from other accounts show "Hardware monitoring not available".'
           ),
 
           React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, 'Available Presets'),
           React.createElement('ul', { style: { color: '#6b7280', paddingLeft: '20px', marginBottom: 0 } },
-            React.createElement('li', null, React.createElement('strong', null, 'Hello AOS'), ' \u2014 simple hello world service'),
-            React.createElement('li', null, React.createElement('strong', null, 'Signal Writer'), ' \u2014 writes vehicle signals to KUKSA Databroker'),
-            React.createElement('li', null, React.createElement('strong', null, 'EV Range Extender'), ' \u2014 battery management with power-save mode'),
-            React.createElement('li', null, React.createElement('strong', null, 'Battery Energy Saver'), ' \u2014 forces HVAC/seat off below SoC thresholds, blocks re-activation'),
-            React.createElement('li', null, React.createElement('strong', null, 'Signal Reporter'), ' \u2014 relays signals to the live dashboard')
+            React.createElement('li', null, React.createElement('strong', null, 'Hello Python'), ' \u2014 simple Python hello world'),
+            React.createElement('li', null, React.createElement('strong', null, 'Seat ECU'), ' \u2014 seat heating/cooling control via Zenoh + Kuksa'),
+            React.createElement('li', null, React.createElement('strong', null, 'HVAC ECU'), ' \u2014 HVAC fan-speed control via Zenoh + Kuksa'),
+            React.createElement('li', null, React.createElement('strong', null, 'BMS'), ' \u2014 battery monitoring (voltage, current, SoC) via Zenoh + Kuksa'),
+            React.createElement('li', null, React.createElement('strong', null, 'Range AI'), ' \u2014 range computation from battery + cabin signals')
           )
         )
       )
@@ -1440,7 +1547,8 @@ export default function Page({ data, config }: PluginProps) {
         },
           (() => {
             const u = serviceUnits.find((x: any) => x.uid === detailUnitUid)
-            const shortUid = (detailUnitUid || '').length > 12 ? (detailUnitUid || '').substring(0, 8) + '…' : (detailUnitUid || '')
+            const displayUid = u?.systemUid || detailUnitUid || ''
+            const shortUid = displayUid.length > 12 ? displayUid.substring(0, 8) + '…' : displayUid
             const chip = (bg: string, fg: string, text: string, title?: string) =>
               React.createElement('span', {
                 title,
@@ -1465,11 +1573,11 @@ export default function Page({ data, config }: PluginProps) {
                       padding: '2px 8px', borderRadius: '10px',
                       display: 'inline-flex', alignItems: 'center', gap: '4px'
                     },
-                    title: detailUnitUid || ''
+                    title: displayUid
                   },
                     shortUid,
                     React.createElement('button', {
-                      onClick: () => { if (detailUnitUid) { navigator.clipboard.writeText(detailUnitUid); addLog(`[Copied] Unit UID: ${detailUnitUid}`) } },
+                      onClick: () => { if (displayUid) { navigator.clipboard.writeText(displayUid); addLog(`[Copied] Unit UID: ${displayUid}`) } },
                       style: { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '11px', padding: 0 },
                       title: 'Copy full UID'
                     }, '📋')
@@ -1504,7 +1612,7 @@ export default function Page({ data, config }: PluginProps) {
                 'Resource Monitoring'
               ),
               React.createElement('button', {
-                onClick: () => loadUnitMonitoring(detailUnitUid),
+                onClick: () => { loadUnitMonitoring(detailUnitUid); loadUnitInfo(detailUnitUid) },
                 style: { ...styles.iconButton, width: '22px', height: '22px', fontSize: '12px' },
                 title: 'Refresh'
               }, '↻')
@@ -1686,9 +1794,35 @@ export default function Page({ data, config }: PluginProps) {
     React.createElement('header', { style: styles.header },
       React.createElement('div', { style: styles.headerLeft },
         React.createElement('h1', { style: styles.title }, 'AOS Cloud Deployment'),
-        
+
       ),
       React.createElement('div', { style: styles.headerRight },
+        // Language toggle — segmented pill
+        React.createElement('div', {
+          style: {
+            display: 'inline-flex', borderRadius: '6px', overflow: 'hidden',
+            border: '1px solid #d1d5db', flexShrink: 0
+          }
+        },
+          React.createElement('button', {
+            onClick: () => switchLanguage('cpp'),
+            style: {
+              padding: '5px 12px', fontSize: '12px', fontWeight: 600, border: 'none', cursor: 'pointer',
+              backgroundColor: languageMode === 'cpp' ? '#3b82f6' : 'white',
+              color: languageMode === 'cpp' ? 'white' : '#6b7280',
+              transition: 'all 0.15s ease'
+            }
+          }, 'C++'),
+          React.createElement('button', {
+            onClick: () => switchLanguage('python'),
+            style: {
+              padding: '5px 12px', fontSize: '12px', fontWeight: 600, border: 'none', cursor: 'pointer',
+              backgroundColor: languageMode === 'python' ? '#3b82f6' : 'white',
+              color: languageMode === 'python' ? 'white' : '#6b7280',
+              transition: 'all 0.15s ease'
+            }
+          }, 'Python')
+        ),
         React.createElement('button', {
           onClick: () => setShowGuide(!showGuide),
           style: {
@@ -1704,14 +1838,22 @@ export default function Page({ data, config }: PluginProps) {
           style: styles.select
         },
           React.createElement('option', { value: 'custom' }, 'Write your own code'),
-          React.createElement('optgroup', { label: 'Example Presets' },
-            React.createElement('option', { value: 'helloAos' }, 'Hello AOS — simple starter'),
+          languageMode === 'cpp' ? React.createElement('optgroup', { label: 'C++ Presets' },
+            React.createElement('option', { value: 'helloAos' }, 'Hello AOS — simple C++ starter'),
             React.createElement('option', { value: 'kuksaWriter' }, 'Signal Writer — write vehicle signals'),
             React.createElement('option', { value: 'kuksaReader' }, 'KUKSA Reader — read vehicle signals'),
             React.createElement('option', { value: 'evRangeExtender' }, 'EV Range Extender — battery management'),
             React.createElement('option', { value: 'batteryEnergySaver' }, 'Battery Energy Saver — HVAC/seat cutoff'),
+            React.createElement('option', { value: 'batteryEnergySaverSdvRuntime' }, 'Battery Energy Saver — sdv-runtime / VSS 4.0'),
             React.createElement('option', { value: 'signalReporter' }, 'Signal Reporter — relay to dashboard')
-          )
+          ) : null,
+          languageMode === 'python' ? React.createElement('optgroup', { label: 'Python Presets' },
+            React.createElement('option', { value: 'helloPython' }, 'Hello Python — simple Python starter'),
+            React.createElement('option', { value: 'seatEcu' }, 'Seat ECU — seat heating/cooling control'),
+            React.createElement('option', { value: 'hvacEcu' }, 'HVAC ECU — fan speed / climate control'),
+            React.createElement('option', { value: 'bms' }, 'BMS — battery monitoring system'),
+            React.createElement('option', { value: 'rangeAi' }, 'Range AI — driving range computation')
+          ) : null
         ),
         React.createElement('span', {
           style: { fontSize: '12px', color: '#6b7280', fontWeight: 500 },
@@ -1731,188 +1873,261 @@ export default function Page({ data, config }: PluginProps) {
     // Main Content
     React.createElement('div', { style: styles.content },
 
-      // Left Column - Docker Instances
+      // Left Column — Orchestrator + Flow
       showDockerPanel && React.createElement('div', { style: styles.dockerColumn },
+
+        // ── Orchestrator Status Card ──────────────────────────────────────
         React.createElement('div', { style: styles.card },
-          // Compact header: title + count + filter toggle + refresh, all on one row
           React.createElement('div', { style: { ...styles.cardHeader, padding: '8px 12px' } },
             React.createElement('div', { style: { ...styles.cardTitle, fontSize: '13px', gap: '6px' } },
-              React.createElement(Icon, { name: 'box', size: 15, color: '#2563eb' }),
-              'Docker',
+              React.createElement(Icon, { name: 'server', size: 15, color: '#2563eb' }),
+              'Orchestrator',
               React.createElement('span', {
-                style: { fontSize: '11px', fontWeight: 400, color: '#6b7280' },
-                title: `${onlineCount} of ${dockerInstances.length} broadcasters reachable`
-              }, ` · ${onlineCount} online`)
-            ),
-            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-              React.createElement('button', {
-                onClick: () => fetchDockerInstances(),
-                style: { ...styles.iconButton, width: '22px', height: '22px', fontSize: '12px' },
-                title: 'Refresh'
-              }, '↻')
+                style: {
+                  fontSize: '11px', fontWeight: 400,
+                  color: connectionStatus === 'connected' ? '#16a34a' : '#dc2626'
+                }
+              }, connectionStatus === 'connected' ? '· Online' : '· Offline')
             )
           ),
-          // Compact instance dropdown (saves vertical space vs. a list)
-          React.createElement('div', { style: { padding: '8px 12px' } },
-            filteredInstances.length === 0
-              ? React.createElement('div', { style: { ...styles.empty, padding: '6px 0', fontSize: '11px' } },
-                  filterOnline ? 'No online devices' : 'No Docker instances found'
-                )
-              : React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
-                  // Online status dot for the currently-selected instance
-                  React.createElement('span', {
-                    style: {
-                      width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0,
-                      backgroundColor: (() => {
-                        const sel = filteredInstances.find((i: any) => i.instance_id === selectedInstance)
-                        if (!sel) return '#9ca3af'
-                        return sel.online ? '#16a34a' : '#dc2626'
-                      })()
-                    },
-                    title: (() => {
-                      const sel = filteredInstances.find((i: any) => i.instance_id === selectedInstance)
-                      if (!sel) return 'No instance selected'
-                      return sel.online ? 'Online' : 'Offline'
-                    })()
-                  }),
-                  React.createElement('select', {
-                    value: selectedInstance,
-                    onChange: (e: any) => {
-                      const inst = dockerInstances.find((i: any) => i.instance_id === e.target.value)
-                      if (inst) handleSelectDocker(inst)
-                    },
-                    style: { ...styles.select, flex: 1, minWidth: 0, fontSize: '12px', padding: '4px 6px' }
-                  },
-                    !selectedInstance && React.createElement('option', { value: '' }, '— Select instance —'),
-                    ...filteredInstances.map((instance: any) =>
-                      React.createElement('option', {
-                        key: instance.instance_id,
-                        value: instance.instance_id
-                      }, `${instance.online ? '●' : '○'} ${instance.name} (${instance.instance_id})`)
-                    )
-                  )
-                )
+          React.createElement('div', { style: { padding: '6px 12px 10px', display: 'flex', flexDirection: 'column', gap: '4px' } },
+            React.createElement('div', { style: { fontSize: '11px', color: '#6b7280', display: 'flex', justifyContent: 'space-between' } },
+              React.createElement('span', null, 'Active workers'),
+              React.createElement('span', { style: { fontWeight: 600, color: '#374151' } }, String(dockerInstances.filter(d => d.online).length))
+            ),
+            workerInfo && React.createElement('div', { style: { fontSize: '11px', color: '#6b7280', display: 'flex', justifyContent: 'space-between' } },
+              React.createElement('span', null, 'Your port'),
+              React.createElement('span', { style: { fontWeight: 600, color: '#374151', fontFamily: 'monospace' } }, String(workerInfo.port))
+            )
           )
         ),
 
-        // Certificate Panel (collapsible)
-        React.createElement('div', { style: { ...styles.card, padding: showAdvanced ? 0 : '8px 12px' } },
-          React.createElement('div', {
-            onClick: () => setShowAdvanced(!showAdvanced),
-            style: {
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: showAdvanced ? '8px 12px' : 0, cursor: 'pointer', userSelect: 'none',
-              gap: '8px'
-            }
-          },
-            React.createElement('div', {
-              style: {
-                display: 'flex', alignItems: 'center', gap: '6px',
-                fontSize: '13px', fontWeight: 500, color: '#374151',
-                minWidth: 0, flex: 1
-              }
-            },
-              React.createElement(Icon, { name: 'shield-check', size: 15, color: '#0891b2' }),
-              React.createElement('span', { style: { flexShrink: 0 } }, 'Certificate'),
-              React.createElement('span', {
-                style: {
-                  width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0,
-                  backgroundColor: certStatus === null ? '#d97706' : certStatus.loaded ? '#16a34a' : '#dc2626'
-                }
-              }),
-              React.createElement('span', {
-                title: certStatus === null ? 'Checking certificate…' : certStatus.loaded ? 'Certificate loaded' : 'No certificate',
-                style: {
-                  fontSize: '11px', fontWeight: 400,
-                  color: certStatus === null ? '#d97706' : certStatus.loaded ? '#16a34a' : '#dc2626',
-                  whiteSpace: 'nowrap' as const, overflow: 'hidden' as const, textOverflow: 'ellipsis' as const
-                }
-              },
-                certStatus === null ? 'Checking…' : certStatus.loaded ? 'Loaded' : 'Missing'
-              )
+        // ── No-cert banner ──────────────────────────────────────────────────
+        !certStatus?.loaded && React.createElement('div', {
+          style: {
+            ...styles.card,
+            backgroundColor: '#fffbeb', border: '1px solid #fcd34d',
+            padding: '10px 14px', marginBottom: '10px',
+            display: 'flex', alignItems: 'center', gap: '10px'
+          }
+        },
+          React.createElement('span', { style: { fontSize: '18px', flexShrink: 0 } }, '🔐'),
+          React.createElement('div', { style: { flex: 1 } },
+            React.createElement('div', { style: { fontSize: '13px', fontWeight: 600, color: '#92400e' } },
+              'Upload your .p12 certificate to provision a build environment'
             ),
-            React.createElement('span', {
-              title: showAdvanced ? 'Collapse' : 'Upload / replace .p12',
-              style: {
-                fontSize: '11px', color: '#6b7280', flexShrink: 0,
-                whiteSpace: 'nowrap' as const,
-                display: 'inline-flex', alignItems: 'center', gap: '4px'
-              }
-            },
-              React.createElement(Icon, { name: showAdvanced ? 'chevron-up' : 'chevron-down', size: 12 }),
-              showAdvanced ? '' : 'Manage'
+            React.createElement('div', { style: { fontSize: '11px', color: '#a16207', marginTop: '2px' } },
+              'A dedicated, isolated workspace is created per certificate identity. Deployment is unavailable without a valid certificate.'
+            )
+          )
+        ),
+
+        // ── Flow Steps Card ────────────────────────────────────────────────
+        React.createElement('div', { style: styles.card },
+          React.createElement('div', { style: { ...styles.cardHeader, padding: '8px 12px' } },
+            React.createElement('div', { style: { ...styles.cardTitle, fontSize: '13px', gap: '6px' } },
+              React.createElement(Icon, { name: 'activity', size: 15, color: '#7c3aed' }),
+              'Setup'
             )
           ),
-          // Compact always-visible warning. One line, wraps on narrow widths.
-          // Hover reveals the full message via title attribute.
-          React.createElement('div', {
-            title: 'Each .p12 corresponds to one AosCloud account. Uploading switches this broadcaster\u2019s signing identity to that account, replacing whatever cert was loaded before.',
+
+          // Step ① — Certificate
+          (() => {
+            const step1Done = certStatus?.loaded;
+            const step1Active = isUploadingCert;
+            const stepNum = step1Done ? '✓' : '①';
+            const stepColor = step1Done ? '#16a34a' : step1Active ? '#d97706' : '#9ca3af';
+            const stepBg = step1Done ? '#dcfce7' : step1Active ? '#fef3c7' : '#f3f4f6';
+            return React.createElement('div', {
+              style: { padding: '6px 12px', display: 'flex', alignItems: 'flex-start', gap: '8px', borderBottom: '1px solid #f3f4f6' }
+            },
+              React.createElement('span', {
+                style: {
+                  width: '20px', height: '20px', borderRadius: '50%', flexShrink: 0,
+                  backgroundColor: stepBg, color: stepColor,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '11px', fontWeight: 700, marginTop: '1px'
+                }
+              }, stepNum),
+              React.createElement('div', { style: { flex: 1, minWidth: 0 } },
+                React.createElement('div', { style: { fontSize: '12px', fontWeight: 600, color: '#374151' } }, 'Certificate'),
+                step1Done
+                  ? React.createElement('div', { style: { fontSize: '11px', color: '#16a34a', marginTop: '2px' } },
+                      certStatus?.identity?.cn
+                        ? `Loaded — ${certStatus.identity.cn}`
+                        : 'Loaded'
+                    )
+                  : step1Active
+                    ? React.createElement('div', { style: { fontSize: '11px', color: '#d97706', marginTop: '2px' } }, 'Uploading...')
+                    : React.createElement('div', { style: { marginTop: '4px' } },
+                        React.createElement('label', {
+                          style: {
+                            fontSize: '11px', color: '#2563eb', cursor: 'pointer',
+                            padding: '3px 10px', borderRadius: '4px',
+                            border: '1px solid #bfdbfe', backgroundColor: '#eff6ff',
+                            display: 'inline-block'
+                          }
+                        },
+                          React.createElement('input', {
+                            type: 'file', accept: '.p12,.pfx', onChange: handleCertUpload,
+                            disabled: connectionStatus !== 'connected' || isUploadingCert,
+                            style: { display: 'none' }
+                          }),
+                          'Upload .p12'
+                        )
+                      )
+              )
+            );
+          })(),
+
+          // Step ② — Environment (worker)
+          (() => {
+            const step2Done = workerInfo !== null;
+            const step2Active = certStatus?.loaded && !workerInfo;
+            const step2Waiting = !certStatus?.loaded;
+            const stepNum = step2Done ? '✓' : '②';
+            const stepColor = step2Done ? '#16a34a' : step2Active ? '#d97706' : '#d1d5db';
+            const stepBg = step2Done ? '#dcfce7' : step2Active ? '#fef3c7' : '#f9fafb';
+            return React.createElement('div', {
+              style: { padding: '6px 12px', display: 'flex', alignItems: 'flex-start', gap: '8px', borderBottom: '1px solid #f3f4f6' }
+            },
+              React.createElement('span', {
+                style: {
+                  width: '20px', height: '20px', borderRadius: '50%', flexShrink: 0,
+                  backgroundColor: stepBg, color: stepColor,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '11px', fontWeight: 700, marginTop: '1px'
+                }
+              }, stepNum),
+              React.createElement('div', { style: { flex: 1, minWidth: 0 } },
+                React.createElement('div', { style: { fontSize: '12px', fontWeight: 600, color: '#374151' } }, 'Environment'),
+                step2Done
+                  ? React.createElement('div', null,
+                      React.createElement('div', { style: { fontSize: '11px', color: '#16a34a', marginTop: '2px' } },
+                        `Ready — port ${workerInfo.port}`
+                      ),
+                      React.createElement('div', { style: { fontSize: '10px', color: '#9ca3af', marginTop: '3px', lineHeight: '1.4' } },
+                        'If the worker becomes unresponsive, Remove your certificate below and re-upload it to get a fresh environment.'
+                      )
+                    )
+                  : step2Active
+                    ? React.createElement('div', { style: { fontSize: '11px', color: '#d97706', marginTop: '2px' } }, 'Creating...')
+                    : React.createElement('div', { style: { fontSize: '11px', color: '#9ca3af', marginTop: '2px' } },
+                        step2Waiting ? 'Upload certificate first' : 'Waiting...'
+                      )
+              )
+            );
+          })(),
+
+          // Step ③ — Build & Deploy
+          (() => {
+            const step3Ready = workerInfo !== null && connectionStatus === 'connected';
+            const stepNum = step3Ready ? '✓' : '③';
+            const stepColor = step3Ready ? '#16a34a' : '#d1d5db';
+            const stepBg = step3Ready ? '#dcfce7' : '#f9fafb';
+            return React.createElement('div', {
+              style: { padding: '6px 12px', display: 'flex', alignItems: 'flex-start', gap: '8px' }
+            },
+              React.createElement('span', {
+                style: {
+                  width: '20px', height: '20px', borderRadius: '50%', flexShrink: 0,
+                  backgroundColor: stepBg, color: stepColor,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '11px', fontWeight: 700, marginTop: '1px'
+                }
+              }, stepNum),
+              React.createElement('div', { style: { flex: 1, minWidth: 0 } },
+                React.createElement('div', { style: { fontSize: '12px', fontWeight: 600, color: '#374151' } }, 'Build & Deploy'),
+                React.createElement('div', { style: { fontSize: '11px', color: step3Ready ? '#16a34a' : '#9ca3af', marginTop: '2px' } },
+                  step3Ready ? 'Ready to build' : 'Complete steps above'
+                )
+              )
+            );
+          })()
+        ),
+
+        // ── Certificate Management (compact, below flow) ──────────────────
+        (certStatus?.loaded || certError) && React.createElement('div', { style: { ...styles.card, padding: '8px 12px' } },
+          certStatus?.loaded && certStatus.identity?.cn && React.createElement('div', {
             style: {
-              fontSize: '11px', color: '#92400e',
-              padding: showAdvanced ? '6px 12px 0 12px' : '6px 0 0 0',
-              paddingLeft: showAdvanced ? '32px' : '20px',
-              textIndent: '-16px',
-              lineHeight: 1.45
+              fontSize: '11px', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb',
+              borderRadius: '4px', padding: '6px 10px', marginBottom: '8px',
+              fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
+              display: 'flex', gap: '6px', alignItems: 'baseline'
             }
           },
-            React.createElement(Icon, { name: 'triangle-alert', size: 12, color: '#d97706', style: { verticalAlign: '-1px', marginRight: '4px' } }),
-            'Upload your own .p12 to deploy under your AosCloud account. Replaces the cert currently loaded here.'
+            React.createElement('span', { style: { color: '#6b7280', flexShrink: 0 } }, 'CN:'),
+            React.createElement('span', { style: { color: '#111827', overflowWrap: 'anywhere' as const, wordBreak: 'break-word' as const } }, certStatus.identity.cn)
           ),
-          showAdvanced && React.createElement('div', { style: { padding: '0 12px 12px', borderTop: '1px solid #f3f4f6', marginTop: '8px', paddingTop: '10px' } },
-            certStatus?.loaded && certStatus.identity?.cn && React.createElement('div', {
-              style: {
-                fontSize: '11px', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb',
-                borderRadius: '4px', padding: '6px 10px', marginBottom: '10px',
-                fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
-                display: 'flex', gap: '6px', alignItems: 'baseline'
-              }
-            },
-              React.createElement('span', { style: { color: '#6b7280', flexShrink: 0 } }, 'CN:'),
-              React.createElement('span', { style: { color: '#111827', overflowWrap: 'anywhere' as const, wordBreak: 'break-word' as const } }, certStatus.identity.cn)
-            ),
-            certStatus?.loaded && certStatus.identity === null && React.createElement('div', {
-              style: { fontSize: '11px', color: '#6b7280', marginBottom: '10px', fontStyle: 'italic' }
-            }, 'Identity unavailable (cert may be password-protected)'),
-            certError && React.createElement('div', { style: { fontSize: '12px', color: '#dc2626', marginBottom: '8px' } }, certError),
-            React.createElement('div', { style: { display: 'flex', gap: '6px' } },
-              React.createElement('label', {
+          toolchainVersions && React.createElement('div', {
+            style: {
+              fontSize: '11px', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0',
+              borderRadius: '4px', padding: '6px 10px', marginBottom: '8px',
+              fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
+              display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' as const
+            }
+          },
+            React.createElement('span', { style: { color: '#6b7280', flexShrink: 0 } }, 'Toolchain:'),
+            React.createElement('span', { style: { color: '#065f46' } }, `aos-signer ${toolchainVersions['aos-signer'] || '?'}`),
+            React.createElement('span', { style: { color: '#065f46' } }, `aos-keys ${toolchainVersions['aos-keys'] || '?'}`),
+            React.createElement('span', { style: { color: '#065f46' } }, `aos-prov ${toolchainVersions['aos-prov'] || '?'}`)
+          ),
+          unitInfo && (Object.keys(unitInfo.versions || {}).length > 0
+            ? React.createElement('div', {
                 style: {
-                  ...styles.button, ...styles.buttonSm,
-                  ...(connectionStatus !== 'connected' || isUploadingCert || isRemovingCert ? styles.buttonDisabled : {}),
-                  flex: 1, textAlign: 'center',
-                  cursor: connectionStatus === 'connected' && !isUploadingCert && !isRemovingCert ? 'pointer' : 'not-allowed'
+                  fontSize: '11px', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe',
+                  borderRadius: '4px', padding: '6px 10px', marginBottom: '8px',
+                  fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
+                  display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' as const
                 }
               },
-                React.createElement('input', {
-                  type: 'file', accept: '.p12,.pfx', onChange: handleCertUpload,
-                  disabled: connectionStatus !== 'connected' || isUploadingCert || isRemovingCert,
-                  style: { display: 'none' }
-                }),
-                isUploadingCert
-                  ? 'Uploading...'
-                  : React.createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '6px', justifyContent: 'center' } },
-                      React.createElement(Icon, { name: 'upload', size: 14 }),
-                      certStatus?.loaded ? 'Replace .p12' : 'Upload .p12'
-                    )
-              ),
-              certStatus?.loaded && React.createElement('button', {
-                onClick: handleCertRemove,
-                disabled: connectionStatus !== 'connected' || isUploadingCert || isRemovingCert,
-                style: {
-                  ...styles.button, ...styles.buttonSm,
-                  ...(connectionStatus !== 'connected' || isUploadingCert || isRemovingCert ? styles.buttonDisabled : {}),
-                  backgroundColor: 'transparent', color: '#dc2626', border: '1px solid #fca5a5',
-                  display: 'inline-flex', alignItems: 'center', gap: '6px', justifyContent: 'center'
-                },
-                title: 'Delete the uploaded certificate from the broadcaster'
-              },
-                isRemovingCert
-                  ? 'Removing...'
-                  : React.createElement(React.Fragment, null,
-                      React.createElement(Icon, { name: 'x', size: 14 }),
-                      'Remove'
-                    )
+                React.createElement('span', { style: { color: '#6b7280', flexShrink: 0 } }, 'Unit:'),
+                ...Object.entries(unitInfo.versions!).map(([k, v]) =>
+                  React.createElement('span', { key: k, style: { color: '#1e40af' } }, `${k}=${v}`)
+                ),
+                React.createElement('span', { style: { color: '#6b7280' } }, `(${unitInfo.nodeCount} node(s))`)
               )
+            : unitInfo.name && React.createElement('div', {
+                style: {
+                  fontSize: '11px', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe',
+                  borderRadius: '4px', padding: '6px 10px', marginBottom: '8px',
+                  fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
+                }
+              },
+                React.createElement('span', { style: { color: '#6b7280' } }, 'Unit: '),
+                React.createElement('span', { style: { color: '#1e40af' } }, unitInfo.name),
+                React.createElement('span', { style: { color: '#9ca3af' } }, ' — no version fields in API response')
+              )
+          ),
+          certError && React.createElement('div', { style: { fontSize: '12px', color: '#dc2626', marginBottom: '8px' } }, certError),
+          React.createElement('div', { style: { display: 'flex', gap: '6px' } },
+            React.createElement('label', {
+              style: {
+                ...styles.button, ...styles.buttonSm,
+                ...(connectionStatus !== 'connected' || isUploadingCert || isRemovingCert ? styles.buttonDisabled : {}),
+                flex: 1, textAlign: 'center', fontSize: '11px',
+                cursor: connectionStatus === 'connected' && !isUploadingCert && !isRemovingCert ? 'pointer' : 'not-allowed'
+              }
+            },
+              React.createElement('input', {
+                type: 'file', accept: '.p12,.pfx', onChange: handleCertUpload,
+                disabled: connectionStatus !== 'connected' || isUploadingCert || isRemovingCert,
+                style: { display: 'none' }
+              }),
+              isUploadingCert ? 'Uploading...' : 'Replace .p12'
+            ),
+            certStatus?.loaded && React.createElement('button', {
+              onClick: handleCertRemove,
+              disabled: connectionStatus !== 'connected' || isUploadingCert || isRemovingCert,
+              style: {
+                ...styles.button, ...styles.buttonSm, fontSize: '11px',
+                ...(connectionStatus !== 'connected' || isUploadingCert || isRemovingCert ? styles.buttonDisabled : {}),
+                backgroundColor: 'transparent', color: '#dc2626', border: '1px solid #fca5a5',
+                display: 'inline-flex', alignItems: 'center', gap: '4px', justifyContent: 'center'
+              },
+              title: 'Remove certificate and shut down your build environment'
+            },
+              isRemovingCert ? 'Removing...' : 'Remove'
             )
           )
         ),
@@ -1945,25 +2160,57 @@ export default function Page({ data, config }: PluginProps) {
                 React.createElement('option', { key: s.uuid, value: s.uuid }, s.title || s.uuid)
               )
             ),
-            // Service UUID display (right under the dropdown so the link is obvious)
+            // Service UUID + codename display (right under the dropdown)
             serviceName && React.createElement('div', {
-              style: { display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px', minWidth: 0 }
+              style: { display: 'flex', flexDirection: 'column' as const, gap: '3px', marginTop: '6px', minWidth: 0 }
             },
-              React.createElement('span', {
-                title: selectedServiceUuid,
-                style: {
-                  fontSize: '11px', color: '#6c757d', fontFamily: 'monospace',
-                  flex: 1, minWidth: 0,
-                  whiteSpace: 'nowrap' as const,
-                  overflow: 'hidden' as const,
-                  textOverflow: 'ellipsis' as const
-                }
-              }, selectedServiceUuid),
-              React.createElement('button', {
-                onClick: () => { navigator.clipboard.writeText(selectedServiceUuid); addLog(`[Copied] Service UUID: ${selectedServiceUuid}`) },
-                style: { ...styles.iconButton, width: '20px', height: '20px', fontSize: '11px', flexShrink: 0 },
-                title: selectedServiceUuid
-              }, '📋')
+              // UUID row
+              React.createElement('div', {
+                style: { display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0 }
+              },
+                React.createElement('span', {
+                  title: selectedServiceUuid,
+                  style: {
+                    fontSize: '11px', color: '#6c757d', fontFamily: 'monospace',
+                    flex: 1, minWidth: 0,
+                    whiteSpace: 'nowrap' as const,
+                    overflow: 'hidden' as const,
+                    textOverflow: 'ellipsis' as const
+                  }
+                }, selectedServiceUuid),
+                React.createElement('button', {
+                  onClick: () => { navigator.clipboard.writeText(selectedServiceUuid); addLog(`[Copied] Service UUID: ${selectedServiceUuid}`) },
+                  style: { ...styles.iconButton, width: '20px', height: '20px', fontSize: '11px', flexShrink: 0 },
+                  title: selectedServiceUuid
+                }, '📋')
+              ),
+              // Codename row
+              selectedServiceCodename && React.createElement('div', {
+                style: { display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0 }
+              },
+                React.createElement('span', {
+                  style: {
+                    fontSize: '10px', color: '#9ca3af', fontFamily: 'monospace',
+                    backgroundColor: '#f3f4f6', padding: '1px 6px', borderRadius: '4px',
+                    flexShrink: 0
+                  }
+                }, 'codename:'),
+                React.createElement('span', {
+                  title: selectedServiceCodename,
+                  style: {
+                    fontSize: '11px', color: '#374151', fontFamily: 'monospace',
+                    flex: 1, minWidth: 0,
+                    whiteSpace: 'nowrap' as const,
+                    overflow: 'hidden' as const,
+                    textOverflow: 'ellipsis' as const
+                  }
+                }, selectedServiceCodename),
+                React.createElement('button', {
+                  onClick: () => { navigator.clipboard.writeText(selectedServiceCodename); addLog(`[Copied] Codename: ${selectedServiceCodename}`) },
+                  style: { ...styles.iconButton, width: '20px', height: '20px', fontSize: '11px', flexShrink: 0 },
+                  title: selectedServiceCodename
+                }, '📋')
+              )
             ),
             // Auto-sync service_uid checkbox (sits under the UUID — it's a
             // setting that controls what happens to that UUID when copied
@@ -1980,7 +2227,7 @@ export default function Page({ data, config }: PluginProps) {
                 onChange: (e: any) => setAutoSyncServiceUid(e.target.checked),
                 style: { cursor: 'pointer' }
               }),
-              'Auto-sync service_uid to config.yaml'
+              'Auto-sync codename to config.yaml'
             ),
             serviceVersions.length > 0 && React.createElement('div', {
               style: { display: 'flex', gap: '4px', marginTop: '6px', flexWrap: 'wrap' }
@@ -2004,7 +2251,7 @@ export default function Page({ data, config }: PluginProps) {
                 display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px',
                 fontSize: '11px', color: '#6b7280', cursor: 'pointer', userSelect: 'none'
               },
-              title: 'When enabled, after a successful build the C++ #define VERSION and YAML version: are bumped to the next patch (e.g. 1.0.5 → 1.0.6)'
+              title: 'When enabled, after a successful build the version in code (C++ #define VERSION / Python VERSION = "...") and YAML version: are bumped to the next patch (e.g. 1.0.5 → 1.0.6)'
             },
               React.createElement('input', {
                 type: 'checkbox',
@@ -2017,68 +2264,145 @@ export default function Page({ data, config }: PluginProps) {
           )
         ),
 
-        // Units running this service
-        serviceUnits.length > 0 && React.createElement('div', { style: styles.card },
+        // Units card — always visible, toggle between service units and all units
+        React.createElement('div', { style: styles.card },
           React.createElement('div', { style: styles.cardHeader },
             React.createElement('div', { style: styles.cardTitle },
               React.createElement(Icon, { name: 'server', size: 16, color: '#6366f1' }),
-              `Units (${serviceUnits.length})`,
-              React.createElement('span', {
-                style: { fontSize: '10px', fontWeight: 400, color: '#9ca3af', marginLeft: '4px' }
-              }, '— click for details')
+              'Units'
+            ),
+            // Toggle pills: This service | All units
+            React.createElement('div', {
+              style: {
+                display: 'flex', border: '1px solid #d1d5db', borderRadius: '4px',
+                overflow: 'hidden', marginRight: '6px'
+              }
+            },
+              React.createElement('button', {
+                onClick: () => setShowAllUnits(false),
+                style: {
+                  border: 'none', padding: '2px 8px', fontSize: '10px', fontWeight: 600,
+                  cursor: 'pointer',
+                  backgroundColor: !showAllUnits ? '#6366f1' : 'transparent',
+                  color: !showAllUnits ? '#fff' : '#6b7280'
+                }
+              }, 'This service'),
+              React.createElement('button', {
+                onClick: async () => {
+                  setShowAllUnits(true)
+                  if (!aosServiceRef.current) return
+                  try {
+                    const res = await aosServiceRef.current.listUnits()
+                    if (res.status === 'success' && res.items?.length) {
+                      setAllUnits(res.items.map((u: any) => ({
+                        uid: u.uid || u.systemUid,
+                        systemUid: u.system_uid || u.systemUid || u.uid || '',
+                        name: u.name || u.system_uid || u.systemUid || 'Unknown',
+                        online: u.online,
+                        status: u.status || 'Unknown',
+                        runState: '',
+                        version: '',
+                        error: '',
+                        ip: ''
+                      })))
+                    }
+                  } catch (err: any) { /* silent */ }
+                },
+                style: {
+                  border: 'none', padding: '2px 8px', fontSize: '10px', fontWeight: 600,
+                  cursor: 'pointer',
+                  backgroundColor: showAllUnits ? '#6366f1' : 'transparent',
+                  color: showAllUnits ? '#fff' : '#6b7280'
+                }
+              }, 'All units')
             ),
             React.createElement('button', {
-              onClick: () => { if (selectedServiceUuid) loadServiceDetails(selectedServiceUuid) },
-              style: styles.iconButton,
-              title: 'Refresh units status'
-            }, '↻')
-          ),
-          React.createElement('div', { style: { maxHeight: '150px', overflowY: 'auto' } },
-            ...serviceUnits.map((u: any) =>
-              React.createElement('div', {
-                key: u.uid,
-                onClick: () => { loadUnitMonitoring(u.uid); setDetailUnitUid(u.uid) },
-                onMouseEnter: (e: any) => {
-                  if (selectedMonitorUnit !== u.uid) e.currentTarget.style.backgroundColor = '#f9fafb'
-                },
-                onMouseLeave: (e: any) => {
-                  e.currentTarget.style.backgroundColor = selectedMonitorUnit === u.uid ? '#f0f7ff' : 'transparent'
-                },
-                title: 'Click to view monitoring + alerts',
-                style: {
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6',
-                  backgroundColor: selectedMonitorUnit === u.uid ? '#f0f7ff' : 'transparent',
-                  transition: 'background-color 0.15s'
+              onClick: () => {
+                if (showAllUnits) {
+                  setShowAllUnits(true) // trigger re-render; re-fetch below
+                  if (aosServiceRef.current) {
+                    aosServiceRef.current.listUnits().then(res => {
+                      if (res.status === 'success' && res.items?.length) {
+                        setAllUnits(res.items.map((u: any) => ({
+                          uid: u.uid || u.systemUid,
+                          systemUid: u.system_uid || u.systemUid || u.uid || '',
+                          name: u.name || u.system_uid || u.systemUid || 'Unknown',
+                          online: u.online,
+                          status: u.status || 'Unknown',
+                          runState: '', version: '', error: '', ip: ''
+                        })))
+                      }
+                    }).catch(() => {})
+                  }
+                } else if (selectedServiceUuid) {
+                  loadServiceDetails(selectedServiceUuid)
                 }
               },
-                React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 } },
-                  React.createElement('span', {
-                    style: { width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0, backgroundColor: u.online ? '#16a34a' : '#dc2626' }
-                  }),
-                  React.createElement('span', { style: { fontSize: '12px', fontWeight: 500 } }, u.name),
-                  React.createElement('button', {
-                    onClick: (e: any) => { e.stopPropagation(); navigator.clipboard.writeText(u.uid); addLog(`[Copied] Unit UID: ${u.uid}`) },
-                    style: { ...styles.iconButton, width: '18px', height: '18px', fontSize: '10px', flexShrink: 0 },
-                    title: u.uid
-                  }, '📋')
-                ),
-                React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 } },
-                  u.version && React.createElement('span', {
-                    style: { fontSize: '10px', padding: '1px 5px', borderRadius: '6px', backgroundColor: '#e7f3ff', color: '#2563eb' }
-                  }, `v${u.version}`),
-                  u.error && React.createElement('span', {
-                    style: { fontSize: '10px', color: '#dc2626' }, title: u.error
-                  }, '⚠'),
-                  // Click affordance — chevron makes the row obviously expandable
-                  React.createElement('span', {
-                    style: { fontSize: '12px', color: '#9ca3af', flexShrink: 0, marginLeft: '2px' },
-                    title: 'Click to open details'
-                  }, '›')
+              style: styles.iconButton,
+              title: 'Refresh'
+            }, '↻')
+          ),
+          (() => {
+            const units = showAllUnits ? allUnits : serviceUnits
+            if (units.length === 0) {
+              return React.createElement('div', {
+                style: { padding: '14px', textAlign: 'center', fontSize: '11px', color: '#9ca3af' }
+              },
+                showAllUnits
+                  ? 'No units available'
+                  : !certStatus?.loaded
+                    ? 'Upload a certificate and select a service to see units'
+                    : !selectedServiceUuid
+                      ? 'Select a service to see its assigned units'
+                      : 'No units assigned to this service'
+              )
+            }
+            return React.createElement('div', { style: { maxHeight: '150px', overflowY: 'auto' } },
+              ...units.map((u: any) =>
+                React.createElement('div', {
+                  key: u.uid,
+                  onClick: () => { loadUnitMonitoring(u.uid); loadUnitInfo(u.uid); setDetailUnitUid(u.uid) },
+                  onMouseEnter: (e: any) => {
+                    if (selectedMonitorUnit !== u.uid) e.currentTarget.style.backgroundColor = '#f9fafb'
+                  },
+                  onMouseLeave: (e: any) => {
+                    e.currentTarget.style.backgroundColor = selectedMonitorUnit === u.uid ? '#f0f7ff' : 'transparent'
+                  },
+                  title: 'Click to view monitoring + alerts',
+                  style: {
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6',
+                    backgroundColor: selectedMonitorUnit === u.uid ? '#f0f7ff' : 'transparent',
+                    transition: 'background-color 0.15s'
+                  }
+                },
+                  React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 } },
+                    React.createElement('span', {
+                      style: { width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0, backgroundColor: u.online ? '#16a34a' : '#dc2626' }
+                    }),
+                    React.createElement('span', { style: { fontSize: '12px', fontWeight: 500 } }, u.name),
+                    React.createElement('button', {
+                      onClick: (e: any) => { e.stopPropagation(); navigator.clipboard.writeText(u.systemUid || u.uid); addLog(`[Copied] Unit UID: ${u.systemUid || u.uid}`) },
+                      style: { ...styles.iconButton, width: '18px', height: '18px', fontSize: '10px', flexShrink: 0 },
+                      title: u.systemUid || u.uid
+                    }, '📋')
+                  ),
+                  React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 } },
+                    u.version && React.createElement('span', {
+                      style: { fontSize: '10px', padding: '1px 5px', borderRadius: '6px', backgroundColor: '#e7f3ff', color: '#2563eb' }
+                    }, `v${u.version}`),
+                    u.error && React.createElement('span', {
+                      style: { fontSize: '10px', color: '#dc2626' }, title: u.error
+                    }, '⚠'),
+                    React.createElement('span', {
+                      style: { fontSize: '12px', color: '#9ca3af', flexShrink: 0, marginLeft: '2px' },
+                      title: 'Click to open details'
+                    }, '›')
+                  )
                 )
               )
             )
-          )
+          })()
         ),
 
         // Monitoring + Alerts moved to the Unit Detail overlay (opens on
@@ -2091,9 +2415,9 @@ export default function Page({ data, config }: PluginProps) {
 
         // Editor with tabs
         React.createElement('div', { style: { ...styles.card, ...styles.editorCard, flex: 1, display: 'flex', flexDirection: 'column' as const } },
-          // Tab bar
+          // Tab bar — shows only the active language's code tab + shared YAML tab
           React.createElement('div', { style: { display: 'flex', borderBottom: '1px solid #e5e7eb', background: '#f9fafb' } },
-            React.createElement('button', {
+            languageMode === 'cpp' ? React.createElement('button', {
               onClick: () => setActiveEditorTab('cpp'),
               style: {
                 padding: '8px 16px', fontSize: '13px', fontWeight: 500, border: 'none', cursor: 'pointer',
@@ -2105,7 +2429,20 @@ export default function Page({ data, config }: PluginProps) {
             },
               React.createElement(Icon, { name: 'file-code', size: 14 }),
               'main.cpp'
-            ),
+            ) : null,
+            languageMode === 'python' ? React.createElement('button', {
+              onClick: () => setActiveEditorTab('python'),
+              style: {
+                padding: '8px 16px', fontSize: '13px', fontWeight: 500, border: 'none', cursor: 'pointer',
+                background: activeEditorTab === 'python' ? '#fff' : 'transparent',
+                color: activeEditorTab === 'python' ? '#2563eb' : '#6b7280',
+                borderBottom: activeEditorTab === 'python' ? '2px solid #2563eb' : '2px solid transparent',
+                display: 'inline-flex', alignItems: 'center', gap: '6px'
+              }
+            },
+              React.createElement(Icon, { name: 'file-code', size: 14 }),
+              'main.py'
+            ) : null,
             React.createElement('button', {
               onClick: () => setActiveEditorTab('yaml'),
               style: {
@@ -2123,13 +2460,13 @@ export default function Page({ data, config }: PluginProps) {
           // Active editor with line numbers
           React.createElement('div', { style: styles.editorContainer },
             React.createElement('pre', { style: styles.lineNumbers },
-              (activeEditorTab === 'cpp' ? cppCode : yamlConfig).split('\n').map((_: string, i: number) => `${i + 1}`).join('\n')
+              (activeEditorTab === 'cpp' ? cppCode : activeEditorTab === 'python' ? pythonCode : yamlConfig).split('\n').map((_: string, i: number) => `${i + 1}`).join('\n')
             ),
             React.createElement('textarea', {
               style: { ...styles.textarea, flex: 1 },
-              value: activeEditorTab === 'cpp' ? cppCode : yamlConfig,
-              onChange: (e: any) => activeEditorTab === 'cpp' ? setCppCode(e.target.value) : setYamlConfig(e.target.value),
-              placeholder: activeEditorTab === 'cpp' ? '// Enter your C++ code here...' : '# Enter your YAML configuration here...',
+              value: activeEditorTab === 'cpp' ? cppCode : activeEditorTab === 'python' ? pythonCode : yamlConfig,
+              onChange: (e: any) => activeEditorTab === 'cpp' ? setCppCode(e.target.value) : activeEditorTab === 'python' ? setPythonCode(e.target.value) : setYamlConfig(e.target.value),
+              placeholder: activeEditorTab === 'cpp' ? '// Enter your C++ code here...' : activeEditorTab === 'python' ? '# Enter your Python code here...' : '# Enter your YAML configuration here...',
               spellCheck: false
             })
           )
@@ -2141,7 +2478,7 @@ export default function Page({ data, config }: PluginProps) {
             onClick: handleBuildDeploy,
             disabled: isBuilding || connectionStatus !== 'connected' || !selectedInstance,
             style: { ...styles.button, ...styles.buttonPrimary, ...(isBuilding || connectionStatus !== 'connected' || !selectedInstance ? styles.buttonDisabled : {}) },
-            title: !selectedInstance ? 'Select a Docker instance first' : ''
+            title: !selectedInstance ? 'Connecting to build service...' : ''
           },
             isBuilding
               ? React.createElement(React.Fragment, null,
@@ -2169,7 +2506,7 @@ export default function Page({ data, config }: PluginProps) {
             }
           },
             React.createElement(Icon, { name: 'triangle-alert', size: 14, color: '#d97706' }),
-            React.createElement('span', null, 'Select a Docker instance from the list to build & deploy')
+            React.createElement('span', null, 'Waiting for build service connection...')
           )
         )
       ),

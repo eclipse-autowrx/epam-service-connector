@@ -1,36 +1,43 @@
-publisher:
-    author: "developer@example.com"
-    company: "Example Corp"
+schemaVersion: 2
 
-build:
-    os: linux
-    arch: aarch64
-    sign_pkcs12: aos-user-sp.p12
-    symlinks: copy
+publisher:
+  author: "developer@example.com"
+  company: "Example Corp"
 
 publish:
-    url: aoscloud.io
-    service_uid: 84d98700-694c-45f6-a00b-3423a7523b95
-    tls_pkcs12: aos-user-sp.p12
-    version: "1.0.0"
+  tlsKey: "aos-user-sp.p12"
+  domain: "aoscloud.io"
 
-configuration:
-    cmd: /hello-aos
-    workingDir: '/'
-    state:
-        filename: default_state.dat
-        required: true
-    instances:
+items:
+  - identity:
+      type: "service"
+      codename: "hello-aos"
+      title: "Hello AOS Service"
+      description: "Simple hello world C++ service"
+    version: "1.0.0"
+    sourceFolder: "service"
+
+    images:
+      - sourceFolder: "src_amd64"
+        archInfo:
+          architecture: "amd64"
+        workingDir: "/"
+        cmd: "/hello-aos"
+      - sourceFolder: "src_arm64"
+        archInfo:
+          architecture: "arm64"
+        workingDir: "/"
+        cmd: "/hello-aos"
+
+    configuration:
+      workingDir: "/"
+      cmd: "/hello-aos"
+      instances:
         minInstances: 1
-        priority: 0
-    isResourceLimits: true
-    requestedResources:
-        cpu: 1000
-        ram: 10MB
-        storage: 5MB
-        state: 512KB
-    quotas:
-        cpu: 1000
-        mem: 10MB
-        state: 512KB
-        storage: 5MB
+        priority: 10
+      quotas:
+        cpuLimit: 1000
+        ramLimit: 10MB
+        storageLimit: 5MB
+        stateLimit: 512KB
+        tmpLimit: 256MiB

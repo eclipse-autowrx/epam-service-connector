@@ -93,9 +93,9 @@ export interface AosAppConfig {
 
 // Build request
 export interface BuildRequest {
-  name: string
-  displayName?: string
-  cppCode: string
+  language?: 'cpp' | 'python'
+  cppCode?: string
+  pythonCode?: string
   yamlConfig: string
 }
 

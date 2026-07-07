@@ -12,6 +12,7 @@ const { exec } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs').promises;
 const path = require('path');
+const yaml = require('js-yaml');
 
 const execAsync = promisify(exec);
 
@@ -25,10 +26,30 @@ const defaultServiceUuid = process.env.SERVICE_UUID || '';
 const defaultUnitUid = process.env.UNIT_UID || '';
 const defaultSubjectId = process.env.SUBJECT_ID || '';
 const certPath = '/root/.aos/security/aos-user-sp.p12';
+const oemCertPath = process.env.OEM_CERT_PATH || '/root/.aos/security/aos-user-oem.p12';
+
+// Resolve the actual OEM cert at runtime: use dedicated OEM cert if present,
+// otherwise fall back to SP cert (most setups only have one cert).
+function resolveOemCertPath() {
+  try {
+    require('fs').accessSync(oemCertPath);
+    return oemCertPath;
+  } catch (e) { /* not found */ }
+  try {
+    require('fs').accessSync(certPath);
+    return certPath;
+  } catch (e) { /* not found */ }
+  return oemCertPath; // let curl report the error
+}
+const workerMode = process.env.WORKER_MODE === 'true';
+const orchestratorUrl = process.env.ORCHESTRATOR_URL || 'http://localhost:9090';
 const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || '';
 
-console.log('[Broadcaster] Starting:', instanceId);
+console.log('[Broadcaster] Starting:', instanceId, workerMode ? '(worker mode)' : '');
 console.log('[Broadcaster] Kit Manager:', kitManagerUrl);
+if (workerMode) {
+  console.log('[Broadcaster] Orchestrator URL:', orchestratorUrl);
+}
 if (proxyUrl) {
   console.log('[Broadcaster] Proxy:', proxyUrl);
 }
@@ -90,6 +111,25 @@ const signalServer = http.createServer((req, res) => {
   } else if (req.method === 'GET' && req.url === '/builds') {
     res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
     res.end(JSON.stringify(getBuildStatus()));
+  } else if (req.method === 'GET' && req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
+    res.end(JSON.stringify({ ok: true, instanceId, uptime: process.uptime(), mode: workerMode ? 'worker' : 'standalone' }));
+  } else if (req.method === 'POST' && req.url === '/api/command') {
+    // Worker mode: receive commands from coordinator via HTTP
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const data = JSON.parse(body);
+        console.log('[Worker] Received command:', data.cmd || data.type, 'from coordinator');
+        const response = await routeCommand(data);
+        res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
+        res.end(JSON.stringify(response));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders });
+        res.end(JSON.stringify({ status: 'error', message: e.message }));
+      }
+    });
   } else {
     res.writeHead(404, corsHeaders);
     res.end();
@@ -128,8 +168,205 @@ async function initCertFromEnv() {
   }
 }
 
+// Route a command (from HTTP or Socket.IO) to the appropriate handler.
+// Returns the response object that should be sent back to the caller.
+async function routeCommand(data) {
+  console.log('[Broadcaster] Routing command:', data.cmd || data.type);
+
+  try {
+    let response;
+
+    switch (data.cmd || data.type) {
+      case 'aos_build_deploy':
+        response = await handleBuildDeploy(data);
+        break;
+      case 'aos_list_apps':
+        response = await handleListApps(data);
+        break;
+      case 'aos_start_app':
+        response = await handleStartApp(data);
+        break;
+      case 'aos_stop_app':
+        response = await handleStopApp(data);
+        break;
+      case 'aos_get_deployment_status':
+        response = await handleGetDeploymentStatus(data);
+        break;
+      case 'aos_upload_cert':
+        response = await handleUploadCert(data);
+        break;
+      case 'aos_check_cert':
+        response = await handleCheckCert(data);
+        break;
+      case 'aos_remove_cert':
+        response = await handleRemoveCert(data);
+        break;
+      case 'aos_list_services':
+        response = await handleListAosCloud(data, 'services');
+        break;
+      case 'aos_list_units':
+        response = await handleListAosCloud(data, 'units');
+        break;
+      case 'aos_list_subjects':
+        response = await handleListAosCloud(data, 'subjects');
+        break;
+      case 'aos_get_service_units':
+        response = await handleGetServiceUnits(data);
+        break;
+      case 'aos_get_service_versions':
+        response = await handleGetServiceVersions(data);
+        break;
+      case 'aos_get_unit_monitoring':
+        response = await handleGetUnitMonitoring(data);
+        break;
+      case 'aos_get_alerts':
+        response = await handleGetAlerts(data);
+        break;
+      case 'aos_request_service_log':
+        response = await handleRequestServiceLog(data);
+        break;
+      case 'aos_get_service_log_status':
+        response = await handleGetServiceLogStatus(data);
+        break;
+      case 'aos_get_service_stdout': {
+        const sshPort = data.sshPort || 8942;
+        const lines = data.lines || 50;
+        const filter = data.filter || 'crun|aos-service|RangeExt|Reporter|Writer';
+        try {
+          await execAsync('which sshpass', { timeout: 3000 });
+          const sshCmd = `sshpass -p Password1 ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p ${sshPort} root@localhost "journalctl --no-pager -n ${lines} 2>&1 | grep -iE '${filter}'"`;
+          const { stdout } = await execAsync(sshCmd, { timeout: 15000 });
+          response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: stdout };
+        } catch (err) {
+          try {
+            const serviceUuid = data.serviceUuid;
+            const unitUid = data.unitUid;
+            const subjectId = data.subjectId;
+            if (!serviceUuid || !unitUid || !subjectId) {
+              response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: 'Select a service and unit to fetch logs from AosCloud.' };
+              break;
+            }
+            const existing = await curlAosCloud(`service-logs/?limit=10`);
+            const items = existing.items || [];
+            const ready = items.find(l => (l.state === 'ok' || l.state === 'done') && l.service === serviceUuid);
+            if (ready) {
+              try {
+                const tmpFile = `/tmp/service-log-${ready.id}.tar.gz`;
+                await execAsync(
+                  `curl -k --http1.1 -o ${tmpFile} ${aoscloudUrl}/api/v11/service-logs/${ready.id}/download-log-file/ ` +
+                  `--cert ${certPath} --cert-type P12`,
+                  { env: { ...process.env }, timeout: 30000 }
+                );
+                const { stdout: logContent } = await execAsync(
+                  `tar xzf ${tmpFile} -O 2>/dev/null || cat ${tmpFile}`,
+                  { timeout: 10000 }
+                );
+                await execAsync(`rm -f ${tmpFile}`).catch(() => {});
+                response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: logContent || 'Log file is empty.' };
+              } catch (dlErr) {
+                response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: `Log available (ID: ${ready.id}) but download/extract failed: ${dlErr.message?.slice(-100)}` };
+              }
+            } else {
+              const now = new Date();
+              const from = new Date(now.getTime() - 30 * 60000);
+              const payload = JSON.stringify({
+                unit: unitUid,
+                service: serviceUuid,
+                subject: subjectId,
+                request_type: 'log',
+                date_from: from.toISOString(),
+                date_till: now.toISOString()
+              });
+              try {
+                await execAsync(
+                  `curl -k --http1.1 -X POST ${aoscloudUrl}/api/v11/service-logs/ ` +
+                  `--cert ${certPath} --cert-type P12 ` +
+                  `-H "accept: application/json" -H "Content-Type: application/json" ` +
+                  `-d '${payload}'`,
+                  { env: { ...process.env }, timeout: 15000 }
+                );
+                response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: 'Log request sent to AosCloud.\n\nThe unit will collect and upload logs. This may take 1-2 minutes.\nClick Refresh again to check if logs are ready.' };
+              } catch (reqErr) {
+                response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: `Failed to request logs: ${reqErr.message?.slice(-100)}` };
+              }
+            }
+          } catch {
+            response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: 'Could not reach AosCloud. Check certificate and connectivity.' };
+          }
+        }
+        break;
+      }
+      case 'aos_get_build_status':
+        response = {
+          kit_id: instanceId,
+          type: 'aos_get_build_status',
+          status: 'success',
+          build: data.buildId ? getBuildStatus(data.buildId) : null,
+          builds: !data.buildId ? getBuildStatus() : undefined
+        };
+        break;
+      case 'aos_signal_stream':
+        response = {
+          kit_id: instanceId,
+          type: 'aos_signal_stream',
+          status: 'success',
+          signals: signalHistory.slice(-(data.limit || 100))
+        };
+        break;
+      case 'aos_get_toolchain_info':
+        response = await handleGetToolchainInfo(data);
+        break;
+      case 'aos_get_unit_info':
+        response = await handleGetUnitInfo(data);
+        break;
+      default:
+        response = {
+          id: data.id,
+          kit_id: instanceId,
+          type: data.type || data.cmd,
+          status: 'error',
+          message: 'Unknown command: ' + (data.cmd || data.type)
+        };
+    }
+
+    response.id = data.id;
+    response.request_from = data.request_from;
+    return response;
+
+  } catch (error) {
+    console.error('[Broadcaster] Error handling command:', error.message);
+    return {
+      id: data.id,
+      kit_id: instanceId,
+      type: data.type || data.cmd,
+      status: 'error',
+      message: error.message
+    };
+  }
+}
+
 async function main() {
   await initCertFromEnv();
+
+  // ── Worker mode: skip Kit Manager, serve commands via HTTP ──
+  if (workerMode) {
+    console.log('[Broadcaster] Worker mode active — listening for commands via HTTP');
+    console.log('[Broadcaster] Signal relay on port', signalRelayPort);
+
+    // Health report to coordinator every 30s
+    setInterval(async () => {
+      try {
+        await execAsync(`curl -s -X POST ${orchestratorUrl}/api/worker-heartbeat -H 'Content-Type: application/json' -d '${JSON.stringify({ instanceId, port: signalRelayPort, status: 'running' })}'`, { timeout: 5000 });
+      } catch (e) { /* orchestrator may be restarting */ }
+    }, 30000);
+
+    // Keep the process alive (signalServer is already listening)
+    process.on('SIGINT', () => { process.exit(0); });
+    process.on('SIGTERM', () => { process.exit(0); });
+    return;
+  }
+
+  // ── Standalone mode: connect to Kit Manager ──
   const socketOpts = {
     transports: ['websocket', 'polling'],
     reconnection: true,
@@ -181,7 +418,9 @@ async function main() {
         'aos_get_service_log_status',
         'aos_get_build_status',
         'aos_get_service_stdout',
-        'aos_signal_stream'
+        'aos_signal_stream',
+        'aos_get_toolchain_info',
+        'aos_get_unit_info'
       ],
       type: 'aos-edge-toolchain',
       suffix: instanceId.split('-')[0],
@@ -210,179 +449,12 @@ async function main() {
   socket.on('messageToKit', async (data) => {
     console.log('[Broadcaster] Received message:', data.cmd, data.type);
 
-    try {
-      let response;
+    const response = await routeCommand(data);
 
-      switch (data.cmd || data.type) {
-        case 'aos_build_deploy':
-          response = await handleBuildDeploy(data);
-          break;
-        case 'aos_list_apps':
-          response = await handleListApps(data);
-          break;
-        case 'aos_start_app':
-          response = await handleStartApp(data);
-          break;
-        case 'aos_stop_app':
-          response = await handleStopApp(data);
-          break;
-        case 'aos_get_deployment_status':
-          response = await handleGetDeploymentStatus(data);
-          break;
-        case 'aos_upload_cert':
-          response = await handleUploadCert(data);
-          break;
-        case 'aos_check_cert':
-          response = await handleCheckCert(data);
-          break;
-        case 'aos_remove_cert':
-          response = await handleRemoveCert(data);
-          break;
-        case 'aos_list_services':
-          response = await handleListAosCloud(data, 'services');
-          break;
-        case 'aos_list_units':
-          response = await handleListAosCloud(data, 'units');
-          break;
-        case 'aos_list_subjects':
-          response = await handleListAosCloud(data, 'subjects');
-          break;
-        case 'aos_get_service_units':
-          response = await handleGetServiceUnits(data);
-          break;
-        case 'aos_get_service_versions':
-          response = await handleGetServiceVersions(data);
-          break;
-        case 'aos_get_unit_monitoring':
-          response = await handleGetUnitMonitoring(data);
-          break;
-        case 'aos_get_alerts':
-          response = await handleGetAlerts(data);
-          break;
-        case 'aos_request_service_log':
-          response = await handleRequestServiceLog(data);
-          break;
-        case 'aos_get_service_log_status':
-          response = await handleGetServiceLogStatus(data);
-          break;
-        case 'aos_get_service_stdout': {
-          const sshPort = data.sshPort || 8942;
-          const lines = data.lines || 50;
-          const filter = data.filter || 'crun|aos-service|RangeExt|Reporter|Writer';
-          try {
-            // Check if sshpass is available (only works when broadcaster runs alongside VMs)
-            await execAsync('which sshpass', { timeout: 3000 });
-            const sshCmd = `sshpass -p Password1 ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p ${sshPort} root@localhost "journalctl --no-pager -n ${lines} 2>&1 | grep -iE '${filter}'"`;
-            const { stdout } = await execAsync(sshCmd, { timeout: 15000 });
-            response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: stdout };
-          } catch (err) {
-            // Fallback: request logs via AosCloud REST API
-            try {
-              const serviceUuid = data.serviceUuid;
-              const unitUid = data.unitUid;
-              const subjectId = data.subjectId;
-              if (!serviceUuid || !unitUid || !subjectId) {
-                response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: 'Select a service and unit to fetch logs from AosCloud.' };
-                break;
-              }
-
-              // Check for existing completed log requests first
-              const existing = await curlAosCloud(`service-logs/?limit=10`);
-              const items = existing.items || [];
-              const ready = items.find(l => (l.state === 'ok' || l.state === 'done') && l.service === serviceUuid);
-
-              if (ready) {
-                // Download and extract the tar.gz log file
-                try {
-                  const tmpFile = `/tmp/service-log-${ready.id}.tar.gz`;
-                  await execAsync(
-                    `curl -k --http1.1 -o ${tmpFile} ${aoscloudUrl}/api/v10/service-logs/${ready.id}/download-log-file/ ` +
-                    `--cert ${certPath} --cert-type P12`,
-                    { env: { ...process.env }, timeout: 30000 }
-                  );
-                  // Extract and read the log content
-                  const { stdout: logContent } = await execAsync(
-                    `tar xzf ${tmpFile} -O 2>/dev/null || cat ${tmpFile}`,
-                    { timeout: 10000 }
-                  );
-                  await execAsync(`rm -f ${tmpFile}`).catch(() => {});
-                  response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: logContent || 'Log file is empty.' };
-                } catch (dlErr) {
-                  response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: `Log available (ID: ${ready.id}) but download/extract failed: ${dlErr.message?.slice(-100)}` };
-                }
-              } else {
-                // Create a new log request
-                const now = new Date();
-                const from = new Date(now.getTime() - 30 * 60000);
-                const payload = JSON.stringify({
-                  unit: unitUid,
-                  service: serviceUuid,
-                  subject: subjectId,
-                  request_type: 'log',
-                  date_from: from.toISOString(),
-                  date_till: now.toISOString()
-                });
-                try {
-                  await execAsync(
-                    `curl -k --http1.1 -X POST ${aoscloudUrl}/api/v10/service-logs/ ` +
-                    `--cert ${certPath} --cert-type P12 ` +
-                    `-H "accept: application/json" -H "Content-Type: application/json" ` +
-                    `-d '${payload}'`,
-                    { env: { ...process.env }, timeout: 15000 }
-                  );
-                  response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: 'Log request sent to AosCloud.\n\nThe unit will collect and upload logs. This may take 1-2 minutes.\nClick Refresh again to check if logs are ready.' };
-                } catch (reqErr) {
-                  response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: `Failed to request logs: ${reqErr.message?.slice(-100)}` };
-                }
-              }
-            } catch {
-              response = { kit_id: instanceId, type: 'aos_get_service_stdout', status: 'success', logs: 'Could not reach AosCloud. Check certificate and connectivity.' };
-            }
-          }
-          break;
-        }
-        case 'aos_get_build_status':
-          response = {
-            kit_id: instanceId,
-            type: 'aos_get_build_status',
-            status: 'success',
-            build: data.buildId ? getBuildStatus(data.buildId) : null,
-            builds: !data.buildId ? getBuildStatus() : undefined
-          };
-          break;
-        case 'aos_signal_stream':
-          response = {
-            kit_id: instanceId,
-            type: 'aos_signal_stream',
-            status: 'success',
-            signals: signalHistory.slice(-(data.limit || 100))
-          };
-          break;
-        default:
-          response = {
-            id: data.id,
-            kit_id: instanceId,
-            type: data.type || data.cmd,
-            status: 'error',
-            message: 'Unknown command: ' + (data.cmd || data.type)
-          };
-      }
-
-      response.id = data.id;
-      response.request_from = data.request_from;
-      socket.emit('messageToKit-kitReply', response);
-      console.log('[Broadcaster] Response sent:', response.status);
-
-    } catch (error) {
-      console.error('[Broadcaster] Error handling message:', error.message);
-      socket.emit('messageToKit-kitReply', {
-        id: data.id,
-        kit_id: instanceId,
-        type: data.type || data.cmd,
-        status: 'error',
-        message: error.message
-      });
-    }
+    response.id = data.id;
+    response.request_from = data.request_from;
+    socket.emit('messageToKit-kitReply', response);
+    console.log('[Broadcaster] Response sent:', response.status);
   });
 }
 
@@ -391,17 +463,70 @@ const SUPPORTED_ARCHS = {
   'aarch64': 'aarch64', 'arm64': 'aarch64',
 };
 
-function detectArch(yamlConfig) {
+// Detect the host (build machine) architecture
+function detectHostArch() {
+  const arch = process.arch;  // e.g. 'x64', 'arm64'
+  if (arch === 'x64') return 'x86_64';
+  if (arch === 'arm64') return 'aarch64';
+  return 'x86_64';  // default
+}
+
+// Parse config.yaml and return all architectures declared in the config.
+// For v2: collects from items[].images[].archInfo.architecture
+// For v1: uses the single build.arch field
+function detectArchs(yamlConfig) {
+  let doc;
+  try {
+    doc = yaml.load(yamlConfig);
+  } catch (e) {
+    // Fallback to regex for malformed YAML
+  }
+
+  if (doc && doc.schemaVersion === 2 && doc.items) {
+    const archs = new Set();
+    for (const item of doc.items) {
+      for (const img of (item.images || [])) {
+        const a = (img.archInfo && img.archInfo.architecture) ? img.archInfo.architecture : null;
+        if (a && a !== 'any') {
+          const resolved = SUPPORTED_ARCHS[a];
+          if (resolved) archs.add(resolved);
+        }
+      }
+    }
+    if (archs.size > 0) return Array.from(archs);
+    // If all architectures are "any", default to host arch
+    if (doc.items.some(item => (item.images || []).some(img => (img.archInfo && img.archInfo.architecture) === 'any'))) {
+      return [detectHostArch()];
+    }
+  }
+
+  if (doc && doc.build && doc.build.arch) {
+    const resolved = SUPPORTED_ARCHS[doc.build.arch];
+    if (resolved) return [resolved];
+  }
+
+  // Regex fallback for unparseable YAML
+  const newArchMatch = yamlConfig.match(/architecture:\s*['"]?(\w+)['"]?/);
+  if (newArchMatch) {
+    const resolved = SUPPORTED_ARCHS[newArchMatch[1]];
+    if (resolved) return [resolved];
+  }
   const archMatch = yamlConfig.match(/arch:\s*(\S+)/);
-  if (!archMatch) {
-    throw new Error('Missing "arch:" field in config.yaml. Supported values: x86_64, aarch64');
+  if (archMatch) {
+    const resolved = SUPPORTED_ARCHS[archMatch[1]];
+    if (resolved) return [resolved];
   }
-  const arch = archMatch[1];
-  const resolved = SUPPORTED_ARCHS[arch];
-  if (!resolved) {
-    throw new Error(`Unsupported architecture "${arch}" in config.yaml. Supported values: ${Object.keys(SUPPORTED_ARCHS).join(', ')}`);
-  }
-  return resolved;
+
+  throw new Error('Missing architecture field in config.yaml. Supported formats: arch: x86_64 (1.x) or archInfo.architecture: amd64 (2.x)');
+}
+
+// Pick the best architecture to build for: prefer the host arch if available
+// in the config, otherwise use the first declared arch.
+function detectArch(yamlConfig, preferredArch) {
+  const archs = detectArchs(yamlConfig);
+  const preferred = preferredArch || detectHostArch();
+  if (archs.includes(preferred)) return preferred;
+  return archs[0];
 }
 
 function compilerForArch(arch) {
@@ -451,6 +576,278 @@ const crypto = require('crypto');
 const BUILD_HISTORY_MAX = 20;
 const buildHistory = new Map();
 
+// Parse YAML config into a structured object (handles both v1 and v2 formats).
+// Returns a normalized config object with safe defaults for all fields.
+function parseYamlConfig(yamlConfig) {
+  let doc;
+  try {
+    doc = yaml.load(yamlConfig) || {};
+  } catch (e) {
+    doc = {};
+  }
+
+  const isV2 = doc && doc.schemaVersion === 2;
+
+  // Publish
+  const publish = (doc && doc.publish) || {};
+  const tlsKey = publish.tlsKey || 'aos-user-sp.p12';
+  const domain = publish.domain || 'aoscloud.io';
+
+  // Publisher
+  const publisher = (doc && doc.publisher) || {};
+  const author = publisher.author || 'developer@example.com';
+  const company = publisher.company || 'Example Corp';
+
+  // Version
+  const version = (isV2 && doc.items && doc.items[0] && doc.items[0].version)
+    || (doc && doc.publish && doc.publish.version)
+    || '1.0.0';
+
+  // Identity (v2 only)
+  const identity = (isV2 && doc.items && doc.items[0] && doc.items[0].identity) || {};
+  const serviceId = identity.id || null;
+  const codename = identity.codename || null;
+  const title = identity.title || null;
+  const description = identity.description || null;
+
+  // Item-level fields
+  const item = (isV2 && doc.items && doc.items[0]) || {};
+  const sourceFolder = item.sourceFolder || null;
+  const images = item.images || null;
+
+  // Configuration
+  const config = (isV2 && doc.items && doc.items[0] && doc.items[0].configuration)
+    || (doc && doc.configuration)
+    || {};
+  const cmd = config.cmd || null;
+  const workingDir = config.workingDir || '/';
+
+  // Environment variables
+  const env = config.env || null;
+
+  // Instances
+  const instances = config.instances || {};
+  const minInstances = instances.minInstances != null ? instances.minInstances : 1;
+  const priority = instances.priority != null ? instances.priority : 10;
+
+  // Quotas — support both v1 (quotas.cpu, quotas.mem) and v2 (quotas.cpuLimit, quotas.ramLimit)
+  const quotas = config.quotas || {};
+  const cpuLimit = quotas.cpuLimit || quotas.cpu || 1000;
+  const ramLimit = quotas.ramLimit || quotas.mem || '10MB';
+  const storageLimit = quotas.storageLimit || quotas.storage || '5MB';
+  const stateLimit = quotas.stateLimit || quotas.state || '512KB';
+  const tmpLimit = quotas.tmpLimit || '256MiB';
+  const uploadSpeedLimit = quotas.uploadSpeedLimit || '10K';
+  const downloadSpeedLimit = quotas.downloadSpeedLimit || '10K';
+  const uploadLimit = quotas.uploadLimit || '10GiB';
+  const downloadLimit = quotas.downloadLimit || '10GiB';
+  const noFileLimit = quotas.noFileLimit != null ? quotas.noFileLimit : 1024;
+  const pidsLimit = quotas.pidsLimit != null ? quotas.pidsLimit : 256;
+
+  // Dependencies (layers, services) and resources — preserve from input YAML
+  const dependencies = item.dependencies || null;
+  const resources = config.resources || null;
+
+  return {
+    tlsKey, domain,
+    author, company, version, serviceId, codename, title, description,
+    sourceFolder, images,
+    cmd, workingDir, env,
+    minInstances, priority,
+    cpuLimit, ramLimit, storageLimit, stateLimit,
+    tmpLimit, uploadSpeedLimit, downloadSpeedLimit, uploadLimit, downloadLimit,
+    noFileLimit, pidsLimit,
+    dependencies, resources,
+  };
+}
+
+// Generate new aos-signer 2.x config format (schemaVersion: 2)
+function generateNewConfigFormat(appName, oldYamlConfig) {
+  const cfg = parseYamlConfig(oldYamlConfig);
+
+  // Use codename from YAML — aos-signer resolves the service by codename on AosCloud
+  const identityLine = `      codename: "${cfg.codename || appName}"`;
+
+  const resolvedCmd = cfg.cmd || `/${appName}`;
+
+  // Build env lines if present
+  const envLines = (cfg.env && cfg.env.length > 0)
+    ? cfg.env.map(e => `        - "${e}"`).join('\n')
+    : '';
+
+  // Use YAML sourceFolder if present, otherwise fall back to appName
+  const effectiveSourceFolder = cfg.sourceFolder || appName;
+
+  // Images: always src_any/any — build creates src_any, config must match
+  const imagesBlock = `      - sourceFolder: "src_any"
+        archInfo:
+          architecture: "any"`;
+
+  // Build dependencies block if present (layers, services)
+  let dependenciesBlock = '';
+  if (cfg.dependencies && cfg.dependencies.length > 0) {
+    dependenciesBlock = '\n    dependencies:\n' + cfg.dependencies.map(dep => {
+      const identity = dep.identity || {};
+      const idType = identity.type || 'layer';
+      const idCodename = identity.codename || '';
+      const versions = dep.versions || '';
+      return `      - identity:
+          type: ${idType}
+          codename: ${idCodename}
+        versions: "${versions}"`;
+    }).join('\n');
+  }
+
+  // Build resources block if present (named resources like kuksa, zenoh)
+  let resourcesBlock = '';
+  if (cfg.resources && cfg.resources.length > 0) {
+    resourcesBlock = '\n      resources:\n' + cfg.resources.map(res => {
+      const name = res.name || '';
+      const mode = res.mode || 'rw';
+      return `        - name: ${name}
+          mode: ${mode}`;
+    }).join('\n');
+  }
+
+  return `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
+schemaVersion: 2
+
+publisher:
+  author: "${cfg.author}"
+  company: "${cfg.company}"
+
+publish:
+  tlsKey: "${cfg.tlsKey}"
+  domain: "${cfg.domain}"
+
+items:
+  - identity:
+      type: service
+${identityLine}
+      title: "${cfg.title || `${appName} Service`}"
+      description: "${cfg.description || `Auto-generated service from AOS Edge Toolchain`}"
+    version: "${cfg.version}"
+    sourceFolder: "${effectiveSourceFolder}"
+
+    images:
+${imagesBlock}
+
+    configuration:
+      workingDir: "${cfg.workingDir}"
+      cmd: ${resolvedCmd}${envLines ? '\n      env:\n' + envLines : ''}
+      instances:
+        minInstances: ${cfg.minInstances}
+        priority: ${cfg.priority}
+      quotas:
+        cpuLimit: ${parseInt(String(cfg.cpuLimit)) || 1000}
+        ramLimit: ${cfg.ramLimit}
+        storageLimit: ${cfg.storageLimit}
+        stateLimit: ${cfg.stateLimit}
+        tmpLimit: ${cfg.tmpLimit}
+        uploadSpeedLimit: ${cfg.uploadSpeedLimit}
+        downloadSpeedLimit: ${cfg.downloadSpeedLimit}
+        uploadLimit: ${cfg.uploadLimit}
+        downloadLimit: ${cfg.downloadLimit}
+        noFileLimit: ${cfg.noFileLimit}
+        pidsLimit: ${cfg.pidsLimit}${resourcesBlock}
+${dependenciesBlock}
+`;
+}
+
+function generatePythonConfig(appName, pyFileName, oldYamlConfig) {
+  const cfg = parseYamlConfig(oldYamlConfig);
+
+  // Use codename from YAML — aos-signer resolves the service by codename on AosCloud
+  const identityLine = `      codename: "${cfg.codename || appName}"`;
+
+  // Use cmd from YAML config as-is, fallback to /usr/bin/python3 -u /main.py
+  const pythonCmd = cfg.cmd || `/usr/bin/python3 -u /${pyFileName}`;
+
+  // Build env lines if present
+  const envLines = (cfg.env && cfg.env.length > 0)
+    ? cfg.env.map(e => `        - "${e}"`).join('\n')
+    : '';
+
+  // Use YAML sourceFolder if present, otherwise fall back to appName
+  const effectiveSourceFolder = cfg.sourceFolder || appName;
+
+  // Images: always src_any/any — build creates src_any, config must match
+  const imagesBlock = `      - sourceFolder: "src_any"
+        archInfo:
+          architecture: "any"`;
+
+  // Build dependencies block if present (layers, services)
+  let dependenciesBlock = '';
+  if (cfg.dependencies && cfg.dependencies.length > 0) {
+    dependenciesBlock = '\n    dependencies:\n' + cfg.dependencies.map(dep => {
+      const identity = dep.identity || {};
+      const idType = identity.type || 'layer';
+      const idCodename = identity.codename || '';
+      const versions = dep.versions || '';
+      return `      - identity:
+          type: ${idType}
+          codename: ${idCodename}
+        versions: "${versions}"`;
+    }).join('\n');
+  }
+
+  // Build resources block if present (named resources like kuksa, zenoh)
+  let resourcesBlock = '';
+  if (cfg.resources && cfg.resources.length > 0) {
+    resourcesBlock = '\n      resources:\n' + cfg.resources.map(res => {
+      const name = res.name || '';
+      const mode = res.mode || 'rw';
+      return `        - name: ${name}
+          mode: ${mode}`;
+    }).join('\n');
+  }
+
+  return `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
+# Python service — architecture-independent
+schemaVersion: 2
+
+publisher:
+  author: "${cfg.author}"
+  company: "${cfg.company}"
+
+publish:
+  tlsKey: "${cfg.tlsKey}"
+  domain: "${cfg.domain}"
+
+items:
+  - identity:
+      type: service
+${identityLine}
+      title: "${cfg.title || `${appName} Service`}"
+      description: "${cfg.description || `Auto-generated Python service from AOS Edge Toolchain`}"
+    version: "${cfg.version}"
+    sourceFolder: "${effectiveSourceFolder}"
+
+    images:
+${imagesBlock}
+
+    configuration:
+      workingDir: "${cfg.workingDir}"
+      cmd: ${pythonCmd}${envLines ? '\n      env:\n' + envLines : ''}
+      instances:
+        minInstances: ${cfg.minInstances}
+        priority: ${cfg.priority}
+      quotas:
+        cpuLimit: ${parseInt(String(cfg.cpuLimit)) || 1000}
+        ramLimit: ${cfg.ramLimit}
+        storageLimit: ${cfg.storageLimit}
+        stateLimit: ${cfg.stateLimit}
+        tmpLimit: ${cfg.tmpLimit}
+        uploadSpeedLimit: ${cfg.uploadSpeedLimit}
+        downloadSpeedLimit: ${cfg.downloadSpeedLimit}
+        uploadLimit: ${cfg.uploadLimit}
+        downloadLimit: ${cfg.downloadLimit}
+        noFileLimit: ${cfg.noFileLimit}
+        pidsLimit: ${cfg.pidsLimit}${resourcesBlock}
+${dependenciesBlock}
+`;
+}
+
 function emitProgress(buildId, stage, message, progress) {
   const entry = { stage, message, progress, ts: Date.now() };
   const build = buildHistory.get(buildId);
@@ -477,10 +874,113 @@ function getBuildStatus(buildId) {
   return all;
 }
 
+async function handleGetToolchainInfo(data) {
+  try {
+    const { stdout } = await execAsync(
+      'pip3 show aos-signer aos-keys aos-prov 2>/dev/null',
+      { timeout: 10000 }
+    );
+    // Parse pip show output into a map of package -> version
+    const packages = {};
+    let currentPkg = '';
+    for (const line of stdout.split('\n')) {
+      const nameMatch = line.match(/^Name:\s*(.+)/);
+      const versionMatch = line.match(/^Version:\s*(.+)/);
+      if (nameMatch) currentPkg = nameMatch[1].trim();
+      if (versionMatch && currentPkg) {
+        packages[currentPkg] = versionMatch[1].trim();
+        currentPkg = '';
+      }
+    }
+    return {
+      kit_id: instanceId,
+      type: 'aos_get_toolchain_info',
+      status: 'success',
+      packages,
+      python: process.env.PYTHON_VERSION || null
+    };
+  } catch (error) {
+    return {
+      kit_id: instanceId,
+      type: 'aos_get_toolchain_info',
+      status: 'error',
+      message: error.message
+    };
+  }
+}
+
+async function handleGetUnitInfo(data) {
+  const unitUid = data.unitUid;
+  if (!unitUid) {
+    return { kit_id: instanceId, type: 'aos_get_unit_info', status: 'error', message: 'No unitUid provided' };
+  }
+  try {
+    const detail = await curlAosCloud(`units/${unitUid}/`, true);
+    const versionFields = {};
+
+    // Collect version-like fields from the top-level unit object
+    for (const key of Object.keys(detail)) {
+      if (key.toLowerCase().includes('version') || key.toLowerCase().includes('aos')) {
+        const v = detail[key];
+        if (typeof v === 'string' || typeof v === 'number') versionFields[key] = v;
+      }
+    }
+
+    // Extract layer versions — this is where AosCore version lives
+    // e.g. layers: [{ layer_uid: "aos-core", layer_version_version: "6.1.0-bosch.2" }]
+    const layers = Array.isArray(detail.layers) ? detail.layers : [];
+    for (const layer of layers) {
+      const uid = layer.layer_uid || '';
+      const ver = layer.layer_version_version || layer.version || '';
+      if (uid && ver) versionFields[uid] = ver;
+    }
+
+    // Extract component versions
+    const components = Array.isArray(detail.unit_update_components) ? detail.unit_update_components : [];
+    for (const comp of components) {
+      const ctype = comp.type || '';
+      const cver = (comp.installed_component && comp.installed_component.version) || comp.version || '';
+      if (ctype && cver) versionFields[ctype] = cver;
+    }
+
+    // Node info: os_type, node_type
+    const nodes = Array.isArray(detail.nodes) ? detail.nodes : [];
+    if (nodes.length > 0) {
+      const n0 = nodes[0];
+      if (n0.os_type) versionFields['os_type'] = n0.os_type;
+      if (n0.node_type) versionFields['node_type'] = n0.node_type;
+      if (n0.status) versionFields['node_status'] = n0.status;
+    }
+
+    // Surface model info
+    const model = detail.model || {};
+    return {
+      kit_id: instanceId,
+      type: 'aos_get_unit_info',
+      status: 'success',
+      unitUid,
+      name: detail.name || detail.display_name || model?.name || '',
+      onlineStatus: detail.online_status || 'unknown',
+      manufacturer: detail.manufacturer || '',
+      versions: versionFields,
+      nodeCount: nodes.length,
+      _rawKeys: Object.keys(detail).filter(k => typeof detail[k] !== 'object' || detail[k] === null)
+    };
+  } catch (error) {
+    return { kit_id: instanceId, type: 'aos_get_unit_info', status: 'error', message: error.message };
+  }
+}
+
 async function handleBuildDeploy(data, buildId) {
-  const appName = data.name || 'hello-aos';
+  const language = data.language || 'python';
   const cppCode = data.cppCode || '';
+  const pythonCode = data.pythonCode || '';
+
   const yamlConfig = data.yamlConfig || '';
+
+  // Parse appName from YAML codename — the YAML is the single source of truth
+  const cfg = parseYamlConfig(yamlConfig);
+  const appName = cfg.codename || 'hello-python';
 
   if (!buildId) buildId = crypto.randomBytes(6).toString('hex');
   const buildDir = path.join('/workspace/builds', buildId);
@@ -494,25 +994,89 @@ async function handleBuildDeploy(data, buildId) {
     buildHistory.delete(oldest);
   }
 
-  emitProgress(buildId, 'init', `Starting build for ${appName} (build: ${buildId})`, 0);
+  emitProgress(buildId, 'init', `Starting build for ${appName} (build: ${buildId}, language: ${language})`, 0);
 
   try {
-    await fs.mkdir(path.join(buildDir, 'src'), { recursive: true });
-    await fs.mkdir(path.join(buildDir, 'meta'), { recursive: true });
-
-    await fs.writeFile(path.join(buildDir, 'src/main.cpp'), cppCode);
-    await fs.writeFile(path.join(buildDir, 'meta/config.yaml'), yamlConfig);
-    await fs.writeFile(path.join(buildDir, 'meta/default_state.dat'), '');
+    // New aos-signer 2.x format: config.yaml at root, service folder with src_<arch> structure
+    // Use YAML sourceFolder if present, otherwise fall back to appName (codename)
+    const effectiveSourceFolder = cfg.sourceFolder || appName;
+    const serviceFolder = path.join(buildDir, effectiveSourceFolder);
+    const srcFolder = path.join(serviceFolder, `src_temp_${buildId}`);
+    await fs.mkdir(srcFolder, { recursive: true });
 
     const certSrc = '/root/.aos/security/aos-user-sp.p12';
     try { await fs.copyFile(certSrc, path.join(buildDir, 'aos-user-sp.p12')); } catch (e) { /* ok */ }
+
+    // ── Python Deployment Path ──
+    if (language === 'python') {
+      emitProgress(buildId, 'config', 'Python deployment — skipping compilation', 10);
+
+      // Write Python source file — extract filename from YAML cmd, fallback to main.py
+      const cfg = parseYamlConfig(yamlConfig);
+      const cmdPath = cfg.cmd || '/usr/bin/python3 -u /main.py';
+      const pyFileName = cmdPath.split('/').pop() || 'main.py';
+      await fs.writeFile(path.join(srcFolder, pyFileName), pythonCode);
+
+      // Python is arch-independent — use src_any
+      const srcAnyFolder = path.join(serviceFolder, 'src_any');
+      await fs.mkdir(srcAnyFolder, { recursive: true });
+      await fs.copyFile(path.join(srcFolder, pyFileName), path.join(srcAnyFolder, pyFileName));
+
+      // Clean up temp src folder
+      await fs.rm(srcFolder, { recursive: true, force: true });
+
+      // Generate config.yaml with Python-specific cmd (direct python3 invocation, no wrapper)
+      const pythonConfig = generatePythonConfig(appName, pyFileName, yamlConfig);
+      await fs.writeFile(path.join(buildDir, 'config.yaml'), pythonConfig);
+      emitProgress(buildId, 'config', 'Generated config.yaml (schemaVersion: 2, Python)', 65);
+
+      // Clear any stale batch.tar.gz from a previous build before signing
+      await fs.rm(path.join(buildDir, 'batch.tar.gz')).catch(() => {});
+
+      emitProgress(buildId, 'sign', 'Signing deployment bundle...', 70);
+      await execAsync('aos-signer sign', { cwd: buildDir, env: { ...process.env } });
+
+      const pkgStats = await fs.stat(path.join(buildDir, 'batch.tar.gz')).catch(() => null);
+      if (!pkgStats) throw new Error('Deployment bundle not created after signing');
+      const sizeMB = (pkgStats.size / (1024 * 1024)).toFixed(1);
+      emitProgress(buildId, 'sign', `Deployment bundle signed: ${sizeMB} MB`, 75);
+
+      emitProgress(buildId, 'upload', 'Uploading to AosCloud...', 80);
+      try {
+        const { stdout: uploadOut, stderr: uploadStderr } = await execAsync('aos-signer upload', { cwd: buildDir, env: { ...process.env } });
+        const fullOutput = (uploadOut + ' ' + (uploadStderr || '')).trim();
+        if (fullOutput.toLowerCase().includes('error') || fullOutput.toLowerCase().includes('failed')) {
+          emitProgress(buildId, 'upload', `Upload rejected: ${fullOutput.slice(-200)}`, -1);
+          const build = buildHistory.get(buildId);
+          if (build) { build.status = 'error'; build.finishedAt = Date.now(); }
+          const logSummary = (build?.logs || []).map(e => `[${e.stage}] ${e.message}`).join('\n');
+          return { kit_id: instanceId, type: 'aos_build_deploy', status: 'error', buildId, appId: appName, message: logSummary };
+        }
+        emitProgress(buildId, 'upload', 'Upload complete — deployment bundle published to AosCloud', 100);
+      } catch (uploadErr) {
+        const errMsg = uploadErr.stderr || uploadErr.stdout || uploadErr.message || 'Unknown upload error';
+        emitProgress(buildId, 'upload', `Upload failed: ${errMsg.slice(-200)}`, -1);
+        const build = buildHistory.get(buildId);
+        if (build) { build.status = 'error'; build.finishedAt = Date.now(); }
+        const logSummary = (build?.logs || []).map(e => `[${e.stage}] ${e.message}`).join('\n');
+        return { kit_id: instanceId, type: 'aos_build_deploy', status: 'error', buildId, appId: appName, message: logSummary };
+      }
+
+      const build = buildHistory.get(buildId);
+      if (build) { build.status = 'success'; build.finishedAt = Date.now(); }
+      const logSummary = (build?.logs || []).map(e => `[${e.stage}] ${e.message}`).join('\n');
+      return { kit_id: instanceId, type: 'aos_build_deploy', status: 'success', buildId, appId: appName, message: logSummary };
+    }
+
+    // ── C++ Deployment Path (original) ──
+    await fs.writeFile(path.join(srcFolder, 'main.cpp'), cppCode);
 
     const targetArch = detectArch(yamlConfig);
     const cxx = compilerForArch(targetArch);
     emitProgress(buildId, 'config', `Target: ${targetArch}, compiler: ${cxx}`, 10);
 
     const isGrpcProject = cppCode.includes('grpcpp') || cppCode.includes('grpc.pb.h');
-    const builtBinary = path.join(buildDir, appName);
+    const builtBinary = path.join(buildDir, `${appName}-bin`);
 
     if (isGrpcProject) {
       emitProgress(buildId, 'proto', 'Generating gRPC proto stubs...', 15);
@@ -526,42 +1090,56 @@ async function handleBuildDeploy(data, buildId) {
       }
       emitProgress(buildId, 'proto', 'Proto stubs generated', 20);
 
+      // Always build static — AosCloud rejects dynamically linked bundles
       const grpcFlags = targetArch === 'x86_64'
-        ? '$(pkg-config --cflags --libs grpc++ protobuf) -lpthread'
-        : '-I/opt/grpc-aarch64/include -L/opt/grpc-aarch64/lib -lgrpc++ -lprotobuf -lpthread';
-      const staticFlag = targetArch === 'x86_64' ? '' : '-static';
-      const compileCmd = `${cxx} -std=c++17 -O2 ${staticFlag} -I${genDir} ` +
-        `${buildDir}/src/main.cpp ` +
+        ? '$(pkg-config --static --libs grpc++ protobuf)'
+        : '-I/opt/grpc-aarch64/include -L/opt/grpc-aarch64/lib -lgrpc++ -lgrpc -lprotobuf -lpthread';
+      const compileCmd = `${cxx} -static -std=c++17 -O2 -I${genDir} ` +
+        `${srcFolder}/main.cpp ` +
         `${genDir}/kuksa/val/v1/types.pb.cc ${genDir}/kuksa/val/v1/types.grpc.pb.cc ` +
         `${genDir}/kuksa/val/v1/val.pb.cc ${genDir}/kuksa/val/v1/val.grpc.pb.cc ` +
         `${grpcFlags} -o ${builtBinary}`;
-      emitProgress(buildId, 'compile', 'Compiling gRPC application...', 25);
+      emitProgress(buildId, 'compile', 'Compiling gRPC application (static)...', 25);
       await execAsync(compileCmd, { cwd: buildDir, env: { ...process.env }, timeout: 300000 });
     } else {
-      const staticFlag = '-static';
-      const compileCmd = `${cxx} ${staticFlag} -std=c++17 -O2 ${buildDir}/src/main.cpp -o ${builtBinary}`;
+      const compileCmd = `${cxx} -static -std=c++17 -O2 ${srcFolder}/main.cpp -o ${builtBinary}`;
       emitProgress(buildId, 'compile', 'Compiling application...', 25);
       await execAsync(compileCmd, { cwd: buildDir, timeout: 60000 });
     }
 
+    // Strip binary to reduce size (gRPC static binaries can be >100MB unstripped)
+    await execAsync(`strip ${builtBinary}`).catch(() => {});
     const { stdout: fileOut } = await execAsync(`file ${builtBinary}`);
     emitProgress(buildId, 'compile', `Binary: ${fileOut.trim().split(':').pop().trim().slice(0, 80)}`, 50);
 
-    await fs.copyFile(builtBinary, path.join(buildDir, 'src', appName));
-    try { await fs.unlink(path.join(buildDir, 'src/main.cpp')); } catch (e) { /* ok */ }
+    // Create src_any folder — AosCloud API requires architecture: "any"
+    const srcArchFolder = path.join(serviceFolder, 'src_any');
+    await fs.mkdir(srcArchFolder, { recursive: true });
+    // Name the binary to match the cmd from YAML (e.g. /hello-aos → hello-aos)
+    const cmdPath = cfg.cmd || `/${appName}`;
+    const binaryName = cmdPath.split('/').pop() || appName;
+    await fs.copyFile(builtBinary, path.join(srcArchFolder, binaryName));
+    await fs.rm(path.join(srcArchFolder, 'main.cpp')).catch(() => {});
 
-    if (isGrpcProject && targetArch === 'x86_64') {
-      emitProgress(buildId, 'bundle', 'Bundling dynamic libraries...', 55);
-      await bundleDynamicLibs(path.join(buildDir, 'src', appName), path.join(buildDir, 'src'));
-    }
+    // Clean up temp src folder
+    await fs.rm(srcFolder, { recursive: true, force: true });
 
-    emitProgress(buildId, 'sign', 'Signing service package...', 60);
+    // Generate new config.yaml format at root (schemaVersion: 2)
+    const newConfig = generateNewConfigFormat(appName, yamlConfig);
+    await fs.writeFile(path.join(buildDir, 'config.yaml'), newConfig);
+    emitProgress(buildId, 'config', 'Generated config.yaml (schemaVersion: 2)', 65);
+
+    // Clear any stale batch.tar.gz from a previous build before signing
+    await fs.rm(path.join(buildDir, 'batch.tar.gz')).catch(() => {});
+
+    emitProgress(buildId, 'sign', 'Signing deployment bundle...', 70);
     await execAsync('aos-signer sign', { cwd: buildDir, env: { ...process.env } });
 
-    const pkgStats = await fs.stat(path.join(buildDir, 'service.tar.gz')).catch(() => null);
-    if (!pkgStats) throw new Error('Package not created after signing');
+    // aos-signer 2.x creates batch.tar.gz instead of service.tar.gz
+    const pkgStats = await fs.stat(path.join(buildDir, 'batch.tar.gz')).catch(() => null);
+    if (!pkgStats) throw new Error('Deployment bundle not created after signing');
     const sizeMB = (pkgStats.size / (1024 * 1024)).toFixed(1);
-    emitProgress(buildId, 'sign', `Package signed: ${sizeMB} MB`, 75);
+    emitProgress(buildId, 'sign', `Deployment bundle signed: ${sizeMB} MB`, 75);
 
     emitProgress(buildId, 'upload', 'Uploading to AosCloud...', 80);
     try {
@@ -574,7 +1152,7 @@ async function handleBuildDeploy(data, buildId) {
         const logSummary = (build?.logs || []).map(e => `[${e.stage}] ${e.message}`).join('\n');
         return { kit_id: instanceId, type: 'aos_build_deploy', status: 'error', buildId, appId: appName, message: logSummary };
       }
-      emitProgress(buildId, 'upload', 'Upload complete — service published to AosCloud', 100);
+      emitProgress(buildId, 'upload', 'Upload complete — deployment bundle published to AosCloud', 100);
     } catch (uploadErr) {
       const errMsg = uploadErr.stderr || uploadErr.stdout || uploadErr.message || 'Unknown upload error';
       emitProgress(buildId, 'upload', `Upload failed: ${errMsg.slice(-200)}`, -1);
@@ -635,10 +1213,11 @@ async function handleStopApp(data) {
   };
 }
 
-async function curlAosCloud(apiPath) {
+async function curlAosCloud(apiPath, useOemCert) {
+  const cert = useOemCert ? resolveOemCertPath() : certPath;
   const { stdout } = await execAsync(
-    `curl -k --http1.1 ${aoscloudUrl}/api/v10/${apiPath} ` +
-    `--cert ${certPath} --cert-type P12 ` +
+    `curl -k --http1.1 ${aoscloudUrl}/api/v11/${apiPath} ` +
+    `--cert ${cert} --cert-type P12 ` +
     `-H "accept: application/json"`,
     { env: { ...process.env }, timeout: 15000 }
   );
@@ -654,14 +1233,19 @@ async function handleListAosCloud(data, resource) {
     let mapped;
     if (resource === 'services') {
       mapped = items.map((s) => ({
-        uuid: s.uuid,
+        // v11 API uses 'id' as the canonical UUID field; 'uuid' is a legacy alias
+        uuid: s.id || s.uuid,
         title: s.title || s.name,
         description: s.description || '',
-        provider: s.service_provider_title || ''
+        provider: s.service_provider_title || '',
+        codename: s.codename || ''
       }));
     } else if (resource === 'units') {
       mapped = items.map((u) => ({
-        uid: u.system_uid,
+        // v11 API uses 'id' as the canonical unit identifier for API calls;
+        // 'system_uid' is the human-readable legacy ID shown in the UI.
+        uid: u.id || u.system_uid,
+        systemUid: u.system_uid || u.id || '',
         name: u.model?.name || u.name || u.display_name || 'Unknown',
         online: u.online_status === 'Online',
         status: u.online_status,
@@ -722,7 +1306,7 @@ async function handleGetDeploymentStatus(data) {
       try {
         const units = await curlAosCloud('units/');
         const unitList = units.items || units || [];
-        unit = unitList.find((u) => u.system_uid === unitUid) || null;
+        unit = unitList.find((u) => (u.id || u.system_uid) === unitUid) || null;
       } catch (e) { console.warn('[DeploymentStatus] Could not fetch units:', e.message); }
     }
 
@@ -948,7 +1532,7 @@ async function handleGetServiceUnits(data) {
 
     // /services/{id}/units/ returns minimal data — enrich with /units/{uid}/ detail
     const enriched = await Promise.all(items.map(async (u) => {
-      const uid = u.system_uid || u.uid;
+      const uid = u.id || u.system_uid || u.uid;
       try {
         const detail = await curlAosCloud(`units/${uid}/`);
         // Find service instance run state from the unit's services_subjects
@@ -967,8 +1551,8 @@ async function handleGetServiceUnits(data) {
         }
         return {
           uid,
-          name: (detail.unit_sets?.[0]?.title ? detail.unit_sets[0].title + ' #' + detail.id : null)
-                || detail.name || 'Unit-' + detail.id,
+          name: (detail.unit_sets?.[0]?.title ? detail.unit_sets[0].title + ' #' + (detail.system_uid || detail.id) : null)
+                || detail.name || 'Unit-' + (detail.system_uid || detail.id),
           online: detail.online_status === 'Online',
           status: detail.online_status || 'Unknown',
           runState,
@@ -1030,10 +1614,14 @@ async function handleGetUnitMonitoring(data) {
     // Fetch monitoring AND unit detail in parallel. Unit detail provides the
     // hardware totals (CPU count, RAM total, partition sizes) that the
     // monitoring endpoint omits — without them we can't render real %.
+    console.log(`[Monitoring] Fetching data for unit: ${unitUid}`);
+    // Monitoring requires OEM cert — SP cert gets "forbidden"
     const [result, unitDetail] = await Promise.all([
-      curlAosCloud(`units/${unitUid}/monitoring/`),
-      curlAosCloud(`units/${unitUid}/`).catch(() => null)
+      curlAosCloud(`units/${unitUid}/monitoring/`, true),
+      curlAosCloud(`units/${unitUid}/`, true).catch(() => null)
     ]);
+    console.log(`[Monitoring] Unit detail:`, unitDetail ? `got ${JSON.stringify(unitDetail).length} bytes` : 'null');
+    console.log(`[Monitoring] Monitoring result type:`, Array.isArray(result) ? 'array' : typeof result, 'keys:', result ? Object.keys(result).join(',') : 'null');
 
     // Detect explicit error envelope (rare; usually the call either 200s with an
     // array of nodes, or curlAosCloud throws).
@@ -1041,7 +1629,7 @@ async function handleGetUnitMonitoring(data) {
       return { kit_id: instanceId, type: 'aos_get_unit_monitoring', status: 'error', message: result.message };
     }
 
-    // Real shape from /api/v10/units/<uid>/monitoring/:
+    // Real shape from /api/v11/units/<uid>/monitoring/:
     //   [ { cpu:[{value,measurementType,nodeId,...}], ram:[...], disk:[{partition,value,...}], ... },
     //     { ...secondary node... }, {} ]
     // Each metric is a *time-series array* of measurements; we want the most
@@ -1177,7 +1765,7 @@ async function handleRequestServiceLog(data) {
     });
 
     const { stdout } = await execAsync(
-      `curl -k --http1.1 -X POST ${aoscloudUrl}/api/v10/service-logs/ ` +
+      `curl -k --http1.1 -X POST ${aoscloudUrl}/api/v11/service-logs/ ` +
       `--cert ${certPath} --cert-type P12 ` +
       `-H "accept: application/json" -H "Content-Type: application/json" ` +
       `-d ${JSON.stringify(payload)}`,

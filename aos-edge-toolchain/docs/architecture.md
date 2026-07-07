@@ -1,4 +1,4 @@
-# AosEdge C++ Service Deployment Architecture
+# AosEdge Service Deployment Architecture
 
 ## High-Level Architecture
 
@@ -6,15 +6,22 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                     DEVELOPMENT WORKSTATION                  │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │        Docker Container: aos-edge-toolchain         │    │
+│  │     Docker: aos-orchestrator (multi-tenant gateway) │    │
 │  │  ┌──────────────────────────────────────────────┐  │    │
-│  │  │  • ARM64 Cross-compiler (aarch64-linux-gnu)  │  │    │
-│  │  │  • aos-signer (signing tool)                 │  │    │
-│  │  │  • Certificates (SP/OEM .p12)                │  │    │
-│  │  │  • Build scripts                             │  │    │
+│  │  │  • Kit Manager entry point (AET-ORCHESTRATOR)│  │    │
+│  │  │  • Extracts CN from uploaded .p12             │  │    │
+│  │  │  • Manages per-user worker containers         │  │    │
+│  │  │  • Port pool: 9101-9199                       │  │    │
+│  │  │  • Idle timeout: 30 min                        │  │    │
 │  │  └──────────────────────────────────────────────┘  │    │
-│  │                        │                            │    │
-│  │  C++ source → Build → Sign → Upload                │    │
+│  │                                                    │    │
+│  │  ┌──────────────────────────────────────────────┐  │    │
+│  │  │  Worker Container (per user)                  │  │    │
+│  │  │  • Dedicated cert volume                      │  │    │
+│  │  │  • Isolated build workspace                   │  │    │
+│  │  │  • aos-broadcaster.js (worker mode)           │  │    │
+│  │  │  • aos-signer (signing tool)                  │  │    │
+│  │  └──────────────────────────────────────────────┘  │    │
 │  └─────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -22,7 +29,7 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                         AosCloud                             │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │  REST API (https://aoscloud.io:10000/api/v10/)     │    │
+│  │  REST API (https://aoscloud.io:10000/api/v11/)     │    │
 │  │  • Services management                             │    │
 │  │  • Units/Subjects management                       │    │
 │  │  • Service deployment                              │    │
@@ -32,48 +39,52 @@
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                      AosEdge Unit                            │
-│                  (Raspberry Pi 5 - ARM64)                    │
+│                  (VirtualBox VM / RPi5)                      │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │  Aos Service Manager                                │    │
 │  │  ┌─────────────────────────────────────────────┐   │    │
-│  │  │  Running Services:                           │   │    │
-│  │  │  • digital-auto-aos-service1                 │   │    │
-│  │  │  • da-service                                │   │    │
+│  │  │  Running Services (crun containers):          │   │    │
+│  │  │  • Python services                            │   │    │
+│  │  │  • KUKSA signal writer/reader                 │   │    │
 │  │  └─────────────────────────────────────────────┘   │    │
 │  └─────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
+```
+
+## Multi-Tenant Flow
+
+```
+User A (.p12) ──→ Orchestrator ──→ Worker A (port 9101, cert A)
+User B (.p12) ──→ Orchestrator ──→ Worker B (port 9102, cert B)
+User C (.p12) ──→ Orchestrator ──→ Worker C (port 9103, cert C)
+                                       │
+                                  Auto-stopped after 30 min idle
 ```
 
 ## Key Components
 
 | Component | Description |
 |-----------|-------------|
-| **Docker Toolkit** | Self-contained build environment with cross-compiler and aos-signer |
+| **Orchestrator** | Multi-tenant gateway: manages worker lifecycle, routes commands, enforces limits |
+| **Worker Container** | Per-user build environment with isolated cert and workspace |
+| **Broadcaster (worker mode)** | HTTP API for build/sign/upload, no Kit Manager registration |
 | **AosCloud API** | REST-based service and unit management (authenticated with .p12 certificates) |
-| **AosEdge Unit** | Edge device (RPi5) running deployed services |
+| **AosEdge Unit** | Edge device running deployed services in crun containers |
 
 ## Deployment Workflow
 
-1. **Develop** C++ application
-2. **Build** ARM64 binary in Docker container
-3. **Sign** service package using aos-signer
-4. **Upload** to AosCloud via REST API
-5. **Deploy** to AosEdge unit through subject/service assignment
+1. **Upload .p12** — orchestrator extracts CN, creates dedicated worker
+2. **Develop** Python application in the UI editor
+3. **Build & Deploy** — worker signs with user's cert, uploads to AosCloud
+4. **Deploy** to AosEdge unit through subject/service assignment
+5. **Monitor** — unit status, monitoring, and logs via AosCloud API
 
 ## AosCloud REST API Endpoints
 
 | Endpoint | Method | Certificate |
 |----------|--------|-------------|
-| `/api/v10/services/` | GET, POST, DELETE | aos-user-sp.p12 |
-| `/api/v10/units/` | GET | aos-user-oem.p12 |
-| `/api/v10/subjects/` | GET, POST | aos-user-oem.p12 |
-| `/api/v10/subjects/{id}/services/` | POST, DELETE | aos-user-oem.p12 |
-| `/api/v10/subjects/{id}/units/` | POST | aos-user-oem.p12 |
-
-## Current Services
-
-| Service | UUID | Status |
-|---------|------|--------|
-| digital-auto-aos-service1 | `c0528145-b393-44c6-aeaa-b26bc560acee` | Ready for deployment |
-| da-service | `54d0b98c-e986-4bec-b065-bef119b9aa0f` | Active (1 unit) |
-| service101 | `f0bbd745-11af-4c89-a0a5-0aa975ee5139` | Available |
+| `/api/v11/services/` | GET, POST, DELETE | aos-user-sp.p12 |
+| `/api/v11/units/` | GET | aos-user-oem.p12 |
+| `/api/v11/subjects/` | GET, POST | aos-user-oem.p12 |
+| `/api/v11/subjects/{id}/services/` | POST, DELETE | aos-user-oem.p12 |
+| `/api/v11/subjects/{id}/units/` | POST | aos-user-oem.p12 |

@@ -5,3 +5,4 @@ node_modules/
 *.pfx
 *.pem
 !service/src/etc/kuksa-val/CA.pem
+aos-edge-toolchain/memory/

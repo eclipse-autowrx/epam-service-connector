@@ -199,41 +199,14 @@ build() {
 sign() {
     log_info "Signing service package..."
 
-    # Check for required files
-    if [ ! -f "/workspace/meta/config.yaml" ]; then
-        log_error "meta/config.yaml not found"
+    # Check for required files (schemaVersion: 2 format)
+    if [ ! -f "/workspace/config.yaml" ]; then
+        log_error "config.yaml not found (schemaVersion: 2 format expected at workspace root)"
         return 1
-    fi
-
-    if [ ! -f "/workspace/meta/default_state.dat" ]; then
-        log_error "meta/default_state.dat not found"
-        return 1
-    fi
-
-    # ⭐ CRITICAL: Check if binary exists in src/ for packaging
-    # aos-signer packages files from src/ - binary MUST be there!
-    local binary_name
-    binary_name=$(grep -oP 'cmd:\s*/\K[\w-]+' /workspace/meta/config.yaml 2>/dev/null || echo "")
-    if [ -n "$binary_name" ] && [ ! -f "/workspace/src/$binary_name" ]; then
-        log_error "Binary NOT found in src/ directory!"
-        echo ""
-        echo "${YELLOW}=== CRITICAL STEP MISSING ===${NC}"
-        echo "Your binary must be in src/ for aos-signer to package it."
-        echo ""
-        echo "After building, copy the binary to src/:"
-        echo "  cp $binary_name src/"
-        echo ""
-        echo "Then run 'sign' again."
-        echo "${YELLOW}============================${NC}"
-        return 1
-    fi
-
-    if [ -f "/workspace/src/$binary_name" ]; then
-        log_info "✓ Binary found in src/: $binary_name"
     fi
 
     # Copy certificate to workspace if referenced in config
-    if grep -q "sign_pkcs12.*aos-user-sp.p12" /workspace/meta/config.yaml; then
+    if grep -q "tlsKey.*aos-user-sp.p12" /workspace/config.yaml; then
         if [ ! -f "/workspace/aos-user-sp.p12" ]; then
             if [ -f "$CERTS_DIR/aos-user-sp.p12" ]; then
                 log_info "Copying SP certificate to workspace..."
@@ -246,24 +219,24 @@ sign() {
         fi
     fi
 
-    # Run aos-signer sign
+    # Run aos-signer sign (schemaVersion: 2 produces batch.tar.gz)
     cd /workspace && aos-signer sign
 
-    log_info "Service package signed: /workspace/service.tar.gz"
+    log_info "Service package signed: /workspace/batch.tar.gz"
     local pkg_size
-    pkg_size=$(stat -c%s /workspace/service.tar.gz 2>/dev/null || stat -f%z /workspace/service.tar.gz)
-    ls -lh /workspace/service.tar.gz
+    pkg_size=$(stat -c%s /workspace/batch.tar.gz 2>/dev/null || stat -f%z /workspace/batch.tar.gz)
+    ls -lh /workspace/batch.tar.gz
 
     # ⭐ Warn if package is too small (likely only source, no binary)
     if [ "$pkg_size" -lt 100000 ]; then
-        log_error "Package size suspiciously small ($(du -h /workspace/service.tar.gz | cut -f1))"
+        log_error "Package size suspiciously small ($(du -h /workspace/batch.tar.gz | cut -f1))"
         echo ""
         echo "${RED}=== WARNING ===${NC}"
         echo "Package is too small - binary may NOT be included!"
         echo "Expected: ~900KB (with binary) | Got: <100KB (source only)"
         echo ""
-        echo "Make sure you copied the binary to src/ before signing:"
-        echo "  cp your-binary src/"
+        echo "Make sure you copied the binary to src_<arch>/ before signing:"
+        echo "  cp your-binary src_amd64/  (or src_arm64/)"
         echo "${RED}================${NC}"
     fi
 }
@@ -272,8 +245,8 @@ sign() {
 upload() {
     log_info "Uploading service to AosCloud..."
 
-    if [ ! -f "/workspace/service.tar.gz" ]; then
-        log_error "service.tar.gz not found. Run 'sign' first."
+    if [ ! -f "/workspace/batch.tar.gz" ]; then
+        log_error "batch.tar.gz not found. Run 'sign' first."
         return 1
     fi
 
@@ -336,7 +309,7 @@ AOSCLOUD API (requires Key Vault certificate):
     # Create new service
     docker run --rm -e AZURE_KEY_VAULT_NAME=<vault> --entrypoint "" aos-edge-toolchain \
       sh -c "python3 /usr/local/bin/init-certs.py && \
-      curl -k --http1.1 -X POST https://aoscloud.io:10000/api/v10/services/ \
+      curl -k --http1.1 -X POST https://aoscloud.io:10000/api/v11/services/ \
       --cert /root/.aos/security/aos-user-sp.p12 --cert-type P12 \
       -H 'Content-Type: application/json' \
       -d '{title:\"My Service\"}'"
@@ -344,14 +317,14 @@ AOSCLOUD API (requires Key Vault certificate):
     # List services
     docker run --rm -e AZURE_KEY_VAULT_NAME=<vault> --entrypoint "" aos-edge-toolchain \
       sh -c "python3 /usr/local/bin/init-certs.py && \
-      curl -k --http1.1 https://aoscloud.io:10000/api/v10/services/ \
+      curl -k --http1.1 https://aoscloud.io:10000/api/v11/services/ \
       --cert /root/.aos/security/aos-user-sp.p12 --cert-type P12 \
       -H 'accept: application/json' | jq '.items[] | {uuid, title}'"
 
     # List units
     docker run --rm -e AZURE_KEY_VAULT_NAME=<vault> --entrypoint "" aos-edge-toolchain \
       sh -c "python3 /usr/local/bin/init-certs.py && \
-      curl -k --http1.1 https://aoscloud.io:10000/api/v10/units/ \
+      curl -k --http1.1 https://aoscloud.io:10000/api/v11/units/ \
       --cert /root/.aos/security/aos-user-sp.p12 --cert-type P12 \
       -H 'accept: application/json' | jq '.items[] | {id, system_uid, online_status}'"
 
@@ -370,13 +343,16 @@ CERTIFICATES (fetched from Azure Key Vault at runtime):
     - Without it, only build works (sign/upload/API require certificate)
     - Certificate path after fetch: /root/.aos/security/aos-user-sp.p12
 
-SERVICE STRUCTURE:
+SERVICE STRUCTURE (schemaVersion: 2):
     /workspace/
-    ├── hello-aos              # Compiled binary (ARM64)
-    ├── meta/
-    │   ├── config.yaml        # Service configuration
-    │   └── default_state.dat  # State file
-    └── aos-user-sp.p12        # SP certificate (auto-copied during sign)
+    ├── config.yaml             # Service configuration (schemaVersion: 2)
+    ├── batch.tar.gz            # Signed deployment bundle (output of sign)
+    ├── aos-user-sp.p12         # SP certificate (auto-copied during sign)
+    └── <service-folder>/       # Source folder (named in config.yaml items[].sourceFolder)
+        ├── src_amd64/          # AMD64 binaries
+        │   └── <binary>
+        └── src_arm64/          # ARM64 binaries
+            └── <binary>
 
 HELP
 }

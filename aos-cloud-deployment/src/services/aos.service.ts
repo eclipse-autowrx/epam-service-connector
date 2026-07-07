@@ -190,16 +190,18 @@ export class AosService {
 
   // Build and deploy AOS application
   async buildAndDeploy(request: BuildRequest): Promise<BuildResponse> {
-    const data = {
-      name: request.name,
-      displayName: request.displayName || request.name,
-      cppCode: request.cppCode,
+    const lang = request.language || 'python'
+    const data: any = {
       yamlConfig: request.yamlConfig,
-      language: 'cpp',
-      vehicleId: 'default-vehicle'
+      language: lang,
+    }
+    if (lang === 'python') {
+      data.pythonCode = request.pythonCode || ''
+    } else {
+      data.cppCode = request.cppCode || ''
     }
 
-    console.log('[AosService] Building app with code length:', request.cppCode?.length)
+    console.log('[AosService] Building app with language:', lang, 'code length:', (request.cppCode || request.pythonCode || '').length)
     const response = await this.sendCommand('aos_build_deploy', data)
 
     if (response.status === 'started' || response.result === 'success' || response.status === 'building' || response.status === 'success') {
@@ -329,6 +331,16 @@ export class AosService {
   // Remove the uploaded .p12 (and derived .pem) from the toolchain container
   async removeCertificate(certName: string = 'aos-user-sp'): Promise<any> {
     return this.sendCommand('aos_remove_cert', { certName })
+  }
+
+  // Get installed toolchain package versions (aos-signer, aos-keys, aos-prov)
+  async getToolchainInfo(): Promise<any> {
+    return this.sendCommand('aos_get_toolchain_info', {})
+  }
+
+  // Get unit version info from AosCloud (aos_version, os_version, etc.)
+  async getUnitInfo(unitUid: string): Promise<any> {
+    return this.sendCommand('aos_get_unit_info', { unitUid })
   }
 
   // Restart an AOS application
