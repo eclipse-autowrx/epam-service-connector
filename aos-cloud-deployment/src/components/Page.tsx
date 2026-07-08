@@ -144,16 +144,16 @@ export default function Page({ data, config }: PluginProps) {
   const styles = {
     page: {
       width: '100%',
-      height: '100%',
+      height: '100% !important',
       // Cap to viewport height so plugin mode (where the host may not
       // constrain height) still gives flex children a finite size. Without
       // this, dockerColumn's overflowY:auto can't engage and the left
       // column overflows when the user zooms in or the viewport shrinks.
-      maxHeight: '100vh',
+      maxHeight: '100vh !important',
       backgroundColor: '#f5f5f5',
       display: 'flex',
       flexDirection: 'column' as const,
-      overflow: 'hidden' as const,
+      overflow: 'hidden !important',
       fontFamily: 'system-ui, -apple-system, sans-serif'
     },
     header: {
@@ -222,7 +222,7 @@ export default function Page({ data, config }: PluginProps) {
       gap: '16px',
       padding: '16px',
       flex: 1,
-      overflow: 'hidden' as const
+      overflow: 'hidden !important'
     },
     editorsColumn: {
       flex: 1,
@@ -230,7 +230,7 @@ export default function Page({ data, config }: PluginProps) {
       flexDirection: 'column' as const,
       gap: '16px',
       minWidth: 0,
-      overflow: 'hidden'
+      overflow: 'hidden !important'
     },
     dockerColumn: {
       width: '280px',
@@ -239,7 +239,7 @@ export default function Page({ data, config }: PluginProps) {
       gap: '8px',
       flexShrink: 0,
       minHeight: 0,
-      overflowY: 'auto' as const,
+      overflowY: 'auto !important',
       paddingRight: '4px'
     },
     statusColumn: {
@@ -248,7 +248,7 @@ export default function Page({ data, config }: PluginProps) {
       flexDirection: 'column' as const,
       gap: '8px',
       flexShrink: 0,
-      overflow: 'hidden'
+      overflow: 'hidden !important'
     },
     card: {
       backgroundColor: 'white',
