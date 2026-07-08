@@ -28605,7 +28605,9 @@ items:
         flex: 1,
         minHeight: "280px",
         display: "flex",
-        flexDirection: "column"
+        flexDirection: "column",
+        overflowY: "auto",
+        position: "relative"
       },
       textarea: {
         flex: 1,
@@ -28641,7 +28643,13 @@ items:
       },
       actions: {
         display: "flex",
-        gap: "12px"
+        gap: "12px",
+        position: "sticky",
+        bottom: 0,
+        backgroundColor: "white",
+        padding: "12px",
+        borderTop: "1px solid #e5e7eb",
+        zIndex: 10
       },
       button: {
         display: "inline-flex",

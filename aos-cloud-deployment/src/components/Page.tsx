@@ -287,7 +287,9 @@ export default function Page({ data, config }: PluginProps) {
       flex: 1,
       minHeight: '280px',
       display: 'flex',
-      flexDirection: 'column' as const
+      flexDirection: 'column' as const,
+      overflowY: 'auto',
+      position: 'relative'
     },
     textarea: {
       flex: 1,
@@ -323,7 +325,13 @@ export default function Page({ data, config }: PluginProps) {
     },
     actions: {
       display: 'flex',
-      gap: '12px'
+      gap: '12px',
+      position: 'sticky',
+      bottom: 0,
+      backgroundColor: 'white',
+      padding: '12px',
+      borderTop: '1px solid #e5e7eb',
+      zIndex: 10
     },
     button: {
       display: 'inline-flex',
