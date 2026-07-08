@@ -6767,16 +6767,16 @@ items:
     const styles = {
       page: {
         width: "100%",
-        height: "100%",
+        height: "100% !important",
         // Cap to viewport height so plugin mode (where the host may not
         // constrain height) still gives flex children a finite size. Without
         // this, dockerColumn's overflowY:auto can't engage and the left
         // column overflows when the user zooms in or the viewport shrinks.
-        maxHeight: "100vh",
+        maxHeight: "100vh !important",
         backgroundColor: "#f5f5f5",
         display: "flex",
         flexDirection: "column",
-        overflow: "hidden",
+        overflow: "hidden !important",
         fontFamily: "system-ui, -apple-system, sans-serif"
       },
       header: {
@@ -6845,7 +6845,7 @@ items:
         gap: "16px",
         padding: "16px",
         flex: 1,
-        overflow: "hidden"
+        overflow: "hidden !important"
       },
       editorsColumn: {
         flex: 1,
@@ -6853,7 +6853,7 @@ items:
         flexDirection: "column",
         gap: "16px",
         minWidth: 0,
-        overflow: "hidden"
+        overflow: "hidden !important"
       },
       dockerColumn: {
         width: "280px",
@@ -6862,7 +6862,7 @@ items:
         gap: "8px",
         flexShrink: 0,
         minHeight: 0,
-        overflowY: "auto",
+        overflowY: "auto !important",
         paddingRight: "4px"
       },
       statusColumn: {
@@ -6871,7 +6871,7 @@ items:
         flexDirection: "column",
         gap: "8px",
         flexShrink: 0,
-        overflow: "hidden"
+        overflow: "hidden !important"
       },
       card: {
         backgroundColor: "white",
