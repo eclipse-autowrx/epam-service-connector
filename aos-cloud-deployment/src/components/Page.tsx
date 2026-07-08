@@ -37,7 +37,7 @@ export default function Page({ data, config }: PluginProps) {
   const [connectionStatus, setConnectionStatus] = React.useState<'disconnected' | 'connecting' | 'connected'>('disconnected')
   const [selectedPreset, setSelectedPreset] = React.useState('custom')
   const [autoIncVersion, setAutoIncVersion] = React.useState(true)
-  const [autoSyncServiceUid, setAutoSyncServiceUid] = React.useState(true)
+  const [autoSyncServiceUid, setAutoSyncServiceUid] = React.useState(false)
   const [activeEditorTab, setActiveEditorTab] = React.useState<'cpp' | 'python' | 'yaml'>('python')
   const cppCodeRef = React.useRef(cppCode)
   const pythonCodeRef = React.useRef(pythonCode)
@@ -2227,7 +2227,10 @@ export default function Page({ data, config }: PluginProps) {
                 onChange: (e: any) => setAutoSyncServiceUid(e.target.checked),
                 style: { cursor: 'pointer' }
               }),
-              'Auto-sync codename to config.yaml'
+              'Auto-sync codename to config.yaml',
+              React.createElement('span', {
+                style: { fontSize: '10px', color: '#dc2626', marginLeft: '4px', fontStyle: 'italic' }
+              }, '(overwrites YAML identity — may cause wrong service deployment)')
             ),
             serviceVersions.length > 0 && React.createElement('div', {
               style: { display: 'flex', gap: '4px', marginTop: '6px', flexWrap: 'wrap' }
