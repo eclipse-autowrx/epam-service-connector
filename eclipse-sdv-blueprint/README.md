@@ -35,11 +35,11 @@ The journey below shows how the system interacts across three steps — from the
 
 ---
 
-## Prototype on digital.auto playground
+## Application on digital.auto playground
 
-You can explore and run the prototype directly in the digital.auto playground — no hardware needed:
+You can explore and run the Application directly in the digital.auto playground — no hardware needed:
 
- **[Open Prototype on digital.auto Playground](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/code)**
+ **[Open Application on digital.auto Playground](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/code)**
 
 The playground lets you simulate vehicle signals and see the app's logic in action before touching any real device. OEMs can use this to validate business logic, test signal flows, and iterate on the customer journey end-to-end.
 
@@ -64,7 +64,7 @@ Phase 1 is designed for **rapid development and validation**. Everything runs in
 ### How the flow works
 
 ```
-1. EV Range Extender Prototype 
+1. EV Range Extender Application
         ↓
 2. App is published to the AosCloud App Registry
         ↓
@@ -94,6 +94,15 @@ Phase 1 is designed for **rapid development and validation**. Everything runs in
 | `eclipse-kuksa` | Vehicle signal broker — reads and writes VSS signals |
 | `eclipse-velocitas` | Framework for building vehicle apps in Python/C++ |
 | `eclipse-zenoh` | Modern pub/sub communication protocol between HPC-VM and End-VM |
+
+### System Setup Workflow
+
+- [Execute Automated setup](#automated-setup)  
+- [Application Execution](#application-execution)  
+- [Start the hardware simulator](#start-the-hardware-simulator)  
+- [Steps to demo](#steps-to-demo)
+
+⚠️ Disclaimer: Please follow the above steps for clear setup and demo.
 
 ### Automated Setup
 
@@ -155,10 +164,10 @@ docker run -d \
 	- **hint**: Name of the default runtime is "ev-range" for the automated setup
 5. Set **Type = Runtime** and click **Save**
 
-**Open and run the prototype**
+**Open and run the Application**
 
-1. Open the [EV Range Extender prototype](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/code)
-2. Select the runtime you just registered
+1. Open the [EV Range Extender Application](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/code)
+2. Select the runtime you just registered on terminal
 3. Click **Execute** — vehicle signals will start flowing in real time
 
 ### Start the hardware simulator
@@ -167,11 +176,13 @@ With both VMs running and the EV Range Extender application executed from the di
 
 ```bash
 ./hardware-sim/setup.sh
-pip install -r hardware-sim/requirements.txt
-python hardware-sim/pytk_dashboard.py
+python hardware-sim/pytk_hwsim.py
 ```
+⚠️ Disclaimer: Please follow the above steps , if dashboard does not display the values, hwsim should be re-launched.
 
 See the [hardware simulator README](hardware-sim/README.md) for the full control and status map.
+
+For nodered hardware simulator there is helper script to launch [here](hardware-sim/node-red/README.md)
 
 ### Steps to demo
 
@@ -181,7 +192,7 @@ Follow these steps:
 2. **After the hardware simulator is running, execute the playground application (SDV code).**
 3. **Press the Start button in the hardware simulator** to begin battery drain.
 4. **Observe threshold behavior:**
-	- Up to **50% battery**, the HVAC fan is reduced gradually; once the battery reaches **50%**, the fan turns off.
+	- At **50% battery**, the HVAC fan is turned off; once the battery reaches **50%**, the fan turns off.
 	- At **30% battery**, stricter power-saving behavior is applied and seat heating/cooling are turned off.
 	- When the fan turns off, a small rise in range can be observed. When seat heating/cooling also turn off, the range increases further.
 
@@ -274,7 +285,7 @@ A key addition in Phase 2 is the **End ECU layer** (STM32), which represents the
 
 | Resource | Link |
 |---|---|
-| digital.auto Playground (Prototype) | [playground.digital.auto](https://playground.digital.auto) |
+| digital.auto Playground | [playground.digital.auto](https://playground.digital.auto) |
 | Development Repository | [eclipse-autowrx/epam-service-connector](https://github.com/eclipse-autowrx/epam-service-connector) |
 | digital.auto Website | [www.digital.auto](https://www.digital.auto) |
 

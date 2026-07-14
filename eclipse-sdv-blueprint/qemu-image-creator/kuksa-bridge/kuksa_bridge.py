@@ -237,8 +237,7 @@ def build_zenoh_config(cfg: BridgeConfig) -> zenoh.Config:
 
 
 class _InboundQueue:
-    """Coalescing latest-value queue, identical in shape to the helper
-    used by ``vm2/hvac_ecu.py`` / ``vm2/seat_ecu.py``.
+    """Coalescing latest-value queue for batched Kuksa writes.
 
     Producers (Zenoh worker thread) call ``offer(spec, raw_value, src)``;
     a single asyncio consumer drains the snapshot per loop tick and

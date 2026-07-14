@@ -126,6 +126,7 @@ known_hosts
 .DS_Store
 Thumbs.db
 desktop.ini
+*:Zone.Identifier
 
 # ---------------------------------------------------------------------
 # Misc backups

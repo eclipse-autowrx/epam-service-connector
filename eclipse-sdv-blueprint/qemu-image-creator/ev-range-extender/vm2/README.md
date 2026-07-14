@@ -33,9 +33,9 @@ need a local Kuksa Databroker for the current VM2 path.
 tcp/0.0.0.0:7461
 ```
 
-It consumes dashboard messages from:
+It consumes dashboard TCP frames carrying:
 
-| Zenoh key | VSS path | Value |
+| Signal key | VSS path | Value |
 |---|---|---|
 | `sim/cabin/temp` | `Vehicle.Cabin.HVAC.AmbientAirTemperature` | `0..100` fan-speed percent |
 
@@ -45,7 +45,7 @@ On each dashboard update it publishes a bridge envelope on:
 kuksa-bridge/Vehicle/Cabin/HVAC/AmbientAirTemperature
 ```
 
-It also publishes dashboard status on:
+It also sends dashboard status frames with topic:
 
 ```text
 dash/status/hvac
@@ -63,9 +63,9 @@ Status is `on` when the fan value is greater than zero, otherwise `off`.
 tcp/0.0.0.0:7462
 ```
 
-It consumes dashboard messages from:
+It consumes dashboard TCP frames carrying:
 
-| Zenoh key | VSS path | Value |
+| Signal key | VSS path | Value |
 |---|---|---|
 | `sim/cabin/seat/heating` | `Vehicle.Cabin.Seat.Row1.DriverSide.Heating` | `0` or `100` |
 | `sim/cabin/seat/hc` | `Vehicle.Cabin.Seat.Row1.DriverSide.HeatingCooling` | `0` or `-100` for cooling |
@@ -77,7 +77,7 @@ kuksa-bridge/Vehicle/Cabin/Seat/Row1/DriverSide/Heating
 kuksa-bridge/Vehicle/Cabin/Seat/Row1/DriverSide/HeatingCooling
 ```
 
-It also publishes dashboard status on:
+It also sends dashboard status frames with topic:
 
 ```text
 dash/status/seat
@@ -166,7 +166,8 @@ Useful options:
 
 | Option | Default | Purpose |
 |---|---|---|
-| `--listen` | `tcp/0.0.0.0:7461` for HVAC, `tcp/0.0.0.0:7462` for seat | Dashboard-facing Zenoh listener. |
+| `--host` | `0.0.0.0` | TCP listen address for dashboard frames. |
+| `--port` | `7461` for HVAC, `7462` for seat | TCP listen port for dashboard frames. |
 | `--bridge-connect` | `tcp/127.0.0.1:7448` | Local VM2 bridge relay endpoint. |
 
 `--kuksa-host` and `--kuksa-port` remain available in the scripts for the older

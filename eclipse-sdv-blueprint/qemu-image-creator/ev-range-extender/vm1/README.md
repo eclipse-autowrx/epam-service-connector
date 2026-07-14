@@ -16,7 +16,7 @@ VM1 address in the default setup:
 
 | Service | File | Purpose |
 |---|---|---|
-| `ev-range-bms.service` | `bms.py` | Receives battery telemetry from the host dashboard over Zenoh and writes it to VM1 Kuksa. |
+| `ev-range-bms.service` | `bms.py` | Receives battery telemetry from the host dashboard over TCP and writes it to VM1 Kuksa. |
 | `ev-range-range-ai.service` | `range_ai.py` | Reads battery and cabin signals from VM1 Kuksa, computes range, and writes `Vehicle.Powertrain.Range`. |
 | `ev-range-kuksa-bridge.service` | `../../kuksa-bridge/kuksa_bridge.py` | Mirrors selected cabin VSS values between VM1 Kuksa and the VM2 bridge relay. |
 
@@ -33,18 +33,19 @@ inspect or restart them through systemd instead of running scripts by hand.
 tcp/0.0.0.0:7460
 ```
 
-It subscribes to:
+It consumes dashboard frames for:
 
-| Zenoh key | VSS path | Type |
+| Signal key | VSS path | Type |
 |---|---|---|
 | `sim/battery/voltage` | `Vehicle.Powertrain.TractionBattery.CurrentVoltage` | float |
 | `sim/battery/current` | `Vehicle.Powertrain.TractionBattery.CurrentCurrent` | float |
 | `sim/battery/soc` | `Vehicle.Powertrain.TractionBattery.StateOfCharge.Current` | float |
 
-Payload format:
+Wire format (newline-delimited JSON):
 
 ```json
 {
+  "key": "sim/battery/soc",
   "value": 80,
   "source": "host-name",
   "ts": "2026-05-21T...Z"
@@ -142,6 +143,15 @@ python3 range_ai.py
 
 Both scripts default to VM1's local Kuksa Databroker at
 `127.0.0.1:55555`.
+
+Useful options for `bms.py`:
+
+| Option | Default | Purpose |
+|---|---|---|
+| `--host` | `0.0.0.0` | TCP listen address for dashboard frames. |
+| `--port` | `7460` | TCP listen port for dashboard frames. |
+| `--kuksa-host` | `127.0.0.1` | VM1 Kuksa Databroker host. |
+| `--kuksa-port` | `55555` | VM1 Kuksa Databroker port. |
 
 ---
 

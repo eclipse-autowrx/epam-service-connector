@@ -170,6 +170,7 @@ write_files:
 
       main() {
           : > "$LOG_FILE" 2>/dev/null || true
+          rm -f /tmp/evrange-runtime.ready
           log "============================================================"
           log "        EV Range Extender SDV Runtime Startup (VM1)"
           log "============================================================"
@@ -204,6 +205,7 @@ write_files:
           log "  Runtime container logs : docker logs -f $CONTAINER"
           log "  This startup log       : tail -f $LOG_FILE"
           log "============================================================"
+          date -Iseconds > /tmp/evrange-runtime.ready
       }
 
       main "$@"
