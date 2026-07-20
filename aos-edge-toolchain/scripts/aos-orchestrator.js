@@ -367,13 +367,21 @@ async function getOrCreateWorker(userCN, p12Base64) {
 
 function startIdleMonitor() {
   setInterval(async () => {
-    const now = Date.now();
-    for (const [userCN, info] of userMap) {
-      if (info.status !== 'running') continue;
-      if (now - info.lastActivity > idleTimeoutMs) {
-        console.log(`[Orchestrator] Worker for CN="${userCN}" idle for ${Math.round((now - info.lastActivity) / 60000)}min — stopping`);
-        await stopWorker(userCN);
+    try {
+      const now = Date.now();
+      for (const [userCN, info] of userMap) {
+        if (info.status !== 'running') continue;
+        if (now - info.lastActivity > idleTimeoutMs) {
+          try {
+            console.log(`[Orchestrator] Worker for CN="${userCN}" idle for ${Math.round((now - info.lastActivity) / 60000)}min — stopping`);
+            await stopWorker(userCN);
+          } catch (e) {
+            console.error(`[Orchestrator] Failed to stop idle worker for CN="${userCN}":`, e.message);
+          }
+        }
       }
+    } catch (e) {
+      console.error('[Orchestrator] Idle monitor check error:', e.message);
     }
   }, 5 * 60 * 1000); // Check every 5 minutes
   console.log('[Orchestrator] Idle monitor started (check interval: 5 min, timeout:', process.env.IDLE_TIMEOUT_MINUTES || '30', 'min)');
