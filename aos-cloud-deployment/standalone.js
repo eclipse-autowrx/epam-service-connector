@@ -21729,7 +21729,7 @@
   var React = __toESM(require_react(), 1);
   globalThis.React = React;
 
-  // src/standalone-python.ts
+  // src/standalone.ts
   var React3 = __toESM(require_react(), 1);
   var ReactDOM = __toESM(require_client(), 1);
 
@@ -28382,7 +28382,7 @@ items:
     const [connectionStatus, setConnectionStatus] = React2.useState("disconnected");
     const [selectedPreset, setSelectedPreset] = React2.useState("custom");
     const [autoIncVersion, setAutoIncVersion] = React2.useState(true);
-    const [autoSyncServiceUid, setAutoSyncServiceUid] = React2.useState(true);
+    const [autoSyncServiceUid, setAutoSyncServiceUid] = React2.useState(false);
     const [activeEditorTab, setActiveEditorTab] = React2.useState("python");
     const cppCodeRef = React2.useRef(cppCode);
     const pythonCodeRef = React2.useRef(pythonCode);
@@ -28605,7 +28605,9 @@ items:
         flex: 1,
         minHeight: "280px",
         display: "flex",
-        flexDirection: "column"
+        flexDirection: "column",
+        overflowY: "auto",
+        position: "relative"
       },
       textarea: {
         flex: 1,
@@ -28641,7 +28643,13 @@ items:
       },
       actions: {
         display: "flex",
-        gap: "12px"
+        gap: "12px",
+        position: "sticky",
+        bottom: 0,
+        backgroundColor: "white",
+        padding: "12px",
+        borderTop: "1px solid #e5e7eb",
+        zIndex: 10
       },
       button: {
         display: "inline-flex",
@@ -30831,7 +30839,10 @@ items:
                   onChange: (e) => setAutoSyncServiceUid(e.target.checked),
                   style: { cursor: "pointer" }
                 }),
-                "Auto-sync codename to config.yaml"
+                "Auto-sync codename to config.yaml",
+                React2.createElement("span", {
+                  style: { fontSize: "10px", color: "#dc2626", marginLeft: "4px", fontStyle: "italic" }
+                }, "(overwrites YAML identity \u2014 may cause wrong service deployment)")
               ),
               serviceVersions.length > 0 && React2.createElement(
                 "div",
@@ -31447,7 +31458,7 @@ items:
     );
   }
 
-  // src/standalone-python.ts
+  // src/standalone.ts
   var container = document.getElementById("root");
   var root = ReactDOM.createRoot(container);
   root.render(
@@ -31503,4 +31514,4 @@ react-dom/cjs/react-dom-client.development.js:
    * LICENSE file in the root directory of this source tree.
    *)
 */
-//# sourceMappingURL=standalone_python.js.map
+//# sourceMappingURL=standalone.js.map

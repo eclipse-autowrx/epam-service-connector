@@ -37,7 +37,7 @@ export default function Page({ data, config }: PluginProps) {
   const [connectionStatus, setConnectionStatus] = React.useState<'disconnected' | 'connecting' | 'connected'>('disconnected')
   const [selectedPreset, setSelectedPreset] = React.useState('custom')
   const [autoIncVersion, setAutoIncVersion] = React.useState(true)
-  const [autoSyncServiceUid, setAutoSyncServiceUid] = React.useState(true)
+  const [autoSyncServiceUid, setAutoSyncServiceUid] = React.useState(false)
   const [activeEditorTab, setActiveEditorTab] = React.useState<'cpp' | 'python' | 'yaml'>('python')
   const cppCodeRef = React.useRef(cppCode)
   const pythonCodeRef = React.useRef(pythonCode)
@@ -144,16 +144,16 @@ export default function Page({ data, config }: PluginProps) {
   const styles = {
     page: {
       width: '100%',
-      height: '100%',
+      height: '100% !important',
       // Cap to viewport height so plugin mode (where the host may not
       // constrain height) still gives flex children a finite size. Without
       // this, dockerColumn's overflowY:auto can't engage and the left
       // column overflows when the user zooms in or the viewport shrinks.
-      maxHeight: '100vh',
+      maxHeight: '100vh !important',
       backgroundColor: '#f5f5f5',
       display: 'flex',
       flexDirection: 'column' as const,
-      overflow: 'hidden' as const,
+      overflow: 'hidden !important',
       fontFamily: 'system-ui, -apple-system, sans-serif'
     },
     header: {
@@ -222,7 +222,7 @@ export default function Page({ data, config }: PluginProps) {
       gap: '16px',
       padding: '16px',
       flex: 1,
-      overflow: 'hidden' as const
+      overflow: 'hidden !important'
     },
     editorsColumn: {
       flex: 1,
@@ -230,7 +230,7 @@ export default function Page({ data, config }: PluginProps) {
       flexDirection: 'column' as const,
       gap: '16px',
       minWidth: 0,
-      overflow: 'hidden'
+      overflow: 'hidden !important'
     },
     dockerColumn: {
       width: '280px',
@@ -239,7 +239,7 @@ export default function Page({ data, config }: PluginProps) {
       gap: '8px',
       flexShrink: 0,
       minHeight: 0,
-      overflowY: 'auto' as const,
+      overflowY: 'auto !important',
       paddingRight: '4px'
     },
     statusColumn: {
@@ -248,7 +248,7 @@ export default function Page({ data, config }: PluginProps) {
       flexDirection: 'column' as const,
       gap: '8px',
       flexShrink: 0,
-      overflow: 'hidden'
+      overflow: 'hidden !important'
     },
     card: {
       backgroundColor: 'white',
@@ -287,7 +287,9 @@ export default function Page({ data, config }: PluginProps) {
       flex: 1,
       minHeight: '280px',
       display: 'flex',
-      flexDirection: 'column' as const
+      flexDirection: 'column' as const,
+      overflowY: 'auto',
+      position: 'relative'
     },
     textarea: {
       flex: 1,
@@ -323,7 +325,13 @@ export default function Page({ data, config }: PluginProps) {
     },
     actions: {
       display: 'flex',
-      gap: '12px'
+      gap: '12px',
+      position: 'sticky',
+      bottom: 0,
+      backgroundColor: 'white',
+      padding: '12px',
+      borderTop: '1px solid #e5e7eb',
+      zIndex: 10
     },
     button: {
       display: 'inline-flex',
@@ -2227,7 +2235,10 @@ export default function Page({ data, config }: PluginProps) {
                 onChange: (e: any) => setAutoSyncServiceUid(e.target.checked),
                 style: { cursor: 'pointer' }
               }),
-              'Auto-sync codename to config.yaml'
+              'Auto-sync codename to config.yaml',
+              React.createElement('span', {
+                style: { fontSize: '10px', color: '#dc2626', marginLeft: '4px', fontStyle: 'italic' }
+              }, '(overwrites YAML identity — may cause wrong service deployment)')
             ),
             serviceVersions.length > 0 && React.createElement('div', {
               style: { display: 'flex', gap: '4px', marginTop: '6px', flexWrap: 'wrap' }

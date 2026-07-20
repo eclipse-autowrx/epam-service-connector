@@ -6687,7 +6687,7 @@ items:
     const [connectionStatus, setConnectionStatus] = React.useState("disconnected");
     const [selectedPreset, setSelectedPreset] = React.useState("custom");
     const [autoIncVersion, setAutoIncVersion] = React.useState(true);
-    const [autoSyncServiceUid, setAutoSyncServiceUid] = React.useState(true);
+    const [autoSyncServiceUid, setAutoSyncServiceUid] = React.useState(false);
     const [activeEditorTab, setActiveEditorTab] = React.useState("python");
     const cppCodeRef = React.useRef(cppCode);
     const pythonCodeRef = React.useRef(pythonCode);
@@ -6767,16 +6767,16 @@ items:
     const styles = {
       page: {
         width: "100%",
-        height: "100%",
+        height: "100% !important",
         // Cap to viewport height so plugin mode (where the host may not
         // constrain height) still gives flex children a finite size. Without
         // this, dockerColumn's overflowY:auto can't engage and the left
         // column overflows when the user zooms in or the viewport shrinks.
-        maxHeight: "100vh",
+        maxHeight: "100vh !important",
         backgroundColor: "#f5f5f5",
         display: "flex",
         flexDirection: "column",
-        overflow: "hidden",
+        overflow: "hidden !important",
         fontFamily: "system-ui, -apple-system, sans-serif"
       },
       header: {
@@ -6845,7 +6845,7 @@ items:
         gap: "16px",
         padding: "16px",
         flex: 1,
-        overflow: "hidden"
+        overflow: "hidden !important"
       },
       editorsColumn: {
         flex: 1,
@@ -6853,7 +6853,7 @@ items:
         flexDirection: "column",
         gap: "16px",
         minWidth: 0,
-        overflow: "hidden"
+        overflow: "hidden !important"
       },
       dockerColumn: {
         width: "280px",
@@ -6862,7 +6862,7 @@ items:
         gap: "8px",
         flexShrink: 0,
         minHeight: 0,
-        overflowY: "auto",
+        overflowY: "auto !important",
         paddingRight: "4px"
       },
       statusColumn: {
@@ -6871,7 +6871,7 @@ items:
         flexDirection: "column",
         gap: "8px",
         flexShrink: 0,
-        overflow: "hidden"
+        overflow: "hidden !important"
       },
       card: {
         backgroundColor: "white",
@@ -6910,7 +6910,9 @@ items:
         flex: 1,
         minHeight: "280px",
         display: "flex",
-        flexDirection: "column"
+        flexDirection: "column",
+        overflowY: "auto",
+        position: "relative"
       },
       textarea: {
         flex: 1,
@@ -6946,7 +6948,13 @@ items:
       },
       actions: {
         display: "flex",
-        gap: "12px"
+        gap: "12px",
+        position: "sticky",
+        bottom: 0,
+        backgroundColor: "white",
+        padding: "12px",
+        borderTop: "1px solid #e5e7eb",
+        zIndex: 10
       },
       button: {
         display: "inline-flex",
@@ -8911,6 +8919,45 @@ items:
               React.createElement("span", { style: { color: "#065f46" } }, `aos-keys ${toolchainVersions["aos-keys"] || "?"}`),
               React.createElement("span", { style: { color: "#065f46" } }, `aos-prov ${toolchainVersions["aos-prov"] || "?"}`)
             ),
+            unitInfo && (Object.keys(unitInfo.versions || {}).length > 0 ? React.createElement(
+              "div",
+              {
+                style: {
+                  fontSize: "11px",
+                  backgroundColor: "#eff6ff",
+                  border: "1px solid #bfdbfe",
+                  borderRadius: "4px",
+                  padding: "6px 10px",
+                  marginBottom: "8px",
+                  fontFamily: "ui-monospace, Menlo, Consolas, monospace",
+                  display: "flex",
+                  gap: "8px",
+                  alignItems: "baseline",
+                  flexWrap: "wrap"
+                }
+              },
+              React.createElement("span", { style: { color: "#6b7280", flexShrink: 0 } }, "Unit:"),
+              ...Object.entries(unitInfo.versions).map(
+                ([k, v]) => React.createElement("span", { key: k, style: { color: "#1e40af" } }, `${k}=${v}`)
+              ),
+              React.createElement("span", { style: { color: "#6b7280" } }, `(${unitInfo.nodeCount} node(s))`)
+            ) : unitInfo.name && React.createElement(
+              "div",
+              {
+                style: {
+                  fontSize: "11px",
+                  backgroundColor: "#eff6ff",
+                  border: "1px solid #bfdbfe",
+                  borderRadius: "4px",
+                  padding: "6px 10px",
+                  marginBottom: "8px",
+                  fontFamily: "ui-monospace, Menlo, Consolas, monospace"
+                }
+              },
+              React.createElement("span", { style: { color: "#6b7280" } }, "Unit: "),
+              React.createElement("span", { style: { color: "#1e40af" } }, unitInfo.name),
+              React.createElement("span", { style: { color: "#9ca3af" } }, " \u2014 no version fields in API response")
+            )),
             certError && React.createElement("div", { style: { fontSize: "12px", color: "#dc2626", marginBottom: "8px" } }, certError),
             React.createElement(
               "div",
@@ -9097,7 +9144,10 @@ items:
                   onChange: (e) => setAutoSyncServiceUid(e.target.checked),
                   style: { cursor: "pointer" }
                 }),
-                "Auto-sync codename to config.yaml"
+                "Auto-sync codename to config.yaml",
+                React.createElement("span", {
+                  style: { fontSize: "10px", color: "#dc2626", marginLeft: "4px", fontStyle: "italic" }
+                }, "(overwrites YAML identity \u2014 may cause wrong service deployment)")
               ),
               serviceVersions.length > 0 && React.createElement(
                 "div",
@@ -9324,75 +9374,7 @@ items:
                   )
                 )
               );
-            })(),
-            // Unit version info — shown below the unit list when a unit is clicked
-            unitInfo && (Object.keys(unitInfo.versions || {}).length > 0 ?
-              (function() {
-                var parseVerKey = function(k) {
-                  var parts = k.split("-");
-                  var verIdx = parts.findIndex(function(p, i) { return /^\d+\.\d+/.test(p) && i > 0; });
-                  if (verIdx < 0) return { component: k, arch: "", partition: "" };
-                  var afterVer = parts.slice(verIdx + 1);
-                  var archEnd = afterVer.findIndex(function(p, i) { return i > 0 && !/^\d+$/.test(p) && p.indexOf("generic") !== 0; });
-                  var arch = archEnd > 0 ? afterVer.slice(0, archEnd).join("-") : afterVer[0] || "";
-                  var rest = archEnd > 0 ? afterVer.slice(archEnd) : afterVer.slice(1);
-                  return { component: afterVer[0] || "", arch: arch, partition: rest.join("-") };
-                };
-                var entries = Object.entries(unitInfo.versions);
-                var grouped = {};
-                for (var i = 0; i < entries.length; i++) {
-                  var k = entries[i][0], v = entries[i][1];
-                  var comp = parseVerKey(k).component || "other";
-                  if (!grouped[comp]) grouped[comp] = [];
-                  grouped[comp].push([k, v]);
-                }
-                return React.createElement("div", {
-                  style: {
-                    fontSize: "10px", borderTop: "1px solid #e5e7eb",
-                    padding: "6px 10px", fontFamily: "ui-monospace, Menlo, Consolas, monospace",
-                    backgroundColor: "#fafbff"
-                  }
-                },
-                  React.createElement("div", { style: { fontWeight: 600, color: "#4338ca", marginBottom: "3px" } },
-                    unitInfo.name || "Unit",
-                    unitInfo.onlineStatus ? React.createElement("span", {
-                      style: {
-                        marginLeft: "6px", fontSize: "9px", fontWeight: 400,
-                        color: unitInfo.onlineStatus === "online" ? "#059669" : "#dc2626",
-                        backgroundColor: unitInfo.onlineStatus === "online" ? "#d1fae5" : "#fee2e2",
-                        padding: "1px 4px", borderRadius: "3px"
-                      }
-                    }, unitInfo.onlineStatus) : null,
-                    React.createElement("span", { style: { marginLeft: "6px", fontSize: "9px", fontWeight: 400, color: "#6b7280" } },
-                      unitInfo.nodeCount + " node(s)")
-                  ),
-                  Object.entries(grouped).map(function(entry) {
-                    var component = entry[0], pairs = entry[1];
-                    return React.createElement("div", {
-                      key: component,
-                      style: { marginBottom: "1px", display: "flex", gap: "4px", alignItems: "baseline" }
-                    },
-                      React.createElement("span", { style: { color: "#6b7280", minWidth: "60px", flexShrink: 0, fontSize: "9px" } }, component),
-                      pairs.map(function(pair) {
-                        var k = pair[0], v = pair[1];
-                        var label = parseVerKey(k).partition || k;
-                        return React.createElement("span", { key: k, style: { color: "#374151", fontSize: "9px" } }, label + "=" + v);
-                      })
-                    );
-                  })
-                );
-              })()
-            : unitInfo.name && React.createElement("div", {
-                style: {
-                  fontSize: "10px", borderTop: "1px solid #e5e7eb",
-                  padding: "6px 10px", fontFamily: "ui-monospace, Menlo, Consolas, monospace",
-                  backgroundColor: "#fafbff", color: "#6b7280"
-                }
-              },
-                unitInfo.name,
-                React.createElement("span", { style: { color: "#9ca3af", marginLeft: "6px" } }, "— no version fields")
-              )
-            )
+            })()
           )
           // Monitoring + Alerts moved to the Unit Detail overlay (opens on
           // unit-row click) to avoid duplication with the inline cards.
