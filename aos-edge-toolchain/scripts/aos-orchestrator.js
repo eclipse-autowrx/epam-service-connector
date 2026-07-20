@@ -23,7 +23,7 @@ const kitManagerUrl = process.env.KIT_MANAGER_URL || 'https://kit.digitalauto.te
 const instanceId = process.env.INSTANCE_ID || 'AET-ORCHESTRATOR';
 const instanceName = process.env.INSTANCE_NAME || 'AOS Edge Toolchain';
 const signalRelayPort = parseInt(process.env.SIGNAL_RELAY_PORT || '9100');
-const maxWorkers = parseInt(process.env.MAX_WORKERS || '5');
+const maxWorkers = parseInt(process.env.MAX_WORKERS || '10');
 const idleTimeoutMs = parseInt(process.env.IDLE_TIMEOUT_MINUTES || '30') * 60 * 1000;
 const portRangeStart = parseInt(process.env.WORKER_PORT_START || '9101');
 const portRangeEnd = parseInt(process.env.WORKER_PORT_END || '9199');
@@ -367,13 +367,21 @@ async function getOrCreateWorker(userCN, p12Base64) {
 
 function startIdleMonitor() {
   setInterval(async () => {
-    const now = Date.now();
-    for (const [userCN, info] of userMap) {
-      if (info.status !== 'running') continue;
-      if (now - info.lastActivity > idleTimeoutMs) {
-        console.log(`[Orchestrator] Worker for CN="${userCN}" idle for ${Math.round((now - info.lastActivity) / 60000)}min — stopping`);
-        await stopWorker(userCN);
+    try {
+      const now = Date.now();
+      for (const [userCN, info] of userMap) {
+        if (info.status !== 'running') continue;
+        if (now - info.lastActivity > idleTimeoutMs) {
+          try {
+            console.log(`[Orchestrator] Worker for CN="${userCN}" idle for ${Math.round((now - info.lastActivity) / 60000)}min — stopping`);
+            await stopWorker(userCN);
+          } catch (e) {
+            console.error(`[Orchestrator] Failed to stop idle worker for CN="${userCN}":`, e.message);
+          }
+        }
       }
+    } catch (e) {
+      console.error('[Orchestrator] Idle monitor check error:', e.message);
     }
   }, 5 * 60 * 1000); // Check every 5 minutes
   console.log('[Orchestrator] Idle monitor started (check interval: 5 min, timeout:', process.env.IDLE_TIMEOUT_MINUTES || '30', 'min)');
