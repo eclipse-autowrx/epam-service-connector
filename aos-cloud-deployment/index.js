@@ -8655,12 +8655,6 @@ items:
             React.createElement(
               "div",
               { style: { padding: "6px 12px 10px", display: "flex", flexDirection: "column", gap: "4px" } },
-              React.createElement(
-                "div",
-                { style: { fontSize: "11px", color: "#6b7280", display: "flex", justifyContent: "space-between" } },
-                React.createElement("span", null, "Active workers"),
-                React.createElement("span", { style: { fontWeight: 600, color: "#374151" } }, String(dockerInstances.filter((d) => d.online && d.type !== "aos-edge-toolchain").length))
-              ),
               workerInfo && React.createElement(
                 "div",
                 { style: { fontSize: "11px", color: "#6b7280", display: "flex", justifyContent: "space-between" } },
