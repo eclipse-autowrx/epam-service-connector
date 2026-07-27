@@ -1,6 +1,11 @@
+# Copyright (c) 2026 Eclipse Foundation.
 #
-#  Copyright (c) 2018-2026 EPAM Systems Inc.
+# This program and the accompanying materials are made available under the
+# terms of the MIT License which is available at
+# https://opensource.org/licenses/MIT.
 #
+# SPDX-License-Identifier: MIT
+
 from os import PathLike
 
 from helpers import extract_domain_from_certificate, AosCryptoContainer
