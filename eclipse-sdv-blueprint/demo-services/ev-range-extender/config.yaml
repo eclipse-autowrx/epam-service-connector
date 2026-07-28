@@ -1,0 +1,60 @@
+# Copyright (c) 2026 Eclipse Foundation.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License which is available at
+# https://opensource.org/licenses/MIT.
+#
+# SPDX-License-Identifier: MIT
+
+# BMS — EV Range Extender (schemaVersion: 2)
+schemaVersion: 2
+
+publisher:
+  author: "AosCloud team"
+  company: "EPAM Systems"
+
+publish:
+  tlsKey: "aos-user-sp.p12"
+  domain: "aoscloud.io"
+
+items:
+  - identity:
+      type: service
+      codename: demo-ev-range-extender-bms
+      title: Demo EV Range Extender BMS
+
+    sourceFolder: services/bms
+    version: 2.0.8
+
+    images:
+    - archInfo:
+        architecture: any
+      sourceFolder: .
+
+    dependencies:
+    - identity:
+        type: layer
+        codename: kuksa-client
+      versions: '>=6.1.0-bosch.2'
+    - identity:
+        type: layer
+        codename: zenoh-client
+      versions: '>=6.1.0-bosch.2'
+
+    configuration:
+      cmd: python3 -u bms.py
+      workingDir: /
+      instances:
+        minInstances: 1
+        priority: 10
+        #labels:
+        #- secondary
+      quotas:
+        cpuLimit: 1000             # DMIPS
+        ramLimit: 128MiB           # 128 MiB
+        storageLimit: 32MiB        # 32 GiB
+      resources:
+      - name: kuksa
+        mode: rw
+      - name: zenoh
+        mode: rw
