@@ -178,6 +178,7 @@ async def _consumer(
     while True:
         pending = await queue.take()
         updates: dict[str, Datapoint] = {}
+        coerced_values: dict[str, Any] = {}
         log_lines: list[str] = []
         for path, (raw_value, cast, src) in pending.items():
             try:
@@ -190,14 +191,20 @@ async def _consumer(
             if last_sent.get(path) == coerced:
                 continue
             updates[path] = Datapoint(coerced)
-            last_sent[path] = coerced
+            coerced_values[path] = coerced
             log_lines.append(f"OK   {path} = {coerced} (from {src})")
         if updates:
             try:
                 await kuksa.set_current_values(updates)
             except Exception as exc:
                 log(f"ERROR writing {len(updates)} key(s) to Kuksa: {exc}")
+                # Do NOT update last_sent on failure: keeping the prior
+                # value means an identical retry from the dashboard will
+                # still be forwarded, so a transient gRPC error self-heals
+                # on the next sample instead of silently dropping writes.
                 continue
+            # Commit the send-dedup state only after the RPC succeeded.
+            last_sent.update(coerced_values)
         for line in log_lines:
             log(line)
 
