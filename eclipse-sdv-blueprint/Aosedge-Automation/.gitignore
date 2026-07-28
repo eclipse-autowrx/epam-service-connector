@@ -23,3 +23,4 @@ coverage*
 # Aos automation runtime artifacts
 *-unit-config-backup.json
 *.p12
+*.pem

@@ -9,7 +9,6 @@
 import os
 import ssl
 import typing
-from contextlib import contextmanager
 from os import PathLike
 from pathlib import Path
 
@@ -105,9 +104,11 @@ class AosCryptoContainer:
 
     def _create_pem(self, force_recreate: bool = False):
         if os.path.exists(self._pem_filename) and not force_recreate:
+            os.chmod(self._pem_filename, 0o600)
             return
         with open(self._pem_filename, 'wb') as pem_handle:
             pem_handle.write(self._dump_to_pem())
+        os.chmod(self._pem_filename, 0o600)
 
     def _dump_to_pem(self) -> bytes:
         pem_list = [

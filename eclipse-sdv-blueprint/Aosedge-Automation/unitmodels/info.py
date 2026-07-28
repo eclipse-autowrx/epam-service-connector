@@ -18,13 +18,14 @@ from units.info import find_unit_id_by_system_uid
 
 def _version_key(version: str) -> tuple:
     # Prefer semantic version ordering when possible (e.g. 2.0.0 < 10.0.0).
+    # Ensure the key is always comparable even when parts mix digits and text.
     parts = str(version).split('.')
-    key: list[int | str] = []
+    key: list[tuple[int, int | str]] = []
     for part in parts:
         if part.isdigit():
-            key.append(int(part))
+            key.append((0, int(part)))
         else:
-            key.append(part)
+            key.append((1, part))
     return tuple(key)
 
 

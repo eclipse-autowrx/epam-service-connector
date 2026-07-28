@@ -25,8 +25,6 @@ def show_services_list(certificate_path: PathLike | str, search: str = '') -> No
             print("Service list URL: GET ", response.url)
             aos_answer = response.json()
 
-        print(aos_answer)
-
         print(f"Services list (total={aos_answer['total']})")
         print("---------")
         _print_services_list(aos_answer)

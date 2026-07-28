@@ -7,7 +7,7 @@ It is needed to install dependencies from requirements.txt file.
 
 ## Structure
 
- - `certificates` - code for working with PCKS12 certificates and keys
+ - `certificates` - code for working with PKCS12 certificates and keys
  - `services` - code for working with AOS services (list, search, get ID by codename, etc.)
  - `subjects` - code for working with AOS subjects (list, create, search, get ID by label, etc.)
  - `units` - code for working with AOS units (list, search, get ID by system UID, etc.)

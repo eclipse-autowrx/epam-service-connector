@@ -51,7 +51,7 @@ def _normalize_unit_config_payload(payload: dict) -> dict:
 
 
 def _load_unit_config_from_url(template_url: str) -> dict:
-    with urlopen(template_url) as response_handle:
+    with urlopen(template_url, timeout=10) as response_handle:
         raw_content = response_handle.read().decode('utf-8')
 
     payload = json.loads(raw_content)
@@ -98,7 +98,7 @@ def update_target_unit_config(
                 f"   payload: {json.dumps(json_data)}"
             )
             response.raise_for_status()
-            answer = response.json()
+            answer = response.json() if response.content else {}
 
         print(f"Successfully updated unit config for system UID '{system_uid}'.")
         print(f" - Unit ID:       {unit_id}")
@@ -162,7 +162,7 @@ def update_target_unit_config_from_url(
                 f"   payload: {json.dumps(json_data)}"
             )
             response.raise_for_status()
-            answer = response.json()
+            answer = response.json() if response.content else {}
 
         print(f"Successfully applied template config for system UID '{system_uid}'.")
         print(f" - Unit ID:       {unit_id}")
@@ -217,7 +217,7 @@ def update_target_unit_config_from_file(
                 f"   payload: {json.dumps(json_data)}"
             )
             response.raise_for_status()
-            answer = response.json()
+            answer = response.json() if response.content else {}
 
         print(f"Successfully applied file-based config for system UID '{system_uid}'.")
         print(f" - Unit ID:       {unit_id}")

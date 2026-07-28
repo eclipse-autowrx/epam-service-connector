@@ -43,7 +43,7 @@ def show_user_info(certificate_path: PathLike) -> None:
         if user_info.get('oem'):
             print(f" - User OEM: {user_info['oem']['id']} - '{user_info['oem']['title']}'")
             for sp in user_info['oem']['service_providers']:
-                print(f"   - SP: {sp}'")
+                print(f"   - SP: {sp}")
         if user_info.get('service_provider'):
             print(f" - User SP: {user_info['service_provider']['id']} - '{user_info['service_provider']['title']}'")
 
