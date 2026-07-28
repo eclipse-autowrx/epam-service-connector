@@ -13,11 +13,11 @@ dev_utils/
 .DS_Store
 *_local.py
 __pycache__
-cloud/db_backs/**.sql
-cloud/db_backs/**.dump
+cloud/db_backs/**/*.sql
+cloud/db_backs/**/*.dump
 cloud/.claude/
 .tox/
-**/vault/**.json
+**/vault/**/*.json
 coverage*
 
 # Aos automation runtime artifacts
