@@ -36,7 +36,7 @@ BORKER_IP = os.getenv('KUKSA_BROKER_HOST', 'kuksa')
 BROKER_PORT = int(os.getenv('KUKSA_BROKER_PORT', '55555'))
 
 DEFAULT_KIT_SERVER = 'https://kit.digitalauto.tech'
-DEFAULT_RUNTIME_NAME = 'AOS-Boschh'
+DEFAULT_RUNTIME_NAME = 'ev-range-extender'
 DEFAULT_RUNTIME_PREFIX = 'Runtime-'
 
 TIME_TO_KEEP_SUBSCRIBER_ALIVE = 60
