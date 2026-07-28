@@ -1,0 +1,52 @@
+schemaVersion: 2
+
+publisher:
+  author: AosCloud team
+  company: Bosch, EPAM Systems
+
+publish:
+  tlsKey: aos-user-sp.p12
+
+items:
+
+- identity:
+    type: service
+    codename: kuksa-syncer
+    title: Kuksa Syncer
+
+  sourceFolder: src/kuksa-syncer
+  version: 1.0.4
+
+  images:
+  - archInfo:
+      architecture: any
+    sourceFolder: .
+
+  configuration:
+    cmd: python3 -u syncer.py
+    workingDir: /
+    instances:
+      minInstances: 1
+      priority: 10
+    quotas:
+      cpuLimit: 1000             # DMIPS
+      ramLimit: 128MiB           # 128 MiB
+      storageLimit: 16MiB        # 16 MiB
+    resources:
+    - name: kuksa
+      mode: rw
+#    - name: zenoh
+#      mode: rw
+  dependencies:
+  - identity:
+      type: layer
+      codename: kuksa-client
+    versions: ">=6.1.1-bosch.1"
+  - identity:
+      type: layer
+      codename: pylibs
+    versions: "6.1.1-bosch.1"
+#  - identity:
+#      type: layer
+#      codename: zenoh-python
+#    versions: ">=6.1.1-bosch.1"
