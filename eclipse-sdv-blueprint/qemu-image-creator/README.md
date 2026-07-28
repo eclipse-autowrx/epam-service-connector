@@ -1,3 +1,10 @@
+Copyright (c) 2026 Eclipse Foundation.
+
+This program and the accompanying materials are made available under the
+terms of the MIT License which is available at
+[https://opensource.org/licenses/MIT.](https://opensource.org/licenses/MIT.)
+
+SPDX-License-Identifier: MIT
 # QEMU Multi-VM SDV Lab
 
 This directory builds and launches the QEMU VM environment for the EV Range

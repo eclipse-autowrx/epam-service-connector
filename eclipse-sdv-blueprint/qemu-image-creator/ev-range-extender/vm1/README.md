@@ -1,3 +1,10 @@
+Copyright (c) 2026 Eclipse Foundation.
+
+This program and the accompanying materials are made available under the
+terms of the MIT License which is available at
+[https://opensource.org/licenses/MIT.](https://opensource.org/licenses/MIT.)
+
+SPDX-License-Identifier: MIT
 # EV Range Extender VM1 Services
 
 VM1 is the HPC side of the QEMU setup. It runs the SDV Runtime container, the

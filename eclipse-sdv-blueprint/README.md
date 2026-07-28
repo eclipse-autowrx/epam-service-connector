@@ -1,3 +1,10 @@
+Copyright (c) 2026 Eclipse Foundation.
+
+This program and the accompanying materials are made available under the
+terms of the MIT License which is available at
+[https://opensource.org/licenses/MIT.](https://opensource.org/licenses/MIT.)
+
+SPDX-License-Identifier: MIT
 # Eclipse SDV Blueprint — Hybrid Cloud–Edge Application Lifecycle Management
 
 This blueprint demonstrates an end-to-end workflow for developing, validating and orchestrating Mixed-Critical Software-Defined Vehicle (SDV) applications across cloud and HPC edge device.
