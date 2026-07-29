@@ -1,3 +1,10 @@
+# Copyright (c) 2026 Eclipse Foundation.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License which is available at
+# [https://opensource.org/licenses/MIT.](https://opensource.org/licenses/MIT.)
+#
+# SPDX-License-Identifier: MIT
 schemaVersion: 2
 
 publisher:
@@ -41,12 +48,12 @@ items:
   - identity:
       type: layer
       codename: kuksa-client
-    versions: ">=6.1.0-bosch.2"
+    versions: ">=6.1.1-bosch.2"
   - identity:
       type: layer
       codename: pylibs
-    versions: "6.1.0-bosch.2"
+    versions: "6.1.1-bosch.2"
 #  - identity:
 #      type: layer
 #      codename: zenoh-python
-#    versions: ">=6.1.0-bosch.2"
+#    versions: ">=6.1.1-bosch.2"

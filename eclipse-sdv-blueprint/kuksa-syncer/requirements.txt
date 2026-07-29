@@ -5,5 +5,5 @@
 # [https://opensource.org/licenses/MIT.](https://opensource.org/licenses/MIT.)
 #
 # SPDX-License-Identifier: MIT
-PyYAML>=6.0
-eclipse-zenoh>=1.0.0
+python-socketio
+kuksa_client==0.4.3
