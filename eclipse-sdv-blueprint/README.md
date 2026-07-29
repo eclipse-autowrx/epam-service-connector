@@ -123,13 +123,13 @@ The setup is organized into sub-sections that guide the VM setup and deployment 
 
 This step sets up two qemu VM instances where the SDV application and its surrounding components are run.
 
-- Download the latest AOS VM image package of bosch and provisioning script from the AOS Edge meta-aos-vm release page: [meta-aos-vm releases](https://github.com/aosedge/meta-aos-vm/releases/)
+- Download the latest AOS VM image package of bosch and provisioning script from the AOS Edge meta-aos-vm release page: [meta-aos-vm releases](https://github.com/aosedge/meta-aos-vm/releases/)VM images named Version 6.x.x-bosch.x (download latest release)
 
 - Extract the image archive and start the QEMU-based VMs from the same directory:
 
 ```bash
 source ~/.aos/venv/bin/activate
-tar -xvf aos-vm-image-genericx86-64-6.1.1-bosch.1.tar.xz
+tar -xvf aos-vm-image-genericx86-64-6.1.1-bosch.2.tar.xz
 sudo ./aos_vm.sh run -f .
 ```
 - If the AOS certificates are unavailable or the setup has not been completed, please follow the steps on[Aos QuickStart](https://docs.aosedge.tech/docs/quick-start/set-up/)
@@ -157,11 +157,11 @@ If Unit shown offline on AOS Dashboard follow the [Debug Steps](#debug-steps-for
 
 This step installs the core components e.g. `kuksa-client`, `zenoh`, and `pylibs`
 
-- Download the AOS VM layers package from the same release page: [aos-vm layers package](https://github.com/aosedge/meta-aos-vm/releases/download/v6.1.1-bosch.1/aos-vm-layers-genericx86-64-6.1.1-bosch.1.tar.gz)
+- Download the AOS VM layers package from the same release page: [aos-vm layers package](https://github.com/aosedge/meta-aos-vm/releases/tag/v6.1.1-bosch.2)
 - Extract the archive and publish the layers using the signing flow:
 
 ```bash
-tar -xvf aos-vm-layers-genericx86-64-6.1.1-bosch.1.tar.gz
+tar -xvf aos-vm-layers-genericx86-64-6.1.1-bosch.2.tar.gz
 cd layers
 aos-signer go
 ```
@@ -173,12 +173,11 @@ aos-signer go
 
 This step deploys the components which produces the data required for the SDV application.
 
-- Clone or access the demo-services repository from [demo-services](https://github.com/aosedge/demo-services.git).
 - The demo-services repository contains the deployment bundles for the EV Range Extender use case: `bms`, `range-ai`, `seat-ecu`, and `hvac`.
 - In the VM, navigate to the EV Range Extender service directory and package it for deployment:
 
 ```bash
-cd /path/to/demo-services/ev-range-extender
+cd epam-service-connector/eclipse-sdv-blueprint/demo-services/ev-range-extender
 aos-signer go
 ```
 - Confirm that these application are then downloaded by the target VM after the cloud-side deployment is configured.
@@ -191,7 +190,7 @@ aos-signer go
 The `kuksa-syncer` service is now part of this repository. Use the local service directory from this workspace and package it for Aos deployment from there.
 
 ```bash
-cd /path/to/epam-service-connector-fork/kuksa-syncer
+cd epam-service-connector/eclipse-sdv-blueprint/kuksa-syncer
 aos-signer go
 ```
 
@@ -199,7 +198,46 @@ aos-signer go
 - Verify the deployment result in Aos Dashboard → SOTA/FOTA → Deployment Bundles.
 - If the deployment does not appear or is rejected, update the service version in `kuksa-syncer/config.yaml` and re-run `aos-signer go`.
 
-##### Section 2 — AOSEdge setup
+##### Section 2 — Build and deploy the SDV application
+
+- Sign in to the digital.auto Playground at [playground.digital.auto](https://playground.digital.auto).
+- Open the EV Range Extender application from the playground at [this link](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/view).
+- In the AOS Cloud Deployment view, first choose the C++ option, then select the EV Range Extender application from the dropdown menu, upload the required certificate, and click Build and Deploy.
+
+##### Section 3 — AOSEdge setup
+
+**Automated AOS Edge setup**
+
+1. **Change into the automation directory**
+   ```bash
+   cd eclipse-sdv-blueprint/Aosedge-Automation
+   ```
+
+2. **Create and activate the Python virtual environment**
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
+
+3. **Install the required Python dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Run the automation script**
+   ```bash
+   python aos-automation.py
+   ```
+
+This script performs the end-to-end AOS Edge setup, including unit config updates, unit set creation, subject creation, and service assignment. It will prompt for the target unit system ID and then update the unit configuration automatically, removing the need for those manual steps in the AOS Cloud dashboard.
+
+After deployment, log in to the units via SSH and verify that the services are running:
+
+```bash
+crun --root=/run/crun list
+```
+
+***Manual steps for AOS-Edge**
 
 **Configure the OEM target systems**
 - Open the AOS documentation portal at [AOS Edge Quick Start](https://docs.aosedge.tech/docs/quick-start/) and install the required certificates in the environment where the deployment tools are used.
@@ -217,28 +255,10 @@ aos-signer go
 
   - Check application deployment on both VMs using
 
+login to units using ssh and verify the serivces deployed or not using 
+
 ```bash
 crun --root=/run/crun list
-```
-
-**Approve and bind the service**
-
-- In AosEdge Dashboard → SOTA/FOTA → Verification Batches, open the package and approve it for deployment.
-- In AosEdge Dashboard → SOTA/FOTA → Deployment Bundles, confirm that the package is validated and available.
-- Observe the deployment process with `journalctl -f` on the VM and confirm that the service starts successfully.
-
-##### Section 3 — Build and deploy the SDV application
-
-- Sign in to the digital.auto Playground at [playground.digital.auto](https://playground.digital.auto).
-- Open the EV Range Extender application from the playground at [this link](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/view).
-- In the AOS Cloud Deployment view, first choose the C++ option, then select the EV Range Extender application from the dropdown menu, upload the required certificate, and click Build and Deploy.
-- Complete the post-deployment validation steps to ensure the application layer is available and the service is bound to the target unit.
-- Add the EV-range-extender service to Subject (aos-bosch).
-- Monitor the runtime logs on VM1 with:
-
-```bash
-ssh root@10.0.0.100
-journalctl -f | grep "range-ext"
 ```
 
 ### Steps to demo
