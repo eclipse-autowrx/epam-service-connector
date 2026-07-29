@@ -128,7 +128,6 @@ This step sets up two qemu VM instances where the SDV application and its surrou
 - Extract the image archive and start the QEMU-based VMs from the same directory:
 
 ```bash
-source ~/.aos/venv/bin/activate
 tar -xvf aos-vm-image-genericx86-64-6.1.1-bosch.2.tar.xz
 sudo ./aos_vm.sh run -f .
 ```
@@ -150,6 +149,7 @@ journalctl -f
 - Provision the VM1 to AOS Cloud with:
 
 ```bash
+source ~/.aos/venv/bin/activate
 aos-prov provision -u 10.0.0.100
 ```
 If Unit shown offline on AOS Dashboard follow the [Debug Steps](#debug-steps-for-network-on-vms)
@@ -161,6 +161,7 @@ This step installs the core components e.g. `kuksa-client`, `zenoh`, and `pylibs
 - Extract the archive and publish the layers using the signing flow:
 
 ```bash
+source ~/.aos/venv/bin/activate
 tar -xvf aos-vm-layers-genericx86-64-6.1.1-bosch.2.tar.gz
 cd layers
 aos-signer go
@@ -177,6 +178,7 @@ This step deploys the components which produces the data required for the SDV ap
 - In the VM, navigate to the EV Range Extender service directory and package it for deployment:
 
 ```bash
+source ~/.aos/venv/bin/activate
 cd epam-service-connector/eclipse-sdv-blueprint/demo-services/ev-range-extender
 aos-signer go
 ```
@@ -190,6 +192,7 @@ aos-signer go
 The `kuksa-syncer` service is now part of this repository. Use the local service directory from this workspace and package it for Aos deployment from there.
 
 ```bash
+source ~/.aos/venv/bin/activate
 cd epam-service-connector/eclipse-sdv-blueprint/kuksa-syncer
 aos-signer go
 ```
@@ -202,6 +205,7 @@ aos-signer go
 
 - Sign in to the digital.auto Playground at [playground.digital.auto](https://playground.digital.auto).
 - Open the EV Range Extender application from the playground at [this link](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/view).
+- Upload sp.12 on the aos-deployment plugin.
 - In the AOS Cloud Deployment view, first choose the C++ option, then select the EV Range Extender application from the dropdown menu, upload the required certificate, and click Build and Deploy.
 
 ##### Section 3 — AOSEdge setup
