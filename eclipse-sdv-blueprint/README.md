@@ -1,3 +1,4 @@
+
 # Eclipse SDV Blueprint — Hybrid Cloud–Edge Application Lifecycle Management
 
 This blueprint demonstrates an end-to-end workflow for developing, validating and orchestrating Mixed-Critical Software-Defined Vehicle (SDV) applications across cloud and HPC edge device.

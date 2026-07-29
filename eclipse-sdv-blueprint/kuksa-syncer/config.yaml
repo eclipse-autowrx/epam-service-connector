@@ -48,12 +48,12 @@ items:
   - identity:
       type: layer
       codename: kuksa-client
-    versions: ">=6.1.1-bosch.1"
+    versions: ">=6.1.1-bosch.2"
   - identity:
       type: layer
       codename: pylibs
-    versions: "6.1.1-bosch.1"
+    versions: "6.1.1-bosch.2"
 #  - identity:
 #      type: layer
 #      codename: zenoh-python
-#    versions: ">=6.1.1-bosch.1"
+#    versions: ">=6.1.1-bosch.2"
