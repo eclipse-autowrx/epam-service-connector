@@ -268,8 +268,10 @@ crun --root=/run/crun list
 ### Steps to demo
 1. Complete the "SDV-Application-Compilation-and-Configuration" steps
 1. Start the hardware simulator by running `./hardware-sim/pytk_hwsim.py` from the `eclipse-sdv-blueprint` directory (see `hardware-sim/README.md`).
+1. Select ev-range-extender runtime on playground .If not added please add the runtime ont he playgound terminal.
+
 1. Once the hardware simulator is running, launch the Playground application (SDV application).
-1. Click the Start button in the hardware simulator to begin battery discharge simulation.
+1. Click the Start button in the hardware simulator to start simulating driving vehicle.
 
 ### Observe the threshold-based behaviour:
 1. When the battery level reaches 50%, the HVAC fan is automatically turned off.
