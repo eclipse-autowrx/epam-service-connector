@@ -2,10 +2,9 @@
 # Hardware Simulator
 
 `pytk_dashboard.py` is the host-side Tk dashboard for driving the EV Range
-Extender VM services. It publishes battery, HVAC, and seat inputs over direct
-TCP connections, and it listens for reverse status messages from the VM2 ECUs
-on those same connections so the UI can show whether HVAC and seat actions are
-active.
+Extender VM services. It publishes battery, HVAC, and seat inputs over Eclipse
+Zenoh, and it listens for reverse status messages from the VM2 ECUs so the UI
+can show whether HVAC and seat actions are active.
 
 This folder is only the host control surface. VM provisioning, QEMU networking,
 and systemd service deployment are documented in
@@ -15,7 +14,7 @@ and systemd service deployment are documented in
 
 ## What the dashboard controls
 
-| UI section | Control | Signal key | Receiver |
+| UI section | Control | Zenoh key | Receiver |
 |---|---|---|---|
 | Battery | Battery Voltage | `sim/battery/voltage` | VM1 `bms.py` on `tcp/7460` |
 | Battery | Battery Current | `sim/battery/current` | VM1 `bms.py` on `tcp/7460` |
@@ -24,11 +23,10 @@ and systemd service deployment are documented in
 | Cabin Seat | Seat Heating | `sim/cabin/seat/heating` | VM2 `seat_ecu.py` on `tcp/7462` |
 | Cabin Seat | Seat Cooling | `sim/cabin/seat/hc` | VM2 `seat_ecu.py` on `tcp/7462` |
 
-Each publish payload is newline-delimited JSON:
+Each publish payload is JSON:
 
 ```json
 {
-  "key": "sim/cabin/temp",
   "value": 50,
   "source": "host-name",
   "ts": "2026-05-21T...Z"
@@ -44,7 +42,7 @@ turns the other off and publishes the matching off value.
 
 The dashboard also subscribes to status channels from VM2:
 
-| Indicator | Status topic | Source |
+| Indicator | Zenoh key | Source |
 |---|---|---|
 | HVAC Fan | `dash/status/hvac` | `hvac_ecu.py` |
 | Seat Heating / Cooling | `dash/status/seat` | `seat_ecu.py` |
@@ -74,7 +72,7 @@ Install the host dependencies, then run the dashboard from this directory:
 cd path/to/eclipse-sdv-blueprint/hardware-sim
 ./setup.sh
 python3 -m pip install -r requirements.txt
-python3 pytk_dashboard.py
+python3 pytk_hwsim.py
 ```
 
 `setup.sh` installs the Tk runtime package required by the dashboard UI:
@@ -146,5 +144,5 @@ If Python cannot import Tk:
 sudo apt install -y python3-tk
 ```
 
-If Python dependencies are missing, install dashboard requirements or activate
+If Python cannot import Zenoh, install the dashboard requirements or activate
 the virtual environment used for the QEMU setup.

@@ -22,6 +22,7 @@ items:
     title: Kuksa Syncer
 
   sourceFolder: src/kuksa-syncer
+  #try changing the version to if deployement fails
   version: 1.0.4
 
   images:
