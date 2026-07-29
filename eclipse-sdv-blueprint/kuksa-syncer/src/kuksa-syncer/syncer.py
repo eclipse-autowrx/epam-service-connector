@@ -36,7 +36,7 @@ BORKER_IP = os.getenv('KUKSA_BROKER_HOST', 'kuksa')
 BROKER_PORT = int(os.getenv('KUKSA_BROKER_PORT', '55555'))
 
 DEFAULT_KIT_SERVER = 'https://kit.digitalauto.tech'
-DEFAULT_RUNTIME_NAME = 'AOS-Bosch'
+DEFAULT_RUNTIME_NAME = 'ev-range-extender'
 DEFAULT_RUNTIME_PREFIX = 'Runtime-'
 
 TIME_TO_KEEP_SUBSCRIBER_ALIVE = 60
@@ -89,22 +89,51 @@ if _static_aliases_env:
         print("[SYNCER] Failed to parse KUKSA_PATH_ALIASES: " + str(_e), flush=True)
 
 
+# Legacy renaming rules. Each entry is (needle, replacement) applied via
+# str.replace. Rules whose needle is not in the path are skipped. All
+# non-empty combinations of the applicable rules are generated as candidates
+# so a single path can be rewritten in more than one dimension at once (e.g.
+# both the seat-position rename *and* the leaf rename below).
+#
+# Known renamings covered:
+#   DriverSide         -> Pos1         (VSS >=4.3 seat position rename)
+#   PassengerSide      -> Pos2
+#   Middle             -> Pos2         (Row2 middle seat in some specs)
+#   .HeatingCooling    -> .Heating     (VSS 4.x renamed the seat heating leaf
+#                                       from Heating to HeatingCooling; older
+#                                       databrokers still expose Heating)
+#
+# The leaf rename is anchored with a leading dot so it only matches the last
+# path segment, not a hypothetical child like HeatingCoolingLevel.
+_LEGACY_SUBSTITUTIONS = (
+    (".DriverSide.", ".Pos1."),
+    (".PassengerSide.", ".Pos2."),
+    (".Middle.", ".Pos2."),
+    (".HeatingCooling", ".Heating"),
+)
+
+
 def _generate_path_candidates(path):
     """Yield legacy-style candidates for a dashboard-facing VSS path.
 
-    Currently handles the VSS >=4.3 seat-side renaming
-        DriverSide   -> Pos1
-        PassengerSide-> Pos2
-    Extend here if other renamings appear.
+    Applies every non-empty subset of the applicable substitutions from
+    _LEGACY_SUBSTITUTIONS so that combined renames (e.g. DriverSide+leaf) are
+    also tried. Extend _LEGACY_SUBSTITUTIONS to add more renamings.
     """
-    if ".DriverSide." in path:
-        yield path.replace(".DriverSide.", ".Pos1.")
-    if ".PassengerSide." in path:
-        yield path.replace(".PassengerSide.", ".Pos2.")
-    # Row2 sometimes uses Middle in newer specs but Pos2 in older; keep here
-    # in case the databroker exposes only Pos2.
-    if ".Middle." in path:
-        yield path.replace(".Middle.", ".Pos2.")
+    applicable = [(old, new) for old, new in _LEGACY_SUBSTITUTIONS if old in path]
+    if not applicable:
+        return
+    n = len(applicable)
+    seen = set()
+    for mask in range(1, 1 << n):
+        candidate = path
+        for i in range(n):
+            if mask & (1 << i):
+                old, new = applicable[i]
+                candidate = candidate.replace(old, new)
+        if candidate != path and candidate not in seen:
+            seen.add(candidate)
+            yield candidate
 
 
 def _resolve_databroker_path(kclient, dashboard_path):
