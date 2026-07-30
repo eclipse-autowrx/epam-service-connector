@@ -46,11 +46,11 @@ items:
   - identity:
       type: layer
       codename: kuksa-client
-    versions: '>=6.1.1-bosch.1'
+    versions: '>=6.1.1-bosch.2'
   - identity:
       type: layer
       codename: zenoh-client
-    versions: '>=6.1.1-bosch.1'
+    versions: '>=6.1.1-bosch.2'
 
   # Hvac ECU
 - identity:
@@ -87,11 +87,11 @@ items:
   - identity:
       type: layer
       codename: kuksa-client
-    versions: '>=6.1.1-bosch.1'
+    versions: '>=6.1.1-bosch.2'
   - identity:
       type: layer
       codename: zenoh-client
-    versions: '>=6.1.1-bosch.1'
+    versions: '>=6.1.1-bosch.2'
 
   ############################
   # bms
@@ -129,11 +129,11 @@ items:
   - identity:
       type: layer
       codename: kuksa-client
-    versions: '>=6.1.1-bosch.1'
+    versions: '>=6.1.1-bosch.2'
   - identity:
       type: layer
       codename: zenoh-client
-    versions: '>=6.1.1-bosch.1'
+    versions: '>=6.1.1-bosch.2'
 
   ############################
   # range-ai
@@ -169,4 +169,4 @@ items:
   - identity:
       type: layer
       codename: kuksa-client
-    versions: '>=6.1.1-bosch.1'
+    versions: '>=6.1.1-bosch.2'
