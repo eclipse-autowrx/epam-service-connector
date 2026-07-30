@@ -69,7 +69,10 @@ The drive loop does not run inside the VMs; it is just a host-side publisher.
 Install the host dependencies, then run the dashboard from this directory:
 
 ```bash
-cd path/to/eclipse-sdv-blueprint/hardware-sim
+cd eclipse-sdv-blueprint/hardware-sim
+python3 -m venv venv
+source venv/bin/activate
+chmod +x setup.sh
 ./setup.sh
 python3 -m pip install -r requirements.txt
 python3 pytk_hwsim.py
@@ -81,68 +84,3 @@ python3 pytk_hwsim.py
 sudo apt install -y python3-tk
 ```
 
-If you are already using the virtual environment from `qemu-image-creator`, you
-can reuse it:
-
-```bash
-cd path/to/eclipse-sdv-blueprint/qemu-image-creator
-source .venv/bin/activate
-cd ../hardware-sim
-python3 pytk_dashboard.py
-```
-
-Defaults match the QEMU VM setup:
-
-| Target | Default |
-|---|---|
-| VM1 IP | `192.168.100.10` |
-| VM2 IP | `192.168.100.11` |
-| BMS port | `7460` |
-| HVAC port | `7461` |
-| Seat port | `7462` |
-
-
----
-
-## Verify
-
-Tail the VM service logs while moving controls:
-
-```bash
-ssh ubuntu@192.168.100.10 'tail -f /tmp/ev-range-bms.log'
-ssh ubuntu@192.168.100.11 'tail -f /tmp/ev-range-hvac.log'
-ssh ubuntu@192.168.100.11 'tail -f /tmp/ev-range-seat.log'
-```
-
-Tail the range output on VM1:
-
-```bash
-ssh ubuntu@192.168.100.10 'tail -f /tmp/ev-range-range-ai.log'
-```
-
-The dashboard itself logs to:
-
-```bash
-/tmp/pytk_dashboard.log
-```
-
----
-
-## Troubleshooting
-
-If the UI opens but VM logs do not change, check that the QEMU VMs are running
-and that the ECU services are active:
-
-```bash
-ssh ubuntu@192.168.100.10 'systemctl is-active ev-range-bms'
-ssh ubuntu@192.168.100.11 'systemctl is-active ev-range-hvac ev-range-seat'
-```
-
-If Python cannot import Tk:
-
-```bash
-sudo apt install -y python3-tk
-```
-
-If Python cannot import Zenoh, install the dashboard requirements or activate
-the virtual environment used for the QEMU setup.

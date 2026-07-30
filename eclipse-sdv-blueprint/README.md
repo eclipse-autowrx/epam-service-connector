@@ -113,9 +113,9 @@ tbd
 
 The setup is organized into sub-sections that guide the VM setup and deployment flow in a practical sequence.
 
-- [Section 1 — VM setup and deployment flow](#chapter-1--vm-setup-and-deployment-flow)
-- [Section 2 — AOSEdge setup](#chapter-2--oem-and-service-deployment-setup-on-aos-edge)
-- [Section 3 — Build and deploy the SDV application](#chapter-3--build-and-deploy-the-sdv-application)
+- [Section 1 — VM setup and deployment flow](#section-1--vm-setup-and-deployment-flow)
+- [Section 2 — Build and deploy the SDV application](#section-2--build-and-deploy-the-sdv-application)
+- [Section 3 — AOSEdge setup](#section-3--aosedge-setup)
 
 
 ##### Section 1 — VM setup and deployment flow
@@ -147,12 +147,15 @@ ip neigh
 ```bash
 journalctl -f
 ```
-- Provision the VM1 to AOS Cloud with:
+- Provision the VM1 to AOS Cloud with on Host:
 
 ```bash
 source ~/.aos/venv/bin/activate
 aos-prov provision -u 10.0.0.100
 ```
+
+As an alternative to using the release images, you can build the VM image yourself by following [meta-aos-vm](https://github.com/aosedge/meta-aos-vm) on the `demo-bosch` branch.
+
 If Unit shown offline on AOS Dashboard follow the [Debug Steps](#debug-steps-for-network-on-vms)
 **Install the core components**
 
@@ -198,7 +201,7 @@ cd epam-service-connector/eclipse-sdv-blueprint/kuksa-syncer
 aos-signer go
 ```
 
-- Add the generated `kuksa-syncer` service to the created subject (`aos-bosch`) in the AOS dashboard.
+- Add the generated `kuksa-syncer` service to the created subject (`ev-range-extender-subject`) in the AOS dashboard.
 - Verify the deployment result in Aos Dashboard → SOTA/FOTA → Deployment Bundles.
 - If the deployment does not appear or is rejected, update the service version in `kuksa-syncer/config.yaml` and re-run `aos-signer go`.
 
@@ -206,7 +209,7 @@ aos-signer go
 
 - Sign in to the digital.auto Playground at [playground.digital.auto](https://playground.digital.auto).
 - Open the EV Range Extender application from the playground at [this link](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/view).
-- Upload sp.12 on the aos-deployment plugin.
+- Upload sp.12 on the aos-deployment plugin(cetificates will be available in .aos/security).
 - In the AOS Cloud Deployment view, first choose the C++ option, then select the EV Range Extender application from the dropdown menu, upload the required certificate, and click Build and Deploy.
 
 ##### Section 3 — AOSEdge setup
@@ -242,19 +245,19 @@ After deployment, log in to the units via SSH and verify that the services are r
 crun --root=/run/crun list
 ```
 
-***Manual steps for AOS-Edge**
+**Manual steps for AOS-Edge**
 
 **Configure the OEM target systems**
 - Open the AOS documentation portal at [AOS Edge Quick Start](https://docs.aosedge.tech/docs/quick-start/) and install the required certificates in the environment where the deployment tools are used.
 - After this, create the required service and subject in the AOS dashboard so the deployment can be bound to the target VM which is followed on the aosedge quick start guide id not done .
 - Sign in to the AOS Service Provider or OEM portal at [AOS Cloud](https://api.aoscloud.io/account/start) and import the required `.p12` certificate, such as `aos-user-oem.p12` or `aos-user-sp.p12`.
 - Download the unit configuration template from [unitconfig.json](https://github.com/aosedge/meta-aos-vm/blob/demo_bosch/misc/unitconfig.json) and import it in AosEdge Dashboard →Target System →edit →UNIT CONFIG
-- Create the unit set `Unitset_Bosch` and assign it to the provisioned VM so verification does not block the demo deployment.
-  - Configure: Title `Unitset_Bosch`, Description `Optional`, Update Strategy `Minimize Unit Restart`, and enable `Is Verification Set`.
-  - Save the unit set, then open the target VM in AosEdge Dashboard → Units, select its details, and add `Unitset_Bosch` under Manage Unit Sets.
-  - Create the subject(aos-bosch) under Subjects on OEM, attach the target VM, and bind the service to it.
+- Create the unit set `ev-range-extender-unitset` and assign it to the provisioned VM so verification does not block the demo deployment.
+  - Configure: Title `ev-range-extender-unitset`, Description `Optional`, Update Strategy `Minimize Unit Restart`, and enable `Is Verification Set`.
+  - Save the unit set, then open the target VM in AosEdge Dashboard → Units, select its details, and add `ev-range-extender-unitset` under Manage Unit Sets.
+  - Create the subject `ev-range-extender-subject` under Subjects on OEM, attach the target VM, and bind the service to it.
   - add the respective unit to subject.
-  - On service add the services that are deployed `Range-Ai`,`Seat ECU`,`HVAC ECU`and `BMS`.
+  - On service add the services that are deployed `Range-Ai`,`Seat ECU`,`HVAC ECU`,`kuksa-syncer`,`ev-range-application`and `BMS`.
 
   - After creating the required unit_set and subject in the AOS dashboard, deployment can be bound to the target VM and services will be deployed on respective VM's.
 
@@ -268,7 +271,7 @@ crun --root=/run/crun list
 
 ### Steps to demo
 1. Complete the "SDV-Application-Compilation-and-Configuration" steps
-1. Start the hardware simulator by running `./hardware-sim/pytk_hwsim.py` from the `eclipse-sdv-blueprint` directory (see `hardware-sim/README.md`).
+1. Start the hardware simulator by running `./hardware-sim/pytk_hwsim.py` from the `eclipse-sdv-blueprint` directory (see [hardware-sim/README.md](hardware-sim/README.md)).
 1. Select ev-range-extender runtime on playground .If not added please add the runtime ont he playgound terminal.
 
 1. Once the hardware simulator is running, launch the Playground application (SDV application).
