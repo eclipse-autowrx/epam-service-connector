@@ -153,6 +153,9 @@ journalctl -f
 source ~/.aos/venv/bin/activate
 aos-prov provision -u 10.0.0.100
 ```
+
+As an alternative to using the release images, you can build the VM image yourself by following [meta-aos-vm](https://github.com/aosedge/meta-aos-vm) on the `demo-bosch` branch.
+
 If Unit shown offline on AOS Dashboard follow the [Debug Steps](#debug-steps-for-network-on-vms)
 **Install the core components**
 
