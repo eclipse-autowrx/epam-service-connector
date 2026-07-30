@@ -4084,13 +4084,12 @@ items:
 #include <cstdlib>
 #include <cmath>
 #include <atomic>
-
 #include <grpcpp/grpcpp.h>
 #include "kuksa/val/v1/val.grpc.pb.h"
 #include "kuksa/val/v1/types.pb.h"
-
-#define VERSION "1.0.0"
-#define SOC_THRESHOLD 20.0f
+#define VERSION "1.0.7"
+#define SOC_THRESHOLD 30.0f
+#define SOC_THRESHOLD_1 50.0f
 #define NORMAL_EFFICIENCY 5.5f
 #define DEGRADED_EFFICIENCY 4.0f
 
@@ -4101,15 +4100,12 @@ static float get_signal(kuksa::val::v1::VAL::Stub* stub,
     entry->set_path(path);
     entry->set_view(kuksa::val::v1::VIEW_CURRENT_VALUE);
     entry->add_fields(kuksa::val::v1::FIELD_VALUE);
-
     kuksa::val::v1::GetResponse response;
     grpc::ClientContext context;
     context.set_deadline(std::chrono::system_clock::now() +
                          std::chrono::seconds(3));
-
     auto status = stub->Get(&context, request, &response);
     if (!status.ok() || response.entries_size() == 0) return -1.0f;
-
     const auto& dp = response.entries(0).value();
     switch (dp.value_case()) {
         case kuksa::val::v1::Datapoint::kFloat:  return dp.float_();
@@ -4127,28 +4123,40 @@ static bool set_signal(kuksa::val::v1::VAL::Stub* stub,
     update->mutable_entry()->set_path(path);
     update->mutable_entry()->mutable_value()->set_float_(value);
     update->add_fields(kuksa::val::v1::FIELD_VALUE);
-
     kuksa::val::v1::SetResponse response;
     grpc::ClientContext context;
     context.set_deadline(std::chrono::system_clock::now() +
                          std::chrono::seconds(3));
+    return stub->Set(&context, request, &response).ok();
+}
 
+static bool set_acct_signal(kuksa::val::v1::VAL::Stub* stub,
+                       const std::string& path, int value) {
+    kuksa::val::v1::SetRequest request;
+    auto* update = request.add_updates();
+    update->mutable_entry()->set_path(path);
+    update->mutable_entry()->mutable_value()->set_int32(value);
+    update->add_fields(kuksa::val::v1::FIELD_VALUE);
+    kuksa::val::v1::SetResponse response;
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() +
+                         std::chrono::seconds(3));
     return stub->Set(&context, request, &response).ok();
 }
 
 int main(int argc, char* argv[]) {
     std::string target = "10.0.0.100:55555";
     int interval = 2;
-
     if (auto t = std::getenv("KUKSA_DATABROKER_ADDR")) target = t;
     if (auto i = std::getenv("CHECK_INTERVAL"))        interval = std::atoi(i);
     if (argc > 1) target   = argv[1];
     if (argc > 2) interval = std::atoi(argv[2]);
-
     const float soc_threshold = std::getenv("SOC_THRESHOLD")
         ? std::atof(std::getenv("SOC_THRESHOLD"))
         : SOC_THRESHOLD;
-
+    const float soc_threshold_1 = std::getenv("SOC_THRESHOLD_1")
+        ? std::atof(std::getenv("SOC_THRESHOLD_1"))
+        : SOC_THRESHOLD_1;
     std::cout << "========================================" << std::endl;
     std::cout << "  EV Range Extender" << std::endl;
     std::cout << "  Version:       " << VERSION << std::endl;
@@ -4157,11 +4165,9 @@ int main(int argc, char* argv[]) {
     std::cout << "  SoC threshold: " << soc_threshold << "%" << std::endl;
     std::cout << "========================================" << std::endl;
     std::cout.flush();
-
     auto channel = grpc::CreateChannel(target,
                                        grpc::InsecureChannelCredentials());
     auto stub = kuksa::val::v1::VAL::NewStub(channel);
-
     for (int r = 1; r <= 15; r++) {
         kuksa::val::v1::GetServerInfoRequest req;
         kuksa::val::v1::GetServerInfoResponse resp;
@@ -4182,25 +4188,22 @@ int main(int argc, char* argv[]) {
         std::cout.flush();
         std::this_thread::sleep_for(std::chrono::seconds(2));
     }
-
     std::string prev_mode = "";
     int cycle = 0;
-
     while (true) {
         cycle++;
-
         float soc  = get_signal(stub.get(),
             "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current");
         float temp = get_signal(stub.get(),
             "Vehicle.Cabin.HVAC.AmbientAirTemperature");
-
         if (soc < 0) soc = 50.0f;
-
         std::string mode;
         float range;
         float light_intensity;
         float seat_heating;
-
+        float cabin_temp;
+        int seat_cool;
+        int seat_heat;
         if (soc < soc_threshold) {
             mode = "POWER_SAVE";
             range = soc * DEGRADED_EFFICIENCY;
@@ -4211,19 +4214,25 @@ int main(int argc, char* argv[]) {
             range = soc * NORMAL_EFFICIENCY;
             light_intensity = 100.0f;
             seat_heating = 1.0f;
+            cabin_temp=30.0f;
         }
-
+        if (soc < soc_threshold_1 ) {
+            cabin_temp=0.0f;
+        }
+        if (soc < soc_threshold){
+            set_acct_signal(stub.get(), "Vehicle.Cabin.Seat.Row1.DriverSide.HeatingCooling", seat_cool);
+            set_acct_signal(stub.get(), "Vehicle.Cabin.Seat.Row1.DriverSide.Heating", seat_heat);
+        }
         set_signal(stub.get(), "Vehicle.Powertrain.Range", range);
         set_signal(stub.get(),
             "Vehicle.Cabin.Lights.AmbientLight.Intensity", light_intensity);
         set_signal(stub.get(), "Vehicle.Cabin.Seat.Heating", seat_heating);
-
+        set_signal(stub.get(), "Vehicle.Cabin.HVAC.AmbientAirTemperature", cabin_temp);
         if (mode != prev_mode) {
             std::cout << "[RangeExt] *** MODE CHANGE: " << mode << " ***"
                       << std::endl;
             prev_mode = mode;
         }
-
         if (cycle % 5 == 1) {
             std::cout << "[RangeExt] cycle=" << cycle
                       << " mode=" << mode
@@ -4232,10 +4241,12 @@ int main(int argc, char* argv[]) {
                       << " Range=" << range << "km"
                       << " Lights=" << light_intensity
                       << " SeatHeat=" << seat_heating
+                      << " CabinTemperature=" << cabin_temp
+                      << " seat_cool=" << seat_cool
+                      << " seat_heat=" << seat_heat
                       << std::endl;
             std::cout.flush();
         }
-
         std::this_thread::sleep_for(std::chrono::seconds(interval));
     }
     return 0;
@@ -4257,7 +4268,7 @@ items:
       codename: "ev-range-extender"
       title: "EV Range Extender - HPC Domain"
       description: "Battery management, range computation, power-saving mode control"
-    version: "1.0.0"
+    version: "3.0.1"
     sourceFolder: "ev-range-extender"
 
     images:
@@ -4269,7 +4280,7 @@ items:
       workingDir: "/"
       cmd: "/ev-range-extender"
       env:
-        - "KUKSA_DATABROKER_ADDR=172.17.0.1:55555"
+        - "KUKSA_DATABROKER_ADDR=10.0.0.100:55555"
       instances:
         minInstances: 1
         priority: 10
