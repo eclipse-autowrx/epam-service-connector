@@ -1,0 +1,172 @@
+schemaVersion: 2
+
+publisher:
+  author: AosCloud team
+  company: EPAM Systems
+
+publish:
+  tlsKey: aos-user-sp.p12
+  domain: aoscloud.io
+
+items:
+
+  ############################
+  # Seat ECU
+- identity:
+    type: service
+    codename: demo-ev-range-extender-seat-ecu
+    title: Demo EV Range Extender Seat ECU
+
+  sourceFolder: services/seat-ecu
+  version: 3.0.2
+
+  images:
+  - archInfo:
+      architecture: any
+    sourceFolder: .
+
+  configuration:
+    cmd: python3 -u seat_ecu.py
+    workingDir: /
+    instances:
+      minInstances: 1
+      priority: 10
+      labels:
+      - secondary
+    quotas:
+      cpuLimit: 1000             # DMIPS
+      ramLimit: 128MiB           # 128 MiB
+      storageLimit: 32MiB        # 32 GiB
+    resources:
+    - name: kuksa
+      mode: rw
+    - name: zenoh
+      mode: rw
+  dependencies:
+  - identity:
+      type: layer
+      codename: kuksa-client
+    versions: '>=6.1.1-bosch.2'
+  - identity:
+      type: layer
+      codename: zenoh-client
+    versions: '>=6.1.1-bosch.2'
+
+  # Hvac ECU
+- identity:
+    type: service
+    codename: demo-ev-range-extender-hvac-ecu
+    title: Demo EV Range Extender HVAC ECU
+
+  sourceFolder: services/hvac-ecu
+  version: 3.0.2
+
+  images:
+  - archInfo:
+      architecture: any
+    sourceFolder: .
+
+  configuration:
+    cmd: python3 -u hvac_ecu.py
+    workingDir: /
+    instances:
+      minInstances: 1
+      priority: 10
+      labels:
+      - secondary
+    quotas:
+      cpuLimit: 1000             # DMIPS
+      ramLimit: 128MiB           # 128 MiB
+      storageLimit: 32MiB        # 32 GiB
+    resources:
+    - name: kuksa
+      mode: rw
+    - name: zenoh
+      mode: rw
+  dependencies:
+  - identity:
+      type: layer
+      codename: kuksa-client
+    versions: '>=6.1.1-bosch.2'
+  - identity:
+      type: layer
+      codename: zenoh-client
+    versions: '>=6.1.1-bosch.2'
+
+  ############################
+  # bms
+- identity:
+    type: service
+    codename: demo-ev-range-extender-bms
+    title: Demo EV Range Extender BMS
+
+  sourceFolder: services/bms
+  version: 3.0.2
+
+  images:
+  - archInfo:
+      architecture: any
+    sourceFolder: .
+
+  configuration:
+    cmd: python3 -u bms.py
+    workingDir: /
+    instances:
+      minInstances: 1
+      priority: 10
+      labels:
+      - main
+    quotas:
+      cpuLimit: 1000             # DMIPS
+      ramLimit: 128MiB           # 128 MiB
+      storageLimit: 32MiB        # 32 GiB
+    resources:
+    - name: kuksa
+      mode: rw
+    - name: zenoh
+      mode: rw
+  dependencies:
+  - identity:
+      type: layer
+      codename: kuksa-client
+    versions: '>=6.1.1-bosch.2'
+  - identity:
+      type: layer
+      codename: zenoh-client
+    versions: '>=6.1.1-bosch.2'
+
+  ############################
+  # range-ai
+- identity:
+    type: service
+    codename: demo-ev-range-extender-range-ai
+    title: Demo EV Range Extender Range AI
+
+  sourceFolder: services/range-ai
+  version: 3.0.2
+
+  images:
+  - archInfo:
+      architecture: any
+    sourceFolder: .
+
+  configuration:
+    cmd: python3 -u range_ai.py
+    workingDir: /
+    instances:
+      minInstances: 1
+      priority: 10
+      labels:
+      - main
+    quotas:
+      cpuLimit: 1000             # DMIPS
+      ramLimit: 128MiB           # 128 MiB
+      storageLimit: 32MiB        # 32 GiB
+    resources:
+    - name: kuksa
+      mode: rw
+  dependencies:
+  - identity:
+      type: layer
+      codename: kuksa-client
+    versions: '>=6.1.1-bosch.2'
