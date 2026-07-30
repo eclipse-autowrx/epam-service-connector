@@ -114,8 +114,8 @@ tbd
 The setup is organized into sub-sections that guide the VM setup and deployment flow in a practical sequence.
 
 - [Section 1 — VM setup and deployment flow](#section-1--vm-setup-and-deployment-flow)
-- [Section 3 — Build and deploy the SDV application](#section-2--build-and-deploy-the-sdv-application)
-- [Section 2 — AOSEdge setup](#section-3--aosedge-setup)
+- [Section 2 — Build and deploy the SDV application](#section-2--build-and-deploy-the-sdv-application)
+- [Section 3 — AOSEdge setup](#section-3--aosedge-setup)
 
 
 ##### Section 1 — VM setup and deployment flow
@@ -245,7 +245,7 @@ After deployment, log in to the units via SSH and verify that the services are r
 crun --root=/run/crun list
 ```
 
-***Manual steps for AOS-Edge**
+**Manual steps for AOS-Edge**
 
 **Configure the OEM target systems**
 - Open the AOS documentation portal at [AOS Edge Quick Start](https://docs.aosedge.tech/docs/quick-start/) and install the required certificates in the environment where the deployment tools are used.
