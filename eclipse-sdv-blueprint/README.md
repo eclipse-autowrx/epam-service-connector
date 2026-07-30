@@ -201,7 +201,7 @@ cd epam-service-connector/eclipse-sdv-blueprint/kuksa-syncer
 aos-signer go
 ```
 
-- Add the generated `kuksa-syncer` service to the created subject (`aos-bosch`) in the AOS dashboard.
+- Add the generated `kuksa-syncer` service to the created subject (`ev-range-extender-subject`) in the AOS dashboard.
 - Verify the deployment result in Aos Dashboard → SOTA/FOTA → Deployment Bundles.
 - If the deployment does not appear or is rejected, update the service version in `kuksa-syncer/config.yaml` and re-run `aos-signer go`.
 
