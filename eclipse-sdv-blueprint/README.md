@@ -152,7 +152,7 @@ ip neigh
 ```bash
 journalctl -f
 ```
-- Provision the VM1 to AOS Cloud with on Host:
+- Provision the VMs to AOS Cloud with on Host:
 
 ```bash
 source ~/.aos/venv/bin/activate
@@ -161,7 +161,7 @@ aos-prov provision -u 10.0.0.100
 
 - As an alternative to using the release images, you can build the VM image yourself by following [meta-aos-vm](https://github.com/aosedge/meta-aos-vm) on the `demo-bosch` branch.
 
-- Link to login [Aos Dashboard](https://api.aoscloud.io/account/start)
+- Log in to the [AOS Dashboard](https://api.aoscloud.io/account/start), select the OEM login option, and choose the certificate-based sign-in that appears when you open the [Units tab](https://oem.aoscloud.io/oem/units).
 
 - If Unit shown offline on AOS Dashboard follow the [Debug Steps](#debug-steps-for-network-on-vms)
 
@@ -182,13 +182,15 @@ aos-signer go
 
 - After the publish step, verify in the [AOS Cloud Service Provider](https://sp.aoscloud.io/sp/layers) portal that the expected layers are available in the Layers section. The layers that should appear are `kuksa-client`, `zenoh`, and `pylibs`.
 
-- Verify [deployment bundles](https://oem.aoscloud.io/oem/deployment-bundles) for successfull deployment of layers.
+- Check the [deployment bundles](https://oem.aoscloud.io/oem/deployment-bundles) to confirm that the layers were deployed successfully.
 
 **Deploy the demo services**
 
 This step deploys the components which produces the data required for the SDV application (ev-range-extender).
 
-- The demo-services repository contains the deployment bundles for the EV Range Extender use case: `bms`, `range-ai`, `seat-ecu`, and `hvac`.
+- Please perform these steps before deploying demo-services [Debug Steps for Application Deployment](#debug-steps-for-application-deployment).
+
+- The demo-services contains the deployment bundles for the EV Range Extender use case: `bms`, `range-ai`, `seat-ecu`, and `hvac`.
 
 - In the VM, navigate to the EV Range Extender service directory and package it for deployment:
 
@@ -197,8 +199,7 @@ source ~/.aos/venv/bin/activate
 cd epam-service-connector/eclipse-sdv-blueprint/demo-services/ev-range-extender
 aos-signer go
 ```
-- After the publish step, verify in the [AOS Cloud Service Provider](https://sp.aoscloud.io/sp/services)
-- If it return nothing on both VMs follow [Debug Steps for Application Deployment](#debug-steps-for-application-deployment)
+- After the publish step, verify in the [AOS Cloud Service Provider](https://sp.aoscloud.io/sp/services).
 
 **Playground Dashboard Connectivity**
 
@@ -210,17 +211,17 @@ cd epam-service-connector/eclipse-sdv-blueprint/kuksa-syncer
 aos-signer go
 ```
 
-- Verify the deployment result in [Aos Dashboard](https://sp.aoscloud.io/sp/services).
+- Verify the deployment result in [Aos Dashboard Services](https://sp.aoscloud.io/sp/services).
 - If the deployment does not appear or is rejected, update the service version in `kuksa-syncer/config.yaml` and re-run `aos-signer go`.
-- Please verfiy [deployment bundles](https://sp.aoscloud.io/sp/deployment-bundles) if any errors occured during 
+- Please verfiy [deployment bundles](https://sp.aoscloud.io/sp/deployment-bundles) if any errors occured during deployment.
 
 ##### Section 2 — Build and deploy the SDV application
 
 - Sign in to the digital.auto Playground at [playground.digital.auto](https://playground.digital.auto).
 - Open the EV Range Extender application from the playground at [this link](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/view).
 - For aos-cloud deployment select [aos-cloud-deployment plugin](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/plug?plugid=aos-cloud-deployment).
-- Upload sp.12 on the aos-deployment plugin (cetificates will be available in .aos/security).
-- In the AOS Cloud Deployment view, first choose the C++ option, then select the EV Range Extender application from the dropdown menu and click Build and Deploy.
+- Upload sp.12 on the aos-deployment plugin (certificates will be available in .aos/security).
+- In the AOS Cloud Deployment plugin, choose the C++ option, then select the EV Range Extender application from the dropdown menu and click Build and Deploy.
 
 ##### Section 3 — AOSEdge setup
 
@@ -258,32 +259,32 @@ crun --root=/run/crun list
 
 **Manual steps for AOS-Edge**
 - This step is optional if the automation setup has already been completed.
+
 **Configure the OEM target systems**
 
 - Sign in to the AOS Service Provider or OEM portal at [AOS Cloud](https://api.aoscloud.io/account/start) and import the required `.p12` certificate, such as `aos-user-oem.p12` or `aos-user-sp.p12`.
+- Select [Service Provider](https://sp.aoscloud.io/sp/dashboard) and [OEM](https://oem.aoscloud.io/oem/dashboard) 
 - Download the unit configuration template from [unitconfig.json](https://github.com/aosedge/meta-aos-vm/blob/demo_bosch/misc/unitconfig.json) and import it in [AosEdge Dashboard Target System](https://oem.aoscloud.io/oem/systems) edit the target system UNIT CONFIG.
-
 - Create a [unit set](https://oem.aoscloud.io/oem/unit-sets) `ev-range-extender-unitset` and assign it to the provisioned VM so verification does not block the demo deployment.
   - Configure: Title `ev-range-extender-unitset`, Description `Optional`, Update Strategy `Minimize Unit Restart`, and enable `Is Verification Set`.
 
-  - Create a [subject](https://oem.aoscloud.io/oem/subjects) `ev-range-extender-subject` under Subjects on OEM, attach the target VM, bind the service to it.
+- Create a [subject](https://oem.aoscloud.io/oem/subjects) `ev-range-extender-subject` under Subjects on OEM, attach the target VM, bind the service to it.
 
   - On service add the services that are deployed `Range-Ai`,`Seat ECU`,`HVAC ECU`,`kuksa-syncer`,`ev-range-application`and `BMS`.
 
   - After creating the required unit_set and subject in the AOS dashboard, deployment can be bound to the target VM and services will be deployed on respective VM's.
 
-  - Check application deployment on both VMs using
-
-login to units using ssh and verify the serivces deployed or not using 
+  - Check application deployment on both VMs by login to units using ssh and verify the serivces deployed or not using 
 
 ```bash
 crun --root=/run/crun list
 ```
+ - Or on [Aos OEM Dashbaord(units)](https://oem.aoscloud.io/oem/units) on the respctive units.
 
 ### Steps to demo
 1. Complete the "SDV-Application-Compilation-and-Configuration" steps.
 1. Start the hardware simulator by running `./hardware-sim/pytk_hwsim.py` from the `eclipse-sdv-blueprint` directory (see [hardware-sim/README.md](hardware-sim/README.md)).
-1. Add ev-range-extender runtime and select ev-range-extender runtime on playground dashboard (https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/dashboard).
+1. Add ev-range-extender runtime and select ev-range-extender runtime on playground dashboard [Ev-range-extender application deployment](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/dashboard).
 
 ![EV Range Extender runtime selection on the playground dashboard](./images/image.png)
 
