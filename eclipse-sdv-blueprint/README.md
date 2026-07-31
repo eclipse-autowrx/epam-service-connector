@@ -124,7 +124,7 @@ The setup is organized into sub-sections that guide the VM setup and deployment 
 
 This step sets up two qemu VM instances where the SDV application and its surrounding components are run.
 
-- Download the latest AOS VM image package of bosch and provisioning script from the AOS Edge meta-aos-vm release page: [meta-aos-vm releases](https://github.com/aosedge/meta-aos-vm/releases/)VM images named Version 6.x.x-bosch.x (download latest release)
+- Download the latest AOS VM image package of bosch and provisioning script from the AOS Edge meta-aos-vm release page: [meta-aos-vm releases](https://github.com/aosedge/meta-aos-vm/releases/) VM images named Version 6.x.x-bosch.x (download latest release)
 
 - Extract the image archive and start the QEMU-based VMs from the same directory:
 
@@ -135,7 +135,8 @@ sudo ./aos_vm.sh run -f .
 - If the AOS certificates are unavailable or the setup has not been completed, please follow the steps on [Aos QuickStart](https://docs.aosedge.tech/docs/quick-start/)
 - Complete the QuickStart guide only up to get-access step. No additional steps are required.
 Perform these steps on WSL or Ubuntu.
-Required steps:
+
+- Required steps:
  1. [Setup your host](https://docs.aosedge.tech/docs/quick-start/set-up/)
  1. [Get access](https://docs.aosedge.tech/docs/quick-start/get-access)
 
@@ -152,7 +153,7 @@ ip neigh
 ```bash
 journalctl -f
 ```
-- Provision the VMs to AOS Cloud with on Host:
+- Provision the VMs to AOS Cloud on Host:
 
 ```bash
 source ~/.aos/venv/bin/activate
@@ -180,9 +181,11 @@ cd layers
 aos-signer go
 ```
 
-- After the publish step, verify in the [AOS Cloud Service Provider](https://sp.aoscloud.io/sp/layers) portal that the expected layers are available in the Layers section. The layers that should appear are `kuksa-client`, `zenoh`, and `pylibs`.
+- After the publish step, verify in the [AOS Cloud Layers-Service Provider](https://sp.aoscloud.io/sp/layers) portal that the expected layers are available in the Layers section. The layers that should appear are `kuksa-client`, `zenoh`, and `pylibs`.
 
 - Check the [deployment bundles](https://oem.aoscloud.io/oem/deployment-bundles) to confirm that the layers were deployed successfully.
+
+-If the deployment does not appear or is rejected, update the service version in `demo-services/ev-range-extender/config.yaml` and re-run `aos-signer go`.
 
 **Deploy the demo services**
 
@@ -199,7 +202,7 @@ source ~/.aos/venv/bin/activate
 cd epam-service-connector/eclipse-sdv-blueprint/demo-services/ev-range-extender
 aos-signer go
 ```
-- After the publish step, verify in the [AOS Cloud Service Provider](https://sp.aoscloud.io/sp/services).
+- After the publish step, verify in the [AOS Cloud Service-Service Provider](https://sp.aoscloud.io/sp/services).
 
 **Playground Dashboard Connectivity**
 
@@ -219,7 +222,7 @@ aos-signer go
 
 - Sign in to the digital.auto Playground at [playground.digital.auto](https://playground.digital.auto).
 - Open the EV Range Extender application from the playground at [this link](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/view).
-- For aos-cloud deployment select [aos-cloud-deployment plugin](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/plug?plugid=aos-cloud-deployment).
+- For ev-range-extender application deployment select [aos-cloud-deployment plugin](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/plug?plugid=aos-cloud-deployment).
 - Upload sp.12 on the aos-deployment plugin (certificates will be available in .aos/security).
 - In the AOS Cloud Deployment plugin, choose the C++ option, then select the EV Range Extender application from the dropdown menu and click Build and Deploy.
 
@@ -255,7 +258,7 @@ After deployment, log in to the units via SSH and verify that the services are r
 ```bash
 crun --root=/run/crun list
 ```
-- Even deployment of services can be verfied on [units portal](https://oem.aoscloud.io/oem/units) on respective unit .
+- Even deployment of services can be verfied on [units portal](https://oem.aoscloud.io/oem/units) on respective unit.
 
 **Manual steps for AOS-Edge**
 - This step is optional if the automation setup has already been completed.
@@ -279,12 +282,12 @@ crun --root=/run/crun list
 ```bash
 crun --root=/run/crun list
 ```
- - Or on [Aos OEM Dashbaord(units)](https://oem.aoscloud.io/oem/units) on the respctive units.
+ - Even deployment of services can be verfied on [AOS dashboard - units portal](https://oem.aoscloud.io/oem/units) on respective unit .
 
 ### Steps to demo
-1. Complete the "SDV-Application-Compilation-and-Configuration" steps.
+1. After performing above steps of Section 1,2 and 3;
 1. Start the hardware simulator by running `./hardware-sim/pytk_hwsim.py` from the `eclipse-sdv-blueprint` directory (see [hardware-sim/README.md](hardware-sim/README.md)).
-1. Add ev-range-extender runtime and select ev-range-extender runtime on playground dashboard [Ev-range-extender application deployment](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/dashboard).
+1. Add ev-range-extender runtime and select ev-range-extender runtime on [playground dashboard](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/dashboard).
 
 ![EV Range Extender runtime selection on the playground dashboard](./images/image.png)
 
@@ -312,7 +315,7 @@ journalctl -f | grep "range-ext"
 The demo runs as a closed loop across host, virtual machines, and the playground runtime.
 
 1. **Hardware simulator (host side)** publishes battery and cabin control values.
-2. **QEMU-VM-1 runtime stack** receives battery values and updates the vehicle signal broker.
+2. **VM-1 runtime stack** receives battery values and updates the vehicle signal broker.
 3. **Vehicle signal broker (Kuksa)** stores and distributes current vehicle values used by the application and runtime services.
 4. **Bridge layer** transfers cabin-related signal and  updates between QEMU-VM-1 and QEMU-VM-2 so both compute domains stay synchronized.
 5. **VM2 ECU services** apply HVAC and seat actions and publish actuator status back to the dashboard.
