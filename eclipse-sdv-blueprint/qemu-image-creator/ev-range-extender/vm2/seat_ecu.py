@@ -14,7 +14,7 @@ on the same socket.
 
 Signal flow (inbound — dashboard control)
 -----------------------------------------
-  pytk_dashboard.py
+  pytk_hwsim.py
     ├─ sim/cabin/seat/heating  ──TCP (port 7462)──►
     └─ sim/cabin/seat/hc       ────────────────►  seat_ecu.py
                                                      │
@@ -31,7 +31,7 @@ Signal flow (outbound — kuksa-bridge inbound from VM1)
 Dashboard update (single path, both cases above)
 ------------------------------------------------
     VM2 seat ECU
-        └─► TCP dash/status/seat ──► pytk_dashboard.py indicator
+        └─► TCP dash/status/seat ──► pytk_hwsim.py indicator
 
 Note: heating is 0–100 %; hc is –100 (cooling) to +100 (heating).
 Cross-VM VSS mirroring is handled exclusively by kuksa-bridge.

@@ -36,7 +36,7 @@ from tkinter import BooleanVar, Canvas, Frame, IntVar, StringVar, Tk, ttk
 from typing import Callable, Optional
 
 # Setup logging
-LOG_FILE = "/tmp/pytk_dashboard.log"
+LOG_FILE = "/tmp/pytk_hwsim.log"
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 handler = logging.handlers.RotatingFileHandler(LOG_FILE, maxBytes=5*1024*1024, backupCount=3)

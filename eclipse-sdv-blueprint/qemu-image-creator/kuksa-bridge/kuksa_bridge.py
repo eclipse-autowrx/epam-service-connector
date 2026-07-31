@@ -13,7 +13,7 @@ Each VM runs one kuksa_bridge.py process. The two processes peer over Zenoh
 and mirror VSS current values between their local Kuksa Databrokers:
 
     Host (192.168.100.1)
-      pytk_dashboard.py  ──Zenoh──►  VM1 bms.py / VM2 hvac_ecu.py / VM2 seat_ecu.py
+      pytk_hwsim.py  ──Zenoh──►  VM1 bms.py / VM2 hvac_ecu.py / VM2 seat_ecu.py
 
     VM1 (192.168.100.10)             VM2 (192.168.100.11)
     ┌──────────────────┐             ┌──────────────────┐

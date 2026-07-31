@@ -13,7 +13,7 @@ status updates back to the dashboard's indicator panel on the same socket.
 
 Signal flow (inbound — dashboard control)
 -----------------------------------------
-  pytk_dashboard.py  ──TCP sim/cabin/temp (port 7461)──►  hvac_ecu.py
+  pytk_hwsim.py  ──TCP sim/cabin/temp (port 7461)──►  hvac_ecu.py
                                                             │
                                                  publish wire value ▼
                       kuksa-bridge/Vehicle/Cabin/HVAC/AmbientAirTemperature
@@ -27,7 +27,7 @@ Signal flow (outbound — kuksa-bridge inbound from VM1)
 Dashboard update (single path, both cases above)
 ------------------------------------------------
     VM2 HVAC ECU
-        └─► TCP dash/status/hvac ──► pytk_dashboard.py indicator
+        └─► TCP dash/status/hvac ──► pytk_hwsim.py indicator
 
 Note: 'sim/cabin/temp' carries a 0–100 fan-speed % value.
 Cross-VM VSS mirroring is handled exclusively by kuksa-bridge.

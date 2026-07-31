@@ -13,7 +13,7 @@ connection and writes it to the local Kuksa Databroker
 
 Signal flow
 -----------
-  pytk_dashboard.py (host)
+  pytk_hwsim.py (host)
     ├─ sim/battery/voltage  ──TCP (port 7460)──►
     ├─ sim/battery/current  ──────────────────►  bms.py (this)
     └─ sim/battery/soc      ──────────────────►      │
@@ -43,7 +43,7 @@ DEFAULT_KUKSA_HOST = "127.0.0.1"
 DEFAULT_KUKSA_PORT = 55555
 
 
-# TCP key -> (VSS path, cast). Keep in sync with pytk_dashboard.py key_routes.
+# TCP key -> (VSS path, cast). Keep in sync with pytk_hwsim.py key_routes.
 KEY_TO_VSS = {
     "sim/battery/voltage": (
         "Vehicle.Powertrain.TractionBattery.CurrentVoltage",

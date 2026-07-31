@@ -192,5 +192,5 @@ tail -f /tmp/ev-range-kuksa-bridge.log
 ```
 
 If dashboard indicators do not change, confirm the dashboard is subscribed to
-`dash/status/hvac` and `dash/status/seat` by checking `/tmp/pytk_dashboard.log`
+`dash/status/hvac` and `dash/status/seat` by checking `/tmp/pytk_hwsim.log`
 on the host.

@@ -1,6 +1,6 @@
 # Hardware Simulator
 
-`pytk_dashboard.py` is the host-side Tk dashboard for driving the EV Range
+`pytk_hwsim.py` is the host-side Tk dashboard for driving the EV Range
 Extender VM services. It publishes battery, HVAC, and seat inputs over direct
 TCP connections, and it listens for reverse status messages from the VM2 ECUs
 on those same connections so the UI can show whether HVAC and seat actions are
@@ -72,8 +72,7 @@ Install the host dependencies, then run the dashboard from this directory:
 ```bash
 cd path/to/eclipse-sdv-blueprint/hardware-sim
 ./setup.sh
-python3 -m pip install -r requirements.txt
-python3 pytk_dashboard.py
+python3 pytk_hwsim.py
 ```
 
 `setup.sh` installs the Tk runtime package required by the dashboard UI:
@@ -89,7 +88,7 @@ can reuse it:
 cd path/to/eclipse-sdv-blueprint/qemu-image-creator
 source .venv/bin/activate
 cd ../hardware-sim
-python3 pytk_dashboard.py
+python3 pytk_hwsim.py
 ```
 
 Defaults match the QEMU VM setup:
@@ -124,7 +123,7 @@ ssh ubuntu@192.168.100.10 'tail -f /tmp/ev-range-range-ai.log'
 The dashboard itself logs to:
 
 ```bash
-/tmp/pytk_dashboard.log
+/tmp/pytk_hwsim.log
 ```
 
 ---
