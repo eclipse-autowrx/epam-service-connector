@@ -1,7 +1,7 @@
 # =====================================================================
 # Eclipse SDV Blueprint - root .gitignore
 #
-# Covers the whole repo:
+# Covers the whole repo:even 
 #   - hardware-sim/        (PyTk host dashboard)
 #   - qemu-image-creator/  (cloud-init + QEMU VM build pipeline)
 #   - images/              (committed SVG diagrams - kept as-is)
@@ -42,6 +42,8 @@ ev-range-*.log
 *.cache
 *.pid
 *.lock
+batch.tar.gz
+**/batch.tar.gz
 
 # ---------------------------------------------------------------------
 # Python
