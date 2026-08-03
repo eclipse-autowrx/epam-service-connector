@@ -32,7 +32,7 @@ import pkg_manager
 
 # Infra endpoints are env-overridable so the same image can run on the AosUnit
 # (defaults) or on Azure Container Apps (env vars set by the deployment).
-BORKER_IP = os.getenv('KUKSA_BROKER_HOST', 'kuksa')
+BROKER_IP = os.getenv('KUKSA_BROKER_HOST', 'kuksa')
 BROKER_PORT = int(os.getenv('KUKSA_BROKER_PORT', '55555'))
 
 DEFAULT_KIT_SERVER = 'https://kit.digitalauto.tech'
@@ -49,7 +49,7 @@ lsOfApiSubscriber = {}
 
 sio = socketio.AsyncClient()
 
-client = VSSClient(BORKER_IP, BROKER_PORT)
+client = VSSClient(BROKER_IP, BROKER_PORT)
 
 # Storage location for the mock-signals file. On AosUnit this is a mounted
 # writable volume at /storage; on Azure Container Apps we mount an Azure Files
@@ -180,7 +180,7 @@ def _resolve_alias_blocking(dashboard_path):
     if dashboard_path in path_alias_map:
         return path_alias_map[dashboard_path]
     try:
-        with KClient(BORKER_IP, BROKER_PORT) as kclient:
+        with KClient(BROKER_IP, BROKER_PORT) as kclient:
             return _resolve_databroker_path(kclient, dashboard_path)
     except Exception as e:
         print("[SYNCER] alias resolver: KClient error for " + str(dashboard_path) +
@@ -235,46 +235,6 @@ def my_stderr_callback(master_id: str, line: str):
     if main_loop:
         asyncio.run_coroutine_threadsafe(send_app_run_reply(master_id, False, 0, line + '\r\n'), main_loop)
 
-async def install_dependencies(request_from):
-    """Install dependencies from requirements.txt."""
-    requirements_path = "app/requirements.txt"
-    if not os.path.exists(requirements_path):
-        return True
-
-    await send_app_run_reply(request_from, False, 0, "Installing dependencies from requirements.txt...\r\n")
-
-    # Using asyncio.create_subprocess_exec to run pip
-    process = await asyncio.create_subprocess_exec(
-        'pip', 'install', '-r', requirements_path,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
-
-    # Stream stdout
-    async def stream_output(stream, callback):
-        while True:
-            line = await stream.readline()
-            if not line:
-                break
-            callback(request_from, line.decode())
-
-    # Create tasks to stream stdout and stderr
-    stdout_task = asyncio.create_task(stream_output(process.stdout, my_stdout_callback))
-    stderr_task = asyncio.create_task(stream_output(process.stderr, my_stdout_callback))
-
-    # Wait for the process to complete and for the streams to be fully read
-    await asyncio.gather(stdout_task, stderr_task)
-    
-    return_code = await process.wait()
-
-    if return_code != 0:
-        await send_app_run_reply(request_from, False, return_code, "Failed to install dependencies.\r\n")
-        return False
-    else:
-        await send_app_run_reply(request_from, False, 0, "Dependencies installed successfully.\r\n")
-        return True
-
-
 @sio.event
 async def connect():
     print('[SYNCER] Connected to Kit Server. Registering as kit_id=' + str(CLIENT_ID), flush=True)
@@ -295,7 +255,7 @@ async def connect_error(data):
 def wait_for_databroker_ready(max_attempts=10, sleep_time=0.5):
     for attempt in range(max_attempts):
         try:
-            with KClient(BORKER_IP, BROKER_PORT) as temp_client:
+            with KClient(BROKER_IP, BROKER_PORT) as temp_client:
                 # Test connection by fetching server info or metadata
                 temp_client.get_server_info()
             print("Databroker is ready.")
@@ -787,10 +747,10 @@ def appendMockSignal(signals):
     if signals is None or len(signals) <=0:
         return 0
     print("[SYNCER] appendMockSignal: checking " + str(len(signals)) +
-          " signal(s) against databroker " + str(BORKER_IP) + ":" + str(BROKER_PORT), flush=True)
+          " signal(s) against databroker " + str(BROKER_IP) + ":" + str(BROKER_PORT), flush=True)
     hasNew = False
     try:
-        kclient_ctx = KClient(BORKER_IP, BROKER_PORT)
+        kclient_ctx = KClient(BROKER_IP, BROKER_PORT)
     except Exception as e:
         print("[SYNCER] appendMockSignal: cannot create KClient: " + str(e), flush=True)
         return 0
@@ -863,7 +823,7 @@ def modifyMockSignal(input_str):
         json_string = json.dumps(input_str)
         input_signals = json.loads(json_string)
         final_signals = []
-        with KClient(BORKER_IP, BROKER_PORT) as kclient:
+        with KClient(BROKER_IP, BROKER_PORT) as kclient:
             for signal in input_signals:
                 try: 
                     if kclient.get_metadata([signal['signal'], ]) is not None:
@@ -879,7 +839,7 @@ def modifyMockSignal(input_str):
 def writeSignalsValue(input_str):
     json_str = json.dumps(input_str)
     signal_values = json.loads(json_str)
-    with KClient(BORKER_IP, BROKER_PORT) as kclient:
+    with KClient(BROKER_IP, BROKER_PORT) as kclient:
         for path,value in signal_values.items():
             try:
                 db_path = _resolve_databroker_path(kclient, path) or path
@@ -1067,7 +1027,7 @@ async def ticker_5s():
     lastLstRunString = ""
     lastNoApiSubscriber = 0
     while True:
-        await asyncio.sleep(1)
+        await asyncio.sleep(5)
         noSubscriber = len(list(lsOfApiSubscriber.keys()))
         if noSubscriber <= 0:
             continue
@@ -1124,7 +1084,7 @@ async def main():
     try:
         await client.connect()
         print("[SYNCER] Initial Kuksa databroker connect: connected=" +
-              str(client.connected) + " (" + str(BORKER_IP) + ":" + str(BROKER_PORT) + ")", flush=True)
+              str(client.connected) + " (" + str(BROKER_IP) + ":" + str(BROKER_PORT) + ")", flush=True)
     except Exception as e:
         print("[SYNCER] Initial Kuksa databroker connect FAILED: " + str(e), flush=True)
     await asyncio.gather(start_socketio(SERVER), ticker(), ticker_fast(), ticker_5s())
