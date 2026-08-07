@@ -1,0 +1,60 @@
+# Copyright (c) 2026 Eclipse Foundation.
+#
+# This program and the accompanying materials are made available under the
+# terms of the MIT License which is available at
+# [https://opensource.org/licenses/MIT.](https://opensource.org/licenses/MIT.)
+#
+# SPDX-License-Identifier: MIT
+schemaVersion: 2
+
+publisher:
+  author: AosCloud team
+  company: Bosch, EPAM Systems
+
+publish:
+  tlsKey: aos-user-sp.p12
+
+items:
+
+- identity:
+    type: service
+    codename: kuksa-syncer
+    title: Kuksa Syncer
+
+  sourceFolder: src/kuksa-syncer
+  #try changing the version to if deployement fails
+  version: 1.0.4
+
+  images:
+  - archInfo:
+      architecture: any
+    sourceFolder: .
+
+  configuration:
+    cmd: python3 -u syncer.py
+    workingDir: /
+    instances:
+      minInstances: 1
+      priority: 10
+    quotas:
+      cpuLimit: 1000             # DMIPS
+      ramLimit: 128MiB           # 128 MiB
+      storageLimit: 16MiB        # 16 MiB
+    resources:
+    - name: kuksa
+      mode: rw
+#    - name: zenoh
+#      mode: rw
+  dependencies:
+  - identity:
+      type: layer
+      codename: kuksa-client
+    versions: ">=6.1.1-bosch.2"
+  - identity:
+      type: layer
+      codename: pylibs
+    versions: "6.1.1-bosch.2"
+#  - identity:
+#      type: layer
+#      codename: zenoh-python
+#    versions: ">=6.1.1-bosch.2"

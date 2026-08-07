@@ -1,2 +1,0 @@
-PyYAML>=6.0
-eclipse-zenoh>=1.0.0

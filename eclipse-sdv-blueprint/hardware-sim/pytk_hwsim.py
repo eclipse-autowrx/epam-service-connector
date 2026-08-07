@@ -1,23 +1,14 @@
 #!/usr/bin/env python3
-# Copyright (c) 2026 Eclipse Foundation.
-#
-# This program and the accompanying materials are made available under the
-# terms of the MIT License which is available at
-# https://opensource.org/licenses/MIT.
-#
-# SPDX-License-Identifier: MIT
-"""EV Range Extender host dashboard (Tk + TCP).
+"""EV Range Extender host dashboard (Tk + Zenoh).
 
-Publishes host controls to VM ECUs via direct TCP connections:
-  - sim/battery/* -> vm1 bms.py        (TCP port 7460)
-  - sim/cabin/temp -> vm2 hvac_ecu.py  (TCP port 7461)
-  - sim/cabin/seat/* -> vm2 seat_ecu.py (TCP port 7462)
+Publishes host controls to VM ECUs:
+  - sim/battery/* -> vm1 bms.py
+  - sim/cabin/temp -> vm2 hvac_ecu.py
+  - sim/cabin/seat/* -> vm2 seat_ecu.py
 
-Receives reverse status from VM2 ECUs on the same persistent connections:
-  - dash/status/hvac  (from hvac_ecu.py)
-  - dash/status/seat  (from seat_ecu.py)
-
-Wire format (both directions): newline-delimited JSON.
+Subscribes reverse status from VM2 ECUs:
+  - dash/status/hvac
+  - dash/status/seat
 """
 
 from __future__ import annotations
@@ -35,6 +26,8 @@ from datetime import datetime, timezone
 from tkinter import BooleanVar, Canvas, Frame, IntVar, StringVar, Tk, ttk
 from typing import Callable, Optional
 
+import zenoh
+
 # Setup logging
 LOG_FILE = "/tmp/pytk_dashboard.log"
 logger = logging.getLogger(__name__)
@@ -44,12 +37,17 @@ formatter = logging.Formatter('%(asctime)s.%(msecs)03d [%(name)s] %(levelname)s:
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
+DEFAULT_VM1_IP = "127.0.0.1"
+# DEFAULT_VM1_IP = "10.0.0.100"
+DEFAULT_VM2_IP = DEFAULT_VM1_IP
+# DEFAULT_VM2_IP = "192.168.100.11"
+# DEFAULT_BMS_PORT = 7460
+# DEFAULT_HVAC_PORT = 7461
+# DEFAULT_SEAT_PORT = 7462
 
-DEFAULT_VM1_IP = "192.168.100.10"
-DEFAULT_VM2_IP = "192.168.100.11"
-DEFAULT_BMS_PORT = 7460
-DEFAULT_HVAC_PORT = 7461
-DEFAULT_SEAT_PORT = 7462
+DEFAULT_BMS_PORT = 7447  # zenoh router port (resolves to primary node)
+DEFAULT_HVAC_PORT = 7447
+DEFAULT_SEAT_PORT = 7447
 
 STATUS_KEY_HVAC = "dash/status/hvac"
 STATUS_KEY_SEAT = "dash/status/seat"
@@ -126,171 +124,90 @@ ALL_SECTIONS = (
 )
 
 
-class TcpBus:
-    """Direct TCP transport for dashboard-to-ECU signaling.
-
-    The dashboard acts as the TCP *client*: it connects to each VM ECU on
-    its listen port and holds the connection open.  Signal values are sent
-    outbound over these connections.  ECUs write reverse-status frames back
-    on the same socket, so no extra listen port is needed on the dashboard.
-
-    Wire format (both directions): newline-delimited JSON.
-        Outbound  {"key": "sim/battery/soc", "value": 80,
-                   "source": "host", "ts": "..."}
-        Inbound   {"topic": "dash/status/hvac", "key": "hvac.fan_speed",
-                   "value": 30.0, "status": "on", "source": "vm2", "ts": "..."}
-
-    ``subscribe`` key_expr is matched against the "topic" field (if present)
-    or the "key" field as fallback.
-    """
-
-    def __init__(self, key_routes: dict[str, tuple[str, int]]) -> None:
+class ZenohBus:
+    def __init__(self, endpoints: list[str]) -> None:
+        self.endpoints = endpoints
         self.source = socket.gethostname()
-        self._routes: dict[str, tuple[str, int]] = key_routes
-        self._sockets: dict[tuple[str, int], socket.socket] = {}
+        self._session: Optional[zenoh.Session] = None
+        self._publishers: dict[str, zenoh.Publisher] = {}
+        self._subscribers: list[zenoh.Subscriber] = []
         self._lock = threading.Lock()
-        self._subscribers: list[tuple[str, Callable[[str, dict], None]]] = []
-        # One reader thread per unique endpoint (handles inbound reverse frames).
-        seen: set[tuple[str, int]] = set()
-        for ep in key_routes.values():
-            if ep not in seen:
-                seen.add(ep)
-                threading.Thread(
-                    target=self._reader_loop, args=(ep,), daemon=True
-                ).start()
-        logger.debug(f"TcpBus init with routes: {key_routes}")
+        logger.debug(f"ZenohBus init with endpoints: {endpoints}")
 
-    # ── Connection management ────────────────────────────────────────────────
-
-    def _connect(self, addr: tuple[str, int]) -> Optional[socket.socket]:
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(3.0)
-            sock.connect(addr)
-            sock.settimeout(None)
-            logger.info(f"TcpBus: connected to {addr[0]}:{addr[1]}")
-            return sock
-        except OSError as exc:
-            try:
-                sock.close()
-            except Exception:
-                pass
-            logger.debug(f"TcpBus: cannot connect to {addr}: {exc}")
-            return None
-
-    def _get_socket(self, addr: tuple[str, int]) -> Optional[socket.socket]:
+    def _ensure(self) -> zenoh.Session:
         with self._lock:
-            sock = self._sockets.get(addr)
-            if sock is not None:
-                return sock
-        sock = self._connect(addr)
-        if sock is None:
-            return None
-        with self._lock:
-            existing = self._sockets.get(addr)
-            if existing is not None:
-                try:
-                    sock.close()
-                except Exception:
-                    pass
-                return existing
-            self._sockets[addr] = sock
-        return sock
-
-    def _drop_socket(self, addr: tuple[str, int], sock: socket.socket) -> None:
-        with self._lock:
-            if self._sockets.get(addr) is sock:
-                del self._sockets[addr]
-        try:
-            sock.close()
-        except Exception:
-            pass
-
-    # ── Reader thread (inbound reverse-status frames) ────────────────────────
-
-    def _reader_loop(self, addr: tuple[str, int]) -> None:
-        """Maintain a TCP connection to *addr* and dispatch inbound frames."""
-        while True:
-            sock = self._get_socket(addr)
-            if sock is None:
-                time.sleep(2.0)
-                continue
-            buf = b""
-            try:
-                while True:
-                    chunk = sock.recv(4096)
-                    if not chunk:
-                        break
-                    buf += chunk
-                    while b"\n" in buf:
-                        line, buf = buf.split(b"\n", 1)
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            msg = json.loads(line.decode())
-                        except Exception:
-                            continue
-                        # Match on "topic" if present, else fall back to "key".
-                        topic = str(msg.get("topic", msg.get("key", "")))
-                        logger.debug(f"TcpBus RECV topic='{topic}' from {addr}")
-                        for k, cb in self._subscribers:
-                            if topic == k:
-                                try:
-                                    cb(topic, msg)
-                                except Exception as exc:
-                                    logger.error(f"TcpBus callback error: {exc}")
-            except OSError:
-                pass
-            finally:
-                self._drop_socket(addr, sock)
-            logger.debug(f"TcpBus: lost connection to {addr}, retrying in 1s")
-            time.sleep(1.0)
-
-    # ── Public API ───────────────────────────────────────────────────────────
+            if self._session is not None:
+                return self._session
+            cfg = zenoh.Config()
+            cfg.insert_json5("connect/endpoints", json.dumps(self.endpoints))
+            cfg.insert_json5("listen/endpoints", '["tcp/0.0.0.0:0"]')
+            self._session = zenoh.open(cfg)
+            return self._session
 
     def put(self, key: str, value: float | int) -> None:
-        endpoint = self._routes.get(key)
-        if endpoint is None:
-            logger.warning(f"TcpBus: no route for key '{key}'")
-            return
-        payload = (
-            json.dumps({
-                "key": key,
+        session = self._ensure()
+        with self._lock:
+            pub = self._publishers.get(key)
+            if pub is None:
+                pub = session.declare_publisher(key)
+                self._publishers[key] = pub
+        payload = json.dumps(
+            {
                 "value": value,
                 "source": self.source,
                 "ts": datetime.now(timezone.utc).isoformat(),
-            })
-            + "\n"
-        ).encode()
-        sock = self._get_socket(endpoint)
-        if sock is None:
-            logger.warning(
-                f"TcpBus: no connection to {endpoint}, dropping put '{key}'"
-            )
-            return
-        try:
-            sock.sendall(payload)
-            logger.debug(
-                f"TcpBus PUT {endpoint[0]}:{endpoint[1]} key={key} value={value}"
-            )
-        except OSError as exc:
-            logger.warning(f"TcpBus: send failed to {endpoint}: {exc}")
-            self._drop_socket(endpoint, sock)
+            }
+        ).encode("utf-8")
+        logger.debug(f"PUBLISH: {key} = {value}")
+        pub.put(payload)
 
     def subscribe(self, key_expr: str, callback: Callable[[str, dict], None]) -> None:
-        self._subscribers.append((key_expr, callback))
-        logger.info(f"TcpBus: subscriber registered for '{key_expr}'")
+        session = self._ensure()
+        logger.info(f"Subscribing to: {key_expr}")
+
+        def _listener(sample: zenoh.Sample) -> None:
+            try:
+                raw = sample.payload.to_string()
+                msg = json.loads(raw)
+            except Exception as e:
+                logger.warning(f"Failed to parse message on {sample.key_expr}: {e}")
+                return
+            if not isinstance(msg, dict):
+                logger.warning(f"Message is not dict on {sample.key_expr}: {type(msg)}")
+                return
+            try:
+                logger.debug(f"RECEIVED: {sample.key_expr} = {msg}")
+                callback(str(sample.key_expr), msg)
+            except Exception as e:
+                logger.error(f"Callback error on {sample.key_expr}: {e}")
+                return
+
+        sub = session.declare_subscriber(key_expr, _listener)
+        with self._lock:
+            self._subscribers.append(sub)
 
     def close(self) -> None:
         with self._lock:
-            sockets = list(self._sockets.values())
-            self._sockets.clear()
-        for sock in sockets:
-            try:
-                sock.close()
-            except Exception:
-                pass
+            for sub in self._subscribers:
+                try:
+                    sub.undeclare()
+                except Exception:
+                    pass
+            self._subscribers.clear()
+
+            for pub in self._publishers.values():
+                try:
+                    pub.undeclare()
+                except Exception:
+                    pass
+            self._publishers.clear()
+
+            if self._session is not None:
+                try:
+                    self._session.close()
+                except Exception:
+                    pass
+                self._session = None
 
 
 class SignalRow:
@@ -548,12 +465,20 @@ class IndicatorPanel:
             "source": "local-default",
         })
 
-        self._seat_values["seat.heating"] = 100 if seat_heating_on else 0
-        self._seat_values["seat.heating_cooling"] = -100 if seat_cooling_on else 0
-        self._apply_seat({
-            "key": "seat.heating",
-            "value": self._seat_values["seat.heating"],
-        })
+        ## Move from 2 signals to 1 signal
+        # self._seat_values["seat.heating"] = 100 if seat_heating_on else 0
+        # self._seat_values["seat.heating_cooling"] = -100 if seat_cooling_on else 0
+        if seat_heating_on:
+            self._seat_values["seat.heating_cooling"] = 100   # Heating is ON
+        elif seat_cooling_on:
+            self._seat_values["seat.heating_cooling"] = -100  # Cooling is ON
+        else:
+            self._seat_values["seat.heating_cooling"] = 0     # Neither is ON
+
+        # self._apply_seat({
+        #     "key": "seat.heating",
+        #     "value": self._seat_values["seat.heating"],
+        # })
         self._apply_seat({
             "key": "seat.heating_cooling",
             "value": self._seat_values["seat.heating_cooling"],
@@ -596,11 +521,11 @@ class IndicatorPanel:
             val = 0
         self._seat_values[key] = val
 
-        heating = self._seat_values.get("seat.heating", 0)
+        # heating = self._seat_values.get("seat.heating", 0)
         hc = self._seat_values.get("seat.heating_cooling", 0)
 
-        heat_on = (heating != 0) or (hc > 0)
-        cool_on = (hc < 0)
+        heat_on = hc > 0
+        cool_on = hc < 0
 
         self._render(
             "seat_heat",
@@ -608,7 +533,7 @@ class IndicatorPanel:
             self._seat_heat_circle,
             self._seat_heat_text,
             "red" if heat_on else "grey",
-            f"heating={heating} hc={hc}",
+            f"hc={hc}",
         )
         self._render(
             "seat_cool",
@@ -631,7 +556,7 @@ class Dashboard:
     _DRAIN_TICK_MS = 1000
     _SOC_DRAIN_PER_TICK = 1.0
 
-    def __init__(self, root: Tk, bus: TcpBus) -> None:
+    def __init__(self, root: Tk, bus: ZenohBus) -> None:
         self.root = root
         self.bus = bus
         self._reverse_inhibit: dict[str, float] = {}
@@ -971,23 +896,16 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    key_routes: dict[str, tuple[str, int]] = {
-        "sim/battery/voltage":    (args.vm1, args.bms_port),
-        "sim/battery/current":    (args.vm1, args.bms_port),
-        "sim/battery/soc":        (args.vm1, args.bms_port),
-        "sim/cabin/temp":         (args.vm2, args.hvac_port),
-        "sim/cabin/seat/heating": (args.vm2, args.seat_port),
-        "sim/cabin/seat/hc":      (args.vm2, args.seat_port),
-    }
+    endpoints = [
+        f"tcp/{args.vm1}:{args.bms_port}",
+        f"tcp/{args.vm2}:{args.hvac_port}",
+        f"tcp/{args.vm2}:{args.seat_port}",
+    ]
 
-    print(
-        f"[pytk] TCP routes: VM1={args.vm1}:{args.bms_port}  "
-        f"VM2={args.vm2}:{args.hvac_port}/{args.seat_port}",
-        flush=True,
-    )
-    logger.info(f"Dashboard starting - routes: {key_routes}, log: {LOG_FILE}")
+    print(f"[pytk] dialing Zenoh endpoints: {endpoints}", flush=True)
+    logger.info(f"Dashboard starting - endpoints: {endpoints}, log: {LOG_FILE}")
 
-    bus = TcpBus(key_routes)
+    bus = ZenohBus(endpoints)
     root = Tk()
     Dashboard(root, bus)
     try:

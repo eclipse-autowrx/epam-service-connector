@@ -1,10 +1,10 @@
+
 # Hardware Simulator
 
 `pytk_dashboard.py` is the host-side Tk dashboard for driving the EV Range
-Extender VM services. It publishes battery, HVAC, and seat inputs over direct
-TCP connections, and it listens for reverse status messages from the VM2 ECUs
-on those same connections so the UI can show whether HVAC and seat actions are
-active.
+Extender VM services. It publishes battery, HVAC, and seat inputs over Eclipse
+Zenoh, and it listens for reverse status messages from the VM2 ECUs so the UI
+can show whether HVAC and seat actions are active.
 
 This folder is only the host control surface. VM provisioning, QEMU networking,
 and systemd service deployment are documented in
@@ -14,7 +14,7 @@ and systemd service deployment are documented in
 
 ## What the dashboard controls
 
-| UI section | Control | Signal key | Receiver |
+| UI section | Control | Zenoh key | Receiver |
 |---|---|---|---|
 | Battery | Battery Voltage | `sim/battery/voltage` | VM1 `bms.py` on `tcp/7460` |
 | Battery | Battery Current | `sim/battery/current` | VM1 `bms.py` on `tcp/7460` |
@@ -23,11 +23,10 @@ and systemd service deployment are documented in
 | Cabin Seat | Seat Heating | `sim/cabin/seat/heating` | VM2 `seat_ecu.py` on `tcp/7462` |
 | Cabin Seat | Seat Cooling | `sim/cabin/seat/hc` | VM2 `seat_ecu.py` on `tcp/7462` |
 
-Each publish payload is newline-delimited JSON:
+Each publish payload is JSON:
 
 ```json
 {
-  "key": "sim/cabin/temp",
   "value": 50,
   "source": "host-name",
   "ts": "2026-05-21T...Z"
@@ -43,7 +42,7 @@ turns the other off and publishes the matching off value.
 
 The dashboard also subscribes to status channels from VM2:
 
-| Indicator | Status topic | Source |
+| Indicator | Zenoh key | Source |
 |---|---|---|
 | HVAC Fan | `dash/status/hvac` | `hvac_ecu.py` |
 | Seat Heating / Cooling | `dash/status/seat` | `seat_ecu.py` |
@@ -70,10 +69,13 @@ The drive loop does not run inside the VMs; it is just a host-side publisher.
 Install the host dependencies, then run the dashboard from this directory:
 
 ```bash
-cd path/to/eclipse-sdv-blueprint/hardware-sim
+cd eclipse-sdv-blueprint/hardware-sim
+python3 -m venv venv
+source venv/bin/activate
+chmod +x setup.sh
 ./setup.sh
 python3 -m pip install -r requirements.txt
-python3 pytk_dashboard.py
+python3 pytk_hwsim.py
 ```
 
 `setup.sh` installs the Tk runtime package required by the dashboard UI:
@@ -82,68 +84,3 @@ python3 pytk_dashboard.py
 sudo apt install -y python3-tk
 ```
 
-If you are already using the virtual environment from `qemu-image-creator`, you
-can reuse it:
-
-```bash
-cd path/to/eclipse-sdv-blueprint/qemu-image-creator
-source .venv/bin/activate
-cd ../hardware-sim
-python3 pytk_dashboard.py
-```
-
-Defaults match the QEMU VM setup:
-
-| Target | Default |
-|---|---|
-| VM1 IP | `192.168.100.10` |
-| VM2 IP | `192.168.100.11` |
-| BMS port | `7460` |
-| HVAC port | `7461` |
-| Seat port | `7462` |
-
-
----
-
-## Verify
-
-Tail the VM service logs while moving controls:
-
-```bash
-ssh ubuntu@192.168.100.10 'tail -f /tmp/ev-range-bms.log'
-ssh ubuntu@192.168.100.11 'tail -f /tmp/ev-range-hvac.log'
-ssh ubuntu@192.168.100.11 'tail -f /tmp/ev-range-seat.log'
-```
-
-Tail the range output on VM1:
-
-```bash
-ssh ubuntu@192.168.100.10 'tail -f /tmp/ev-range-range-ai.log'
-```
-
-The dashboard itself logs to:
-
-```bash
-/tmp/pytk_dashboard.log
-```
-
----
-
-## Troubleshooting
-
-If the UI opens but VM logs do not change, check that the QEMU VMs are running
-and that the ECU services are active:
-
-```bash
-ssh ubuntu@192.168.100.10 'systemctl is-active ev-range-bms'
-ssh ubuntu@192.168.100.11 'systemctl is-active ev-range-hvac ev-range-seat'
-```
-
-If Python cannot import Tk:
-
-```bash
-sudo apt install -y python3-tk
-```
-
-If Python dependencies are missing, install dashboard requirements or activate
-the virtual environment used for the QEMU setup.
