@@ -147,7 +147,7 @@ The setup is organized into sub-sections that guide the VM setup and deployment 
 
 This step sets up two qemu VM instances where the SDV application and its surrounding components are run.
 
-- Download the latest Aos VM image package of bosch and provisioning script from the Aos Edge meta-aos-vm release page: [meta-aos-vm releases](https://github.com/aosedge/meta-aos-vm/releases/) VM images named Version 6.x.x-bosch.x (download latest release)
+- Download the latest Aos VM image package of bosch and provisioning script from the AosEdge meta-aos-vm release page: [meta-aos-vm releases](https://github.com/aosedge/meta-aos-vm/releases/) VM images named Version 6.x.x-bosch.x (download latest release)
 
 - Extract the image archive and start the QEMU-based VMs from the same directory:
 
@@ -251,7 +251,7 @@ aos-signer go
 
 #### Section 3 — AosEdge setup
 
-**Automated Aos Edge setup**
+**Automated AosEdge setup**
 
 1. Change into the automation directory
    ```bash
@@ -274,7 +274,7 @@ aos-signer go
    python aos-automation.py
    ```
 
-This script performs the end-to-end Aos Edge setup, including unit config updates, unit set creation, subject creation, and service assignment. It will prompt for the target unit system ID and then update the unit configuration automatically, removing the need for those manual steps in the AosCloud dashboard.
+This script performs the end-to-end AosEdge setup, including unit config updates, unit set creation, subject creation, and service assignment. It will prompt for the target unit system ID and then update the unit configuration automatically, removing the need for those manual steps in the AosCloud dashboard.
 
 After deployment, log in to the units via SSH and verify that the services are running:
 
