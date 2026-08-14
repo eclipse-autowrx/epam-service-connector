@@ -155,6 +155,8 @@ This step sets up two QEMU VM instances where the SDV application and its surrou
 tar -xvf aos-vm-image-genericx86-64-6.1.1-bosch.2.tar.xz
 sudo ./aos_vm.sh run -f .
 ```
+- You may need to run `chmod +x aos_vm.sh` to allow the execution of `aos_vm.sh`.
+
 - If the Aos certificates are unavailable or the setup has not been completed, please follow the steps on [Aos QuickStart](https://docs.aosedge.tech/docs/quick-start/)
 - Complete the QuickStart guide only up to get-access step. No additional steps are required.
 Perform these steps on WSL or Ubuntu.
