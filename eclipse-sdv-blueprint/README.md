@@ -102,9 +102,9 @@ Phase 1 is designed for rapid application development and validation. By running
         ↓
 2. App is published to the AosCloud App Registry once it is successfully build
         ↓
-3. AosCore fetches the latest app and deploy it to the qemu VM
+3. AosCore fetches the latest app and deploy it to the QEMU VM
         ↓
-4. AosCore on the qemu VM configure the app and systemd is running this app as service
+4. AosCore on the QEMU VM configure the app and systemd is running this app as service
         ↓
 5. The app(service) reads/writes vehicle signals via eclipse-kuksa
         ↓
@@ -145,7 +145,7 @@ The setup is organized into sub-sections that guide the VM setup and deployment 
 
 **Prepare the VM environment**
 
-This step sets up two qemu VM instances where the SDV application and its surrounding components are run.
+This step sets up two QEMU VM instances where the SDV application and its surrounding components are run.
 
 - Download the latest Aos VM image package of bosch and provisioning script from the AosEdge meta-aos-vm release page: [meta-aos-vm releases](https://github.com/aosedge/meta-aos-vm/releases/) VM images named Version 6.x.x-bosch.x (download latest release)
 
