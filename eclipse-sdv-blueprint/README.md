@@ -208,7 +208,7 @@ aos-signer go
 
 - Check the [deployment bundles](https://oem.aoscloud.io/oem/deployment-bundles) to confirm that the layers were deployed successfully.
 
--If the deployment does not appear or is rejected, update the service version in `demo-services/ev-range-extender/config.yaml` and re-run `aos-signer go`.
+- If the deployment does not appear or is rejected, update the service version in `demo-services/ev-range-extender/config.yaml` and re-run `aos-signer go`.
 
 **Deploy the demo services**
 
@@ -247,7 +247,7 @@ aos-signer go
 - Open the EV Range Extender application from the playground at [this link](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/view).
 - For ev-range-extender application deployment select [aos-cloud-deployment plugin](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/plug?plugid=aos-cloud-deployment).
 - Upload sp.12 on the aos-deployment plugin (certificates will be available in .aos/security).
-- In the AosCloud Deployment plugin, choose the C++ option, then select the EV Range Extender application from the dropdown menu and click Build and Deploy.
+- In the AosCloud Deployment plugin, choose the `C++` option, then select the `EV Range Extender` application from the dropdown menu and click `Build and Deploy` button.
 
 #### Section 3 — AosEdge setup
 
