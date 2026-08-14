@@ -160,14 +160,15 @@ sudo ./aos_vm.sh run -f .
 - You may need to run `chmod +x aos_vm.sh` to allow the execution of `aos_vm.sh`.
 
 - If the Aos certificates are unavailable or the setup has not been completed, please follow the steps on [Aos QuickStart](https://docs.aosedge.tech/docs/quick-start/)
-- Complete the QuickStart guide only up to get-access step. No additional steps are required.
+
+  - Complete the QuickStart guide only up to get-access step. No additional steps are required.
 Perform these steps on WSL or Ubuntu.
 
-- Required steps:
- 1. [Setup your host](https://docs.aosedge.tech/docs/quick-start/set-up/)
- 1. [Get access](https://docs.aosedge.tech/docs/quick-start/get-access)
+  - Required steps: 
+    1. [Setup your host](https://docs.aosedge.tech/docs/quick-start/set-up/)
+     1. [Get access](https://docs.aosedge.tech/docs/quick-start/get-access)
 
-- Access the VM1 with `ssh root@10.0.0.100` and the secondary node with `ssh root@10.0.0.x`, where the address can be discovered with:
+- Access the main node with `ssh root@10.0.0.100` and the secondary node with `ssh root@10.0.0.x`, where the address can be discovered with:
 
 ```bash
 ip neigh
