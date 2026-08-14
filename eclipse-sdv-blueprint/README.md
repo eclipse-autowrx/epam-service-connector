@@ -307,13 +307,15 @@ crun --root=/run/crun list
  - Even deployment of services can be verfied on [Aos dashboard - units portal](https://oem.aoscloud.io/oem/units) on respective unit .
 
 ### Steps to demo
-1. After performing above steps of Section 1,2 and 3.
-1. Start the hardware simulator by running `./hardware-sim/pytk_hwsim.py` from the `eclipse-sdv-blueprint` directory (see [hardware-sim/README.md](hardware-sim/README.md)).
-1. Add ev-range-extender runtime and select ev-range-extender runtime on [playground dashboard](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/dashboard).
+ _*Above Section 1,2 and 3 should be completed._
+
+1. Open [Playground dashboard](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/dashboard). In the right pane, click `Add Runtime`, input `Runtime-ev-range-extender` runtime, and click `Add`. Find `Runtime-ev-range-extender` in the Runtime drop down and select it.
 
 ![EV Range Extender runtime selection on the playground dashboard](./images/image.png)
 
-1. Once the hardware simulator is running, Click the Start button in the hardware simulator to start simulating driving vehicle.
+1. On your Host, start the hardware simulator by running `./hardware-sim/pytk_hwsim.py` from the `eclipse-sdv-blueprint` directory (see [hardware-sim/README.md](hardware-sim/README.md)).
+
+1. Click `Start` button in the hardware simulator to start simulating driving vehicle.
 
 **Observe the threshold-based behaviour**:
 1. When the battery level reaches 50%, the HVAC fan is automatically turned off.
