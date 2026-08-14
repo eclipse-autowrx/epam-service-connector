@@ -212,11 +212,11 @@ aos-signer go
 
 **Deploy the demo services**
 
-This step deploys the components which produces the data required for the SDV application (ev-range-extender).
+This step deploys the components that produce the data required for the SDV application (ev-range-extender).
 
 - Please perform these steps before deploying demo-services [Debug Steps for Application Deployment](#debug-steps-for-application-deployment).
 
-- The demo-services contains the deployment bundles for the EV Range Extender use case: `bms`, `range-ai`, `seat-ecu`, and `hvac`.
+- The `demo-services` folder contains the deployment bundles for the EV Range Extender use case: `bms`, `range-ai`, `seat-ecu`, and `hvac`.
 
 - In the VM, navigate to the EV Range Extender service directory and package it for deployment:
 
@@ -239,7 +239,7 @@ aos-signer go
 
 - Verify the deployment result in [Aos Dashboard Services](https://sp.aoscloud.io/sp/services).
 - If the deployment does not appear or is rejected, update the service version in `kuksa-syncer/config.yaml` and re-run `aos-signer go`.
-- Please verfiy [deployment bundles](https://sp.aoscloud.io/sp/deployment-bundles) if any errors occured during deployment.
+- Please verify [deployment bundles](https://sp.aoscloud.io/sp/deployment-bundles) if any errors occur during deployment.
 
 #### Section 2 — Build and deploy the SDV application
 
@@ -281,7 +281,7 @@ After deployment, log in to the units via SSH and verify that the services are r
 ```bash
 crun --root=/run/crun list
 ```
-- Even deployment of services can be verfied on [units portal](https://oem.aoscloud.io/oem/units) on respective unit.
+- Service deployments can be verified on the [units portal](https://oem.aoscloud.io/oem/units) for the respective unit.
 
 **Manual steps for Aos-Edge**
 
@@ -299,12 +299,12 @@ Hint: This step is optional if the automation setup has already been completed.
 
   - After creating the required unit_set and subject in the Aos dashboard, deployment can be bound to the target VM and services will be deployed on respective VM's.
 
-  - Check application deployment on both VMs by login to units using ssh and verify the serivces deployed or not using 
+  - Check application deployment on both VMs by logging in to the units via SSH and verify whether serivces are deployed by:
 
 ```bash
 crun --root=/run/crun list
 ```
- - Even deployment of services can be verfied on [Aos dashboard - units portal](https://oem.aoscloud.io/oem/units) on respective unit .
+ - Service deployments can be verfied on the [Aos dashboard - units portal](https://oem.aoscloud.io/oem/units) for the respective unit .
 
 ### Steps to demo
  _*Above Section 1,2 and 3 should be completed._
@@ -321,7 +321,7 @@ crun --root=/run/crun list
 1. When the battery level reaches 50%, the HVAC fan is automatically turned off.
 2. When the battery level reaches 30%, additional power-saving measures are applied, and the seat heating/cooling functions are turned off.
 3. When the HVAC fan is turned off, a slight increase in the estimated driving range can be observed.
-4. When the seat heating/cooling functions are also disabled, the estimated driving range increases furthe
+4. When the seat heating/cooling functions are also disabled, the estimated driving range increases further.
 5. Log in to VM1 using SSH:
 
 ```bash
