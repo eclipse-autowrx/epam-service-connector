@@ -149,6 +149,8 @@ This step sets up two QEMU VM instances where the SDV application and its surrou
 
 - Download the latest Aos VM image package of bosch and provisioning script from the AosEdge meta-aos-vm release page: [meta-aos-vm releases](https://github.com/aosedge/meta-aos-vm/releases/) VM images named Version 6.x.x-bosch.x (download latest release)
 
+  - As an alternative to using the release images, you can build the VM image yourself by following [meta-aos-vm](https://github.com/aosedge/meta-aos-vm) on the `demo-bosch` branch.
+
 - Extract the image archive and start the QEMU-based VMs from the same directory:
 
 ```bash
@@ -173,19 +175,14 @@ ip neigh
 
 - Use `Password1` as the password when prompted to log in to the VMs.
 
-- Monitor the boot and service logs with:
+- If needed, monitor the boot and service logs with `journalctl -f`.
 
-```bash
-journalctl -f
-```
 - Provision the VMs to AosCloud on Host:
 
 ```bash
 source ~/.aos/venv/bin/activate
 aos-prov provision -u 10.0.0.100
 ```
-
-- As an alternative to using the release images, you can build the VM image yourself by following [meta-aos-vm](https://github.com/aosedge/meta-aos-vm) on the `demo-bosch` branch.
 
 - Log in to the [Aos Dashboard](https://api.aoscloud.io/account/start), select the OEM login option, and choose the certificate-based sign-in that appears when you open the [Units tab](https://oem.aoscloud.io/oem/units).
 
