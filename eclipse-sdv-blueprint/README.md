@@ -153,10 +153,11 @@ This step sets up two QEMU VM instances where the SDV application and its surrou
 
 - Extract the image archive and start the QEMU-based VMs from the same directory:
 
-```bash
-tar -xvf aos-vm-image-genericx86-64-6.1.1-bosch.2.tar.xz
-sudo ./aos_vm.sh run -f .
-```
+  ```bash
+  tar -xvf aos-vm-image-genericx86-64-6.1.1-bosch.2.tar.xz
+  sudo ./aos_vm.sh run -f .
+  ```
+
 - You may need to run `chmod +x aos_vm.sh` to allow the execution of `aos_vm.sh`.
 
 - If the Aos certificates are unavailable or the setup has not been completed, please follow the steps on [Aos QuickStart](https://docs.aosedge.tech/docs/quick-start/)
@@ -170,9 +171,9 @@ Perform these steps on WSL or Ubuntu.
 
 - Access the main node with `ssh root@10.0.0.100` and the secondary node with `ssh root@10.0.0.x`, where the address can be discovered with:
 
-```bash
-ip neigh
-```
+  ```bash
+  ip neigh
+  ```
 
 - Use `Password1` as the password when prompted to log in to the VMs.
 
@@ -180,10 +181,10 @@ ip neigh
 
 - Provision the VMs to AosCloud on Host:
 
-```bash
-source ~/.aos/venv/bin/activate
-aos-prov provision -u 10.0.0.100
-```
+  ```bash
+  source ~/.aos/venv/bin/activate
+  aos-prov provision -u 10.0.0.100
+  ```
 
 - Log in to the [Aos Dashboard](https://api.aoscloud.io/account/start), select the OEM login option, and choose the certificate-based sign-in that appears when you open the [Units tab](https://oem.aoscloud.io/oem/units).
 
@@ -197,12 +198,12 @@ This step installs the core components e.g. `kuksa-client`, `zenoh`, and `pylibs
 
 - Extract the archive and publish the layers using the signing flow:
 
-```bash
-source ~/.aos/venv/bin/activate
-tar -xvf aos-vm-layers-genericx86-64-6.1.1-bosch.2.tar.gz
-cd layers
-aos-signer go
-```
+  ```bash
+  source ~/.aos/venv/bin/activate
+  tar -xvf aos-vm-layers-genericx86-64-6.1.1-bosch.2.tar.gz
+  cd layers
+  aos-signer go
+  ```
 
 - After the publish step, verify in the [AosCloud Layers-Service Provider](https://sp.aoscloud.io/sp/layers) portal that the expected layers are available in the Layers section. The layers that should appear are `kuksa-client`, `zenoh`, and `pylibs`.
 
@@ -220,22 +221,22 @@ This step deploys the components that produce the data required for the SDV appl
 
 - In the VM, navigate to the EV Range Extender service directory and package it for deployment:
 
-```bash
-source ~/.aos/venv/bin/activate
-cd epam-service-connector/eclipse-sdv-blueprint/demo-services/ev-range-extender
-aos-signer go
-```
+  ```bash
+  source ~/.aos/venv/bin/activate
+  cd epam-service-connector/eclipse-sdv-blueprint/demo-services/ev-range-extender
+  aos-signer go
+  ```
 - After the publish step, verify in the [AosCloud Service-Service Provider](https://sp.aoscloud.io/sp/services).
 
 **Playground Dashboard Connectivity**
 
 - Kuksa-syncer is used for dashboard connectivity of playground which will be deployed on AosCloud platform .
 
-```bash
-source ~/.aos/venv/bin/activate
-cd epam-service-connector/eclipse-sdv-blueprint/kuksa-syncer
-aos-signer go
-```
+  ```bash
+  source ~/.aos/venv/bin/activate
+  cd epam-service-connector/eclipse-sdv-blueprint/kuksa-syncer
+  aos-signer go
+  ```
 
 - Verify the deployment result in [Aos Dashboard Services](https://sp.aoscloud.io/sp/services).
 - If the deployment does not appear or is rejected, update the service version in `kuksa-syncer/config.yaml` and re-run `aos-signer go`.
@@ -301,9 +302,10 @@ Hint: This step is optional if the automation setup has already been completed.
 
   - Check application deployment on both VMs by logging in to the units via SSH and verify whether serivces are deployed by:
 
-```bash
-crun --root=/run/crun list
-```
+    ```bash
+    crun --root=/run/crun list
+    ```
+
  - Service deployments can be verfied on the [Aos dashboard - units portal](https://oem.aoscloud.io/oem/units) for the respective unit .
 
 ### Steps to demo
@@ -324,14 +326,16 @@ crun --root=/run/crun list
 4. When the seat heating/cooling functions are also disabled, the estimated driving range increases further.
 5. Log in to VM1 using SSH:
 
-```bash
-ssh root@10.0.0.100
-```
+    ```bash
+    ssh root@10.0.0.100
+    ```
+
 6. Monitor the application logs by running:
 
-```bash
-journalctl -f | grep "range-ext"
-```
+    ```bash
+    journalctl -f | grep "range-ext"
+    ```
+
 7. Check the application level logs
 
 ### Signal Flow and Internals
@@ -348,76 +352,75 @@ The demo runs as a closed loop across host, virtual machines, and the playground
 
 Before performing these checks, verify the bridge and external interface names on your host and replace `aos-br0` / `eth0` if they differ.
 
-2. Check the bridge and IP forwarding still exist
+1. Check the bridge and IP forwarding still exist
 
-```bash
-ip addr show aos-br0
-cat /proc/sys/net/ipv4/ip_forward
-```
+    ```bash
+    ip addr show aos-br0
+    cat /proc/sys/net/ipv4/ip_forward
+    ```
 
-This should show `10.0.0.1/24` on the bridge and `1` for forwarding. If forwarding shows `0`:
+2. This should show `10.0.0.1/24` on the bridge and `1` for forwarding. 
+<br>
+<br>
+If forwarding shows `0`:
 
-```bash
-sudo sysctl -w net.ipv4.ip_forward=1
-```
+    ```bash
+    sudo sysctl -w net.ipv4.ip_forward=1
+    ```
 
 3. Check MASQUERADE rule exists (this is the one that keeps disappearing)
 
-```bash
-sudo iptables -t nat -L POSTROUTING -n -v
-```
+    ```bash
+    sudo iptables -t nat -L POSTROUTING -n -v
+    ```
 
-If it's empty, re-add it using your external interface name instead of `eth0`:
+    If it's empty, re-add it using your external interface name instead of `eth0`:
 
-```bash
-sudo iptables -t nat -A POSTROUTING -o <external-interface> -j MASQUERADE
-```
+   ```bash
+   sudo iptables -t nat -A POSTROUTING -o <external-interface> -j MASQUERADE
+   ```
 
 4. Check FORWARD chain allows traffic both ways
 
-```bash
-sudo iptables -L FORWARD -n -v
-```
-
-It should show `aos-br0→<external-interface> ACCEPT` and `<external-interface>→aos-br0 ACCEPT` with state `RELATED,ESTABLISHED`. If missing:
-
-```bash
-sudo iptables -A FORWARD -i aos-br0 -o <external-interface> -j ACCEPT
-sudo iptables -A FORWARD -i <external-interface> -o aos-br0 -m state --state RELATED,ESTABLISHED -j ACCEPT
-```
-
-Use the actual interface name on your machine, for example `eth0`, `ens33`, `enp3s0`, or another host-facing NIC.
+    ```bash
+    sudo iptables -L FORWARD -n -v
+    ```
+    It should show `aos-br0→<external-interface> ACCEPT` and `<external-interface>→aos-br0 ACCEPT` with state `RELATED,ESTABLISHED`. If missing:
+    ```bash
+    sudo iptables -A FORWARD -i aos-br0 -o <external-interface> -j ACCEPT
+    sudo iptables -A FORWARD -i <external-interface> -o aos-br0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+    ```
+    Use the actual interface name on your machine, for example `eth0`, `ens33`, `enp3s0`, or another host-facing NIC.
 
 ### Debug Steps for Application Deployment
 
 1. SSH into the Secondary-VM :
 
-```bash
-ssh ubuntu@10.0.0.X 
-```
+    ```bash
+    ssh ubuntu@10.0.0.X 
+    ```
+    If the filesystem is mounted read-only, remount it as writable:
+    
+    ```bash
+    mount -o rw,remount /
+    ```
 
-- If the filesystem is mounted read-only, remount it as writable:
-
-```bash
-mount -o rw,remount /
-```
-
-- note:To get to know Secondary-VM ip 
-```bash
-ip neigh
-```
+- note: To find the secondary-VM ip 
+    ```bash
+    ip neigh
+    ```
 
 2. Open `/etc/hosts` for editing with `vi`:
 
-```bash
-vi /etc/hosts
-```
+    ```bash
+    vi /etc/hosts
+    ```
 
 3. Add the following entry to the file:
 
-```text
-10.0.0.100 main
-```
+    ```text
+    10.0.0.100 main
+    ```
 
 4. Save and exit `vi`:
 
@@ -427,9 +430,9 @@ vi /etc/hosts
 
 5. Verify DNS resolution for `main`:
 
-```bash
-nslookup main
-```
+    ```bash
+    nslookup main
+    ```
 
 
 ---
