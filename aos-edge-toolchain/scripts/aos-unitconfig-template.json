@@ -1,0 +1,18 @@
+{
+    "nodes": [
+        {
+            "nodeType": "aos-bosch-vm-main",
+            "labels": [
+                "main"
+            ],
+            "priority": 100
+        },
+        {
+            "nodeType": "aos-bosch-vm-secondary",
+            "labels": [
+                "secondary"
+            ],
+            "priority": 50
+        }
+    ]
+}

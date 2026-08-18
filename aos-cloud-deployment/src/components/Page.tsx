@@ -93,6 +93,14 @@ export default function Page({ data, config }: PluginProps) {
   const [selectedSubjectId, setSelectedSubjectId] = React.useState<string>('')
   const aosCloudLoadedRef = React.useRef<boolean>(false)
 
+  // AosEdge setup automation (native equivalent of aos-automation.py), run against the unit selected below
+  const [isRunningAutomation, setIsRunningAutomation] = React.useState<boolean>(false)
+  const [automationResult, setAutomationResult] = React.useState<{ status: 'success' | 'error'; message: string; dashboardUrl?: string } | null>(null)
+
+  // OEM certificate — the automation's provisioning steps require OEM-level AosCloud permissions
+  const [oemCertStatus, setOemCertStatus] = React.useState<{ loaded: boolean; identity?: CertIdentity | null } | null>(null)
+  const [isUploadingOemCert, setIsUploadingOemCert] = React.useState<boolean>(false)
+
   const aosServiceRef = React.useRef<AosService | null>(null)
   const buildLogsRef = React.useRef<HTMLDivElement>(null)
   const pollingIntervalRef = React.useRef<any>(null)
@@ -1066,6 +1074,38 @@ export default function Page({ data, config }: PluginProps) {
     } catch (e) { /* ignore */ }
   }
 
+  // Runs the AosEdge setup automation against the unit currently selected in the Units list.
+  const runAosSetupAutomation = async () => {
+    if (!aosServiceRef.current) return
+    const units = showAllUnits ? allUnits : serviceUnits
+    const unit = units.find((u: any) => u.uid === selectedMonitorUnit)
+    const systemUid = unit?.systemUid || ''
+    if (!systemUid) {
+      addLog('[Automation] Select a unit first')
+      return
+    }
+
+    setIsRunningAutomation(true)
+    setAutomationResult(null)
+    addLog(`[Automation] Starting AosEdge setup for unit ${systemUid}...`)
+    try {
+      const res = await aosServiceRef.current.runAosAutomation(systemUid)
+      for (const step of res.steps || []) addLog(`[Automation] ${step}`)
+      if (res.status === 'success') {
+        setAutomationResult({ status: 'success', message: res.message, dashboardUrl: res.dashboardUrl })
+        addLog('[Automation] Completed successfully')
+      } else {
+        setAutomationResult({ status: 'error', message: res.message || 'Automation failed' })
+        addLog(`[Automation] Failed: ${res.message}`)
+      }
+    } catch (err: any) {
+      setAutomationResult({ status: 'error', message: err.message || 'Automation failed' })
+      addLog(`[Automation] Error: ${err.message}`)
+    } finally {
+      setIsRunningAutomation(false)
+    }
+  }
+
   // Worker info returned by coordinator after cert upload
   const [workerInfo, setWorkerInfo] = React.useState<{ instanceId?: string; port?: number; userCN?: string } | null>(null)
 
@@ -1153,6 +1193,30 @@ export default function Page({ data, config }: PluginProps) {
       addLog(`[Cert] Remove failed: ${err.message}`)
     } finally {
       setIsRemovingCert(false)
+    }
+  }
+
+  // Uploads the OEM certificate the automation's provisioning steps need (unit config/unit-set/subject writes require OEM-level permissions on AosCloud).
+  const handleOemCertUpload = async (e: any) => {
+    const file = e.target.files?.[0]
+    if (!file || !aosServiceRef.current) return
+
+    setIsUploadingOemCert(true)
+    try {
+      const arrayBuffer = await file.arrayBuffer()
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
+      const result = await aosServiceRef.current.uploadCertificate(base64, 'aos-user-oem')
+      if (result.status === 'success') {
+        setOemCertStatus({ loaded: true, identity: result.identity ?? null })
+        addLog(`[OEM Cert] Uploaded${result.identity?.cn ? `: CN=${result.identity.cn}` : ''}`)
+      } else {
+        addLog(`[OEM Cert] Upload failed: ${result.message}`)
+      }
+    } catch (err: any) {
+      addLog(`[OEM Cert] Upload failed: ${err.message}`)
+    } finally {
+      setIsUploadingOemCert(false)
+      e.target.value = ''
     }
   }
 
@@ -2410,6 +2474,70 @@ export default function Page({ data, config }: PluginProps) {
               )
             )
           })()
+        ),
+
+        // AosEdge setup automation — native equivalent of aos-automation.py, run
+        // against the unit currently selected above (no Python process involved).
+        React.createElement('div', { style: styles.card },
+          React.createElement('div', { style: styles.cardHeader },
+            React.createElement('div', { style: styles.cardTitle },
+              React.createElement(Icon, { name: 'settings', size: 16, color: '#6366f1' }),
+              'AosEdge Setup'
+            )
+          ),
+          React.createElement('div', { style: { padding: '12px', display: 'flex', flexDirection: 'column' as const, gap: '8px' } },
+            React.createElement('div', { style: { fontSize: '11px', color: '#6b7280' } },
+              (() => {
+                const units = showAllUnits ? allUnits : serviceUnits
+                const unit = units.find((u: any) => u.uid === selectedMonitorUnit)
+                return unit
+                  ? `Target unit: ${unit.name} (${unit.systemUid || unit.uid})`
+                  : 'Select a unit above to run setup'
+              })()
+            ),
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px' } },
+              React.createElement('span', { style: { color: '#6b7280' } }, 'OEM certificate (required for setup):'),
+              oemCertStatus?.loaded
+                ? React.createElement('span', { style: { color: '#16a34a' } }, oemCertStatus.identity?.cn ? `Loaded — ${oemCertStatus.identity.cn}` : 'Loaded')
+                : React.createElement('label', {
+                    style: {
+                      color: '#2563eb', cursor: 'pointer', padding: '2px 8px', borderRadius: '4px',
+                      border: '1px solid #bfdbfe', backgroundColor: '#eff6ff'
+                    }
+                  },
+                    React.createElement('input', {
+                      type: 'file', accept: '.p12,.pfx', onChange: handleOemCertUpload,
+                      disabled: isUploadingOemCert, style: { display: 'none' }
+                    }),
+                    isUploadingOemCert ? 'Uploading…' : 'Upload OEM .p12'
+                  )
+            ),
+            React.createElement('button', {
+              onClick: runAosSetupAutomation,
+              disabled: isRunningAutomation || !selectedMonitorUnit,
+              style: {
+                ...styles.button, ...styles.buttonPrimary,
+                ...(isRunningAutomation || !selectedMonitorUnit ? styles.buttonDisabled : {})
+              },
+              title: 'Runs unit config update, unit set, subject, and service assignment — same steps as aos-automation.py'
+            }, isRunningAutomation ? 'Running setup…' : 'Run AosEdge Setup'),
+            automationResult && React.createElement('div', {
+              style: {
+                fontSize: '11px', padding: '8px', borderRadius: '4px',
+                backgroundColor: automationResult.status === 'success' ? '#f0fdf4' : '#fef2f2',
+                color: automationResult.status === 'success' ? '#16a34a' : '#dc2626',
+                whiteSpace: 'pre-wrap' as const
+              }
+            },
+              automationResult.message,
+              automationResult.dashboardUrl && React.createElement('div', { style: { marginTop: '4px' } },
+                React.createElement('a', {
+                  href: automationResult.dashboardUrl, target: '_blank', rel: 'noopener noreferrer',
+                  style: { color: '#2563eb' }
+                }, 'Open Playground dashboard')
+              )
+            )
+          )
         ),
 
         // Monitoring + Alerts moved to the Unit Detail overlay (opens on

@@ -148,6 +148,33 @@ With the orchestrator, each user uploads their own .p12 via the UI. The
 orchestrator extracts the CN, creates a dedicated worker, and stores the
 cert in an isolated Docker volume. No more cert collisions between users.
 
+An **OEM certificate** (`aos-user-oem.p12`) is required in addition to the SP
+certificate for the **AosEdge Setup** automation button below — AosCloud
+rejects unit-config/unit-set/subject writes from an SP-only identity with
+`403 Forbidden`.
+
+---
+
+## AosEdge Setup Automation
+
+The **AosEdge Setup** card (below the Units list) runs the same provisioning
+sequence as the `aos-automation.py` script in
+`eclipse-sdv-blueprint/Aosedge-Automation/`, natively in the toolchain backend
+(no Python process is invoked):
+
+1. Update the target unit's config from the bundled `unitconfig.json` template and verify it
+2. Create the unit set (`ev-range-extender-unitset`) if it doesn't exist
+3. Assign the selected unit to that unit set
+4. Create the subject (`ev-range-extender-subject`) if it doesn't exist
+5. Assign the unit to the subject
+6. Assign the required services (by codename) to the subject
+
+Steps are idempotent — re-running after a partial success treats "already
+exists/assigned" responses as success, same as the Python script. Select a
+unit from the Units list first (the button stays disabled until one is
+selected), then upload your **OEM certificate** and click **Run AosEdge
+Setup**. Progress and the final Playground dashboard link appear inline.
+
 ---
 
 ## Orchestrator Environment Variables

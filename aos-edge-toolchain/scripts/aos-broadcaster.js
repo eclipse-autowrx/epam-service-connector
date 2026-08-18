@@ -8,7 +8,7 @@
 // SPDX-License-Identifier: MIT
 
 const io = require('socket.io-client');
-const { exec } = require('child_process');
+const { exec, execFile } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs').promises;
 const path = require('path');
@@ -319,6 +319,9 @@ async function routeCommand(data) {
       case 'aos_get_unit_info':
         response = await handleGetUnitInfo(data);
         break;
+      case 'aos_run_automation':
+        response = await handleRunAutomation(data);
+        break;
       default:
         response = {
           id: data.id,
@@ -420,7 +423,8 @@ async function main() {
         'aos_get_service_stdout',
         'aos_signal_stream',
         'aos_get_toolchain_info',
-        'aos_get_unit_info'
+        'aos_get_unit_info',
+        'aos_run_automation'
       ],
       type: 'aos-edge-toolchain',
       suffix: instanceId.split('-')[0],
@@ -1222,6 +1226,326 @@ async function curlAosCloud(apiPath, useOemCert) {
     { env: { ...process.env }, timeout: 15000 }
   );
   return JSON.parse(stdout);
+}
+
+// --- AosEdge setup automation (native JS re-implementation of aos-automation.py) ---
+// Mirrors eclipse-sdv-blueprint/Aosedge-Automation/aos-automation.py step-for-step.
+// Uses execFile (argument array) instead of a shell string to avoid command injection,
+// since systemUid originates from a UI selection sent over the socket.
+const execFileAsync = promisify(execFile);
+
+const AOS_UNIT_SET_TITLE = 'ev-range-extender-unitset';
+const AOS_SUBJECT_LABEL = 'ev-range-extender-subject';
+const AOS_SERVICE_CODENAMES = [
+  'ev-range-extender',
+  'kuksa-syncer',
+  'demo-ev-range-extender-bms',
+  'demo-ev-range-extender-hvac-ecu',
+  'demo-ev-range-extender-range-ai',
+  'demo-ev-range-extender-seat-ecu',
+];
+const AOS_PLAYGROUND_DASHBOARD_URL =
+  'https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/dashboard';
+const AOS_UNIT_CONFIG_TEMPLATE_PATH = path.join(__dirname, 'aos-unitconfig-template.json');
+
+// Issues an AosCloud API request via execFile (no shell) and returns {status, json}.
+async function curlJson(method, apiPath, { params, body, useOemCert = true } = {}) {
+  const cert = useOemCert ? resolveOemCertPath() : certPath;
+  const url = new URL(`${aoscloudUrl}/api/v11/${apiPath}`);
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
+    }
+  }
+  const args = [
+    '-k', '--http1.1', '-sS', '-X', method, url.toString(),
+    '--cert', cert, '--cert-type', 'P12',
+    '-H', 'accept: application/json',
+    '-w', '\n__STATUS__:%{http_code}',
+  ];
+  if (body !== undefined) {
+    args.push('-H', 'Content-Type: application/json', '--data', JSON.stringify(body));
+  }
+  const { stdout } = await execFileAsync('curl', args, { timeout: 20000 });
+  const marker = '\n__STATUS__:';
+  const idx = stdout.lastIndexOf(marker);
+  const rawBody = idx >= 0 ? stdout.slice(0, idx) : stdout;
+  const status = idx >= 0 ? parseInt(stdout.slice(idx + marker.length).trim(), 10) : 0;
+  let json = {};
+  if (rawBody.trim()) {
+    try { json = JSON.parse(rawBody); } catch (e) { json = { _raw: rawBody }; }
+  }
+  return { status, json };
+}
+
+function compareVersions(a, b) {
+  const pa = String(a).split('.');
+  const pb = String(b).split('.');
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const xa = pa[i], xb = pb[i];
+    if (xa === undefined) return -1;
+    if (xb === undefined) return 1;
+    const na = Number(xa), nb = Number(xb);
+    if (!Number.isNaN(na) && !Number.isNaN(nb)) {
+      if (na !== nb) return na - nb;
+    } else if (xa !== xb) {
+      return xa < xb ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
+async function findUnitIdBySystemUid(systemUid) {
+  const { status, json } = await curlJson('GET', 'units/', { params: { system_uid: systemUid } });
+  if (status >= 400) throw new Error(`Failed to look up unit '${systemUid}': HTTP ${status}`);
+  const total = json.total ?? (json.items ? json.items.length : 0);
+  if (!total) throw new Error(`No units found with system_uid '${systemUid}'`);
+  if (total > 1) throw new Error(`More than one unit found with system_uid '${systemUid}'`);
+  return json.items[0].id;
+}
+
+async function resolveUnitModelId(unitId) {
+  const { status, json } = await curlJson('GET', `units/${unitId}/`);
+  if (status >= 400) throw new Error(`Failed to fetch unit '${unitId}': HTTP ${status}`);
+  const model = json.model;
+  if (!model) throw new Error(`Unit '${unitId}' has no model assigned`);
+  if (typeof model === 'string') return model;
+  if (model.id) return model.id;
+  throw new Error(`Unsupported model format for unit '${unitId}'`);
+}
+
+function normalizeUnitConfigPayload(payload) {
+  if (payload && typeof payload === 'object' && payload.unit_config && typeof payload.unit_config === 'object') {
+    return payload.unit_config;
+  }
+  return payload;
+}
+
+async function loadUnitConfigTemplate() {
+  const raw = await fs.readFile(AOS_UNIT_CONFIG_TEMPLATE_PATH, 'utf-8');
+  return normalizeUnitConfigPayload(JSON.parse(raw));
+}
+
+// Order-independent equality for objects (AosCloud re-serializes keys in its own order); arrays stay order-sensitive.
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (typeof a !== typeof b || a === null || b === null) return a === b;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((item, i) => deepEqual(item, b[i]));
+  }
+  if (typeof a === 'object') {
+    const aKeys = Object.keys(a);
+    const bKeys = Object.keys(b);
+    if (aKeys.length !== bKeys.length) return false;
+    return aKeys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && deepEqual(a[key], b[key]));
+  }
+  return false;
+}
+
+async function updateTargetUnitConfig(systemUid) {
+  const unitConfig = await loadUnitConfigTemplate();
+  const unitId = await findUnitIdBySystemUid(systemUid);
+  const modelId = await resolveUnitModelId(unitId);
+  const { status, json } = await curlJson('PATCH', `unit-models/${modelId}/`, { body: { unit_config: unitConfig } });
+  if (status >= 400) throw new Error(`Failed to update unit config: HTTP ${status} ${JSON.stringify(json)}`);
+}
+
+async function verifyUnitConfigMatchesTemplate(systemUid) {
+  const desired = await loadUnitConfigTemplate();
+  const unitId = await findUnitIdBySystemUid(systemUid);
+  const modelId = await resolveUnitModelId(unitId);
+
+  const { status, json: configList } = await curlJson('GET', `unit-models/${modelId}/unit-configs/`);
+  if (status >= 400) throw new Error(`Failed to fetch unit configs: HTTP ${status}`);
+
+  let current;
+  if ((configList.total || 0) > 0) {
+    const items = configList.items || [];
+    const latest = items.reduce((best, cur) =>
+      compareVersions(cur.version || '0', best.version || '0') > 0 ? cur : best
+    );
+    current = latest.unit_config || {};
+  } else {
+    const { status: s2, json: modelInfo } = await curlJson('GET', `unit-models/${modelId}/`);
+    if (s2 >= 400) throw new Error(`Failed to fetch unit model: HTTP ${s2}`);
+    current = modelInfo.unit_config || {};
+  }
+
+  if (!deepEqual(current, desired)) {
+    throw new Error('Verification failed: current unit config does not match local unitconfig.json template');
+  }
+}
+
+async function getDefaultFleetId() {
+  const { status, json } = await curlJson('GET', 'fleets/default/');
+  if (status >= 400 || !json.id) throw new Error(`Failed to resolve default fleet ID: HTTP ${status}`);
+  return json.id;
+}
+
+async function findUnitSetIdByTitle(title) {
+  const { status, json } = await curlJson('GET', 'unit-sets/', { params: { search: title } });
+  if (status >= 400) throw new Error(`Failed to search unit sets: HTTP ${status}`);
+  const match = (json.items || []).find((item) => item.title === title);
+  return match ? match.id : null;
+}
+
+async function createUnitSet(title) {
+  const existingId = await findUnitSetIdByTitle(title);
+  if (existingId) return existingId;
+  const fleetId = await getDefaultFleetId();
+  const body = { title, fleet: fleetId, description: '', update_strategy: 'MinimizeRestarts', is_validation_set: true };
+  const { status, json } = await curlJson('POST', 'unit-sets/', { body });
+  if (status !== 201) throw new Error(`Failed to create unit set '${title}': HTTP ${status} ${JSON.stringify(json)}`);
+  return json.id;
+}
+
+async function assignUnitToUnitSet(unitSetTitle, systemUid) {
+  const unitSetId = await findUnitSetIdByTitle(unitSetTitle);
+  if (!unitSetId) throw new Error(`No unit set found with title '${unitSetTitle}'`);
+  const { status, json } = await curlJson('POST', `unit-sets/${unitSetId}/units/`, { body: { system_uids: [systemUid] } });
+  if (status === 200 || status === 201 || status === 409) return;
+  const text = JSON.stringify(json).toLowerCase();
+  if (status === 400 && (text.includes('already') || text.includes('exists'))) return;
+  throw new Error(`Failed to assign unit to unit set '${unitSetTitle}': HTTP ${status} ${JSON.stringify(json)}`);
+}
+
+async function findSubjectIdByLabel(label) {
+  const { status, json } = await curlJson('GET', 'subjects/', { params: { label } });
+  if (status >= 400) throw new Error(`Failed to search subjects: HTTP ${status}`);
+  const total = json.total ?? (json.items ? json.items.length : 0);
+  if (!total) return null;
+  if (total > 1) throw new Error(`More than one subject found with label '${label}'`);
+  return json.items[0].id;
+}
+
+async function createSubject(label) {
+  const existingId = await findSubjectIdByLabel(label);
+  if (existingId) return existingId;
+  const { status, json } = await curlJson('POST', 'subjects/', { body: { label, priority: 0, is_group: false } });
+  if (status >= 400) throw new Error(`Failed to create subject '${label}': HTTP ${status} ${JSON.stringify(json)}`);
+  return json.id;
+}
+
+async function assignUnitToSubject(subjectLabel, systemUid) {
+  const subjectId = await createSubject(subjectLabel);
+  const { status, json } = await curlJson('POST', `subjects/${subjectId}/units/`, { body: { system_uids: [systemUid] } });
+  if (status === 201 || status === 409) return;
+  const text = JSON.stringify(json).toLowerCase();
+  if (text.includes('already contains')) return;
+  throw new Error(`Failed to assign unit to subject '${subjectLabel}': HTTP ${status} ${JSON.stringify(json)}`);
+}
+
+async function getAllServices() {
+  const limit = 200;
+  let offset = 0;
+  const all = [];
+  while (true) {
+    const { status, json } = await curlJson('GET', 'services/', { params: { limit, offset } });
+    if (status >= 400) throw new Error(`Failed to list services: HTTP ${status}`);
+    const items = json.items || [];
+    all.push(...items);
+    const total = json.total || 0;
+    offset += limit;
+    if (all.length >= total || items.length === 0) break;
+  }
+  return all;
+}
+
+async function resolveServiceIdOrRaise(codename) {
+  const services = await getAllServices();
+  const exact = services.filter((s) => (s.codename || '') === codename);
+  if (exact.length === 1) return exact[0].id;
+  if (exact.length > 1) {
+    throw new Error(`More than one exact service found for codename '${codename}'. Matching IDs: ${exact.map((s) => s.id).join(', ')}`);
+  }
+  const close = services
+    .map((s) => s.codename || '')
+    .filter((c) => c && (codename.toLowerCase().includes(c.toLowerCase()) || c.toLowerCase().includes(codename.toLowerCase())));
+  throw new Error(`Required service codename '${codename}' not found in visible services. Close matches: ${close.slice(0, 10).join(', ') || 'none'}.`);
+}
+
+async function assignServiceToSubject(subjectLabel, serviceCodename) {
+  const subjectId = await findSubjectIdByLabel(subjectLabel);
+  if (!subjectId) throw new Error(`No subject found with label '${subjectLabel}'`);
+  const serviceId = await resolveServiceIdOrRaise(serviceCodename);
+  const { status, json } = await curlJson('POST', `subjects/${subjectId}/services/`, { body: { service_ids: [serviceId] } });
+  if (status === 200 || status === 201 || status === 204 || status === 409) return;
+  const text = JSON.stringify(json).toLowerCase();
+  if (text.includes('already contains') || text.includes('already assigned') || text.includes('already exists')) return;
+  if (status === 400 && text.includes('without versions in "ready" state cannot be assigned')) {
+    throw new Error(`Service '${serviceCodename}' (${serviceId}) is not assignable: ${JSON.stringify(json)}`);
+  }
+  throw new Error(`Failed to assign service '${serviceCodename}' (${serviceId}): HTTP ${status} ${JSON.stringify(json)}`);
+}
+
+// Runs the full AosEdge setup sequence for the given unit's system UID —
+// same steps/order/idempotency as aos-automation.py, called natively (no Python process).
+async function handleRunAutomation(data) {
+  const systemUid = (data.systemUid || '').trim();
+  if (!systemUid) {
+    return { kit_id: instanceId, type: 'aos_run_automation', status: 'error', message: 'No unit selected — select a unit first.' };
+  }
+
+  const steps = [];
+  const log = (message) => { steps.push(message); console.log('[Automation]', message); };
+
+  try {
+    log(`Validating system UID '${systemUid}'...`);
+    await findUnitIdBySystemUid(systemUid);
+
+    log('Step 1/6: Updating target unit config...');
+    await updateTargetUnitConfig(systemUid);
+    await verifyUnitConfigMatchesTemplate(systemUid);
+    log('Unit config verified.');
+
+    log(`Step 2/6: Creating unit set '${AOS_UNIT_SET_TITLE}'...`);
+    await createUnitSet(AOS_UNIT_SET_TITLE);
+
+    log('Step 3/6: Assigning unit to unit set...');
+    await assignUnitToUnitSet(AOS_UNIT_SET_TITLE, systemUid);
+
+    log(`Step 4/6: Creating subject '${AOS_SUBJECT_LABEL}'...`);
+    await createSubject(AOS_SUBJECT_LABEL);
+
+    log('Step 5/6: Assigning unit to subject...');
+    await assignUnitToSubject(AOS_SUBJECT_LABEL, systemUid);
+
+    log('Step 6/6: Assigning services to subject...');
+    const failures = [];
+    for (const codename of AOS_SERVICE_CODENAMES) {
+      try {
+        await assignServiceToSubject(AOS_SUBJECT_LABEL, codename);
+        log(`  - ${codename}: assigned`);
+      } catch (err) {
+        failures.push(`${codename}: ${err.message}`);
+        log(`  - ${codename}: FAILED — ${err.message}`);
+      }
+    }
+
+    if (failures.length) {
+      return {
+        kit_id: instanceId,
+        type: 'aos_run_automation',
+        status: 'error',
+        message: 'Not all required services could be assigned to the subject.\n' + failures.map((f) => `- ${f}`).join('\n'),
+        steps,
+      };
+    }
+
+    log('Automation completed successfully.');
+    return {
+      kit_id: instanceId,
+      type: 'aos_run_automation',
+      status: 'success',
+      message: 'Automation completed successfully.',
+      dashboardUrl: AOS_PLAYGROUND_DASHBOARD_URL,
+      steps,
+    };
+  } catch (error) {
+    log(`Error: ${error.message}`);
+    return { kit_id: instanceId, type: 'aos_run_automation', status: 'error', message: error.message, steps };
+  }
 }
 
 async function handleListAosCloud(data, resource) {

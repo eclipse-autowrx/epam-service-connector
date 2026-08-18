@@ -3548,7 +3548,7 @@
       }
       const messageId = "aos-msg-" + Date.now() + "-" + Math.random().toString(36).substr(2, 9);
       return new Promise((resolve, reject) => {
-        const timeoutMs = cmd === "aos_build_deploy" ? 18e4 : 6e4;
+        const timeoutMs = cmd === "aos_build_deploy" ? 18e4 : cmd === "aos_run_automation" ? 12e4 : 6e4;
         const timeout = setTimeout(() => {
           this.pendingRequests.delete(messageId);
           reject(new Error(`Request timeout (${timeoutMs / 1e3}s) \u2014 check if the Docker instance is responding`));
@@ -3699,6 +3699,11 @@
     // Get unit version info from AosCloud (aos_version, os_version, etc.)
     async getUnitInfo(unitUid) {
       return this.sendCommand("aos_get_unit_info", { unitUid });
+    }
+    // Run the AosEdge setup automation (unit config, unit set, subject, service assignment)
+    // for the given unit's system UID — mirrors aos-automation.py, executed natively on the toolchain.
+    async runAosAutomation(systemUid) {
+      return this.sendCommand("aos_run_automation", { systemUid });
     }
     // Restart an AOS application
     async restartApp(appId) {
@@ -6732,6 +6737,8 @@ items:
     const [selectedUnitUid, setSelectedUnitUid] = React.useState("");
     const [selectedSubjectId, setSelectedSubjectId] = React.useState("");
     const aosCloudLoadedRef = React.useRef(false);
+    const [isRunningAutomation, setIsRunningAutomation] = React.useState(false);
+    const [automationResult, setAutomationResult] = React.useState(null);
     const aosServiceRef = React.useRef(null);
     const buildLogsRef = React.useRef(null);
     const pollingIntervalRef = React.useRef(null);
@@ -7673,6 +7680,37 @@ items:
         if (res.status === "success")
           setServiceLogs(res.logs || []);
       } catch (e) {
+      }
+    };
+    const runAosSetupAutomation = async () => {
+      if (!aosServiceRef.current)
+        return;
+      const units = showAllUnits ? allUnits : serviceUnits;
+      const unit = units.find((u) => u.uid === selectedMonitorUnit);
+      const systemUid = unit?.systemUid || "";
+      if (!systemUid) {
+        addLog("[Automation] Select a unit first");
+        return;
+      }
+      setIsRunningAutomation(true);
+      setAutomationResult(null);
+      addLog(`[Automation] Starting AosEdge setup for unit ${systemUid}...`);
+      try {
+        const res = await aosServiceRef.current.runAosAutomation(systemUid);
+        for (const step of res.steps || [])
+          addLog(`[Automation] ${step}`);
+        if (res.status === "success") {
+          setAutomationResult({ status: "success", message: res.message, dashboardUrl: res.dashboardUrl });
+          addLog("[Automation] Completed successfully");
+        } else {
+          setAutomationResult({ status: "error", message: res.message || "Automation failed" });
+          addLog(`[Automation] Failed: ${res.message}`);
+        }
+      } catch (err) {
+        setAutomationResult({ status: "error", message: err.message || "Automation failed" });
+        addLog(`[Automation] Error: ${err.message}`);
+      } finally {
+        setIsRunningAutomation(false);
       }
     };
     const [workerInfo, setWorkerInfo] = React.useState(null);
@@ -9380,6 +9418,69 @@ items:
                 )
               );
             })()
+          ),
+          // AosEdge setup automation — native equivalent of aos-automation.py, run
+          // against the unit currently selected above (no Python process involved).
+          React.createElement(
+            "div",
+            { style: styles.card },
+            React.createElement(
+              "div",
+              { style: styles.cardHeader },
+              React.createElement(
+                "div",
+                { style: styles.cardTitle },
+                React.createElement(Icon, { name: "settings", size: 16, color: "#6366f1" }),
+                "AosEdge Setup"
+              )
+            ),
+            React.createElement(
+              "div",
+              { style: { padding: "12px", display: "flex", flexDirection: "column", gap: "8px" } },
+              React.createElement(
+                "div",
+                { style: { fontSize: "11px", color: "#6b7280" } },
+                (() => {
+                  const units = showAllUnits ? allUnits : serviceUnits;
+                  const unit = units.find((u) => u.uid === selectedMonitorUnit);
+                  return unit ? `Target unit: ${unit.name} (${unit.systemUid || unit.uid})` : "Select a unit above to run setup";
+                })()
+              ),
+              React.createElement("button", {
+                onClick: runAosSetupAutomation,
+                disabled: isRunningAutomation || !selectedMonitorUnit,
+                style: {
+                  ...styles.button,
+                  ...styles.buttonPrimary,
+                  ...isRunningAutomation || !selectedMonitorUnit ? styles.buttonDisabled : {}
+                },
+                title: "Runs unit config update, unit set, subject, and service assignment \u2014 same steps as aos-automation.py"
+              }, isRunningAutomation ? "Running setup\u2026" : "Run AosEdge Setup"),
+              automationResult && React.createElement(
+                "div",
+                {
+                  style: {
+                    fontSize: "11px",
+                    padding: "8px",
+                    borderRadius: "4px",
+                    backgroundColor: automationResult.status === "success" ? "#f0fdf4" : "#fef2f2",
+                    color: automationResult.status === "success" ? "#16a34a" : "#dc2626",
+                    whiteSpace: "pre-wrap"
+                  }
+                },
+                automationResult.message,
+                automationResult.dashboardUrl && React.createElement(
+                  "div",
+                  { style: { marginTop: "4px" } },
+                  React.createElement("a", {
+                    href: automationResult.dashboardUrl,
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                    style: { color: "#2563eb" }
+                  }, "Open Playground dashboard")
+                )
+              )
+            )
           )
           // Monitoring + Alerts moved to the Unit Detail overlay (opens on
           // unit-row click) to avoid duplication with the inline cards.
