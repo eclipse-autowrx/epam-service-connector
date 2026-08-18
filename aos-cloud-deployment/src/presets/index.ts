@@ -479,12 +479,16 @@ int main(int argc, char* argv[]) {
             range = soc * DEGRADED_EFFICIENCY;
             light_intensity = 30.0f;
             seat_heating = 0.0f;
+            seat_cool = 0;
+            seat_heat = 0;
         } else {
             mode = "NORMAL";
             range = soc * NORMAL_EFFICIENCY;
             light_intensity = 100.0f;
             seat_heating = 1.0f;
             cabin_temp=30.0f;
+            seat_cool = 0;
+            seat_heat = 1;
         }
         if (soc < soc_threshold_1 ) {
             cabin_temp=0.0f;

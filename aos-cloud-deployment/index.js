@@ -4214,12 +4214,16 @@ int main(int argc, char* argv[]) {
             range = soc * DEGRADED_EFFICIENCY;
             light_intensity = 30.0f;
             seat_heating = 0.0f;
+            seat_cool = 0;
+            seat_heat = 0;
         } else {
             mode = "NORMAL";
             range = soc * NORMAL_EFFICIENCY;
             light_intensity = 100.0f;
             seat_heating = 1.0f;
             cabin_temp=30.0f;
+            seat_cool = 0;
+            seat_heat = 1;
         }
         if (soc < soc_threshold_1 ) {
             cabin_temp=0.0f;
@@ -6739,6 +6743,8 @@ items:
     const aosCloudLoadedRef = React.useRef(false);
     const [isRunningAutomation, setIsRunningAutomation] = React.useState(false);
     const [automationResult, setAutomationResult] = React.useState(null);
+    const [oemCertStatus, setOemCertStatus] = React.useState(null);
+    const [isUploadingOemCert, setIsUploadingOemCert] = React.useState(false);
     const aosServiceRef = React.useRef(null);
     const buildLogsRef = React.useRef(null);
     const pollingIntervalRef = React.useRef(null);
@@ -7789,6 +7795,28 @@ items:
         addLog(`[Cert] Remove failed: ${err.message}`);
       } finally {
         setIsRemovingCert(false);
+      }
+    };
+    const handleOemCertUpload = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file || !aosServiceRef.current)
+        return;
+      setIsUploadingOemCert(true);
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+        const result = await aosServiceRef.current.uploadCertificate(base64, "aos-user-oem");
+        if (result.status === "success") {
+          setOemCertStatus({ loaded: true, identity: result.identity ?? null });
+          addLog(`[OEM Cert] Uploaded${result.identity?.cn ? `: CN=${result.identity.cn}` : ""}`);
+        } else {
+          addLog(`[OEM Cert] Upload failed: ${result.message}`);
+        }
+      } catch (err) {
+        addLog(`[OEM Cert] Upload failed: ${err.message}`);
+      } finally {
+        setIsUploadingOemCert(false);
+        e.target.value = "";
       }
     };
     const handleBuildDeploy = async () => {
@@ -9445,6 +9473,32 @@ items:
                   const unit = units.find((u) => u.uid === selectedMonitorUnit);
                   return unit ? `Target unit: ${unit.name} (${unit.systemUid || unit.uid})` : "Select a unit above to run setup";
                 })()
+              ),
+              React.createElement(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "8px", fontSize: "11px" } },
+                React.createElement("span", { style: { color: "#6b7280" } }, "OEM certificate (required for setup):"),
+                oemCertStatus?.loaded ? React.createElement("span", { style: { color: "#16a34a" } }, oemCertStatus.identity?.cn ? `Loaded \u2014 ${oemCertStatus.identity.cn}` : "Loaded") : React.createElement(
+                  "label",
+                  {
+                    style: {
+                      color: "#2563eb",
+                      cursor: "pointer",
+                      padding: "2px 8px",
+                      borderRadius: "4px",
+                      border: "1px solid #bfdbfe",
+                      backgroundColor: "#eff6ff"
+                    }
+                  },
+                  React.createElement("input", {
+                    type: "file",
+                    accept: ".p12,.pfx",
+                    onChange: handleOemCertUpload,
+                    disabled: isUploadingOemCert,
+                    style: { display: "none" }
+                  }),
+                  isUploadingOemCert ? "Uploading\u2026" : "Upload OEM .p12"
+                )
               ),
               React.createElement("button", {
                 onClick: runAosSetupAutomation,
