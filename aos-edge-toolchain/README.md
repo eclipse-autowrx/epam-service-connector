@@ -155,6 +155,12 @@ cert — AosCloud returns `403 Forbidden` for these writes from an SP-only
 identity. Upload it via `aos_upload_cert` with `certName: 'aos-user-oem'`
 (the deployment UI has a dedicated "Upload OEM .p12" control for this).
 
+Step 6 checks each service's current assignment via `GET subjects/{id}/services/`
+before assigning — if already assigned, the `POST` is skipped entirely. AosCloud
+redeploys the current version to the unit on every successful assignment `POST`,
+even if the service was already assigned, so re-running the automation without
+a version bump does not trigger a redundant redeploy.
+
 ---
 
 ## Certificate Management

@@ -100,6 +100,7 @@ export default function Page({ data, config }: PluginProps) {
   // OEM certificate — the automation's provisioning steps require OEM-level AosCloud permissions
   const [oemCertStatus, setOemCertStatus] = React.useState<{ loaded: boolean; identity?: CertIdentity | null } | null>(null)
   const [isUploadingOemCert, setIsUploadingOemCert] = React.useState<boolean>(false)
+  const [isRemovingOemCert, setIsRemovingOemCert] = React.useState<boolean>(false)
 
   const aosServiceRef = React.useRef<AosService | null>(null)
   const buildLogsRef = React.useRef<HTMLDivElement>(null)
@@ -714,6 +715,7 @@ export default function Page({ data, config }: PluginProps) {
         }
         setTimeout(async () => {
           await checkCertificate()
+          await checkOemCertificate()
           await fetchAosCloudServices()
         }, 500)
       })
@@ -844,6 +846,17 @@ export default function Page({ data, config }: PluginProps) {
       setCertError('')
     } catch (err: any) {
       setCertError(err.message || 'Failed to check certificate')
+    }
+  }
+
+  // Checks the OEM certificate independently of the SP certificate (distinct certName, distinct file on the worker).
+  const checkOemCertificate = async () => {
+    if (!aosServiceRef.current) return
+    try {
+      const result = await aosServiceRef.current.checkCertificate('aos-user-oem')
+      setOemCertStatus({ loaded: result.certLoaded, identity: result.identity ?? null })
+    } catch (err: any) {
+      // non-fatal — OEM cert is only needed for the AosEdge Setup automation
     }
   }
 
@@ -1220,6 +1233,28 @@ export default function Page({ data, config }: PluginProps) {
     }
   }
 
+  // Removes only the OEM certificate (certName='aos-user-oem') — the SP certificate and build environment are untouched.
+  const handleOemCertRemove = async () => {
+    if (!aosServiceRef.current) return
+    if (typeof window !== 'undefined' && !window.confirm('Remove the OEM certificate? This only affects AosEdge Setup — your SP certificate and build environment stay intact.')) {
+      return
+    }
+    setIsRemovingOemCert(true)
+    try {
+      const result = await aosServiceRef.current.removeCertificate('aos-user-oem')
+      if (result.status === 'success') {
+        addLog(`[OEM Cert] ${result.message}`)
+        setOemCertStatus({ loaded: false, identity: null })
+      } else {
+        addLog(`[OEM Cert] Remove failed: ${result.message}`)
+      }
+    } catch (err: any) {
+      addLog(`[OEM Cert] Remove failed: ${err.message}`)
+    } finally {
+      setIsRemovingOemCert(false)
+    }
+  }
+
   const handleBuildDeploy = async () => {
     if (!aosServiceRef.current || !aosServiceRef.current.isServiceConnected()) {
       addLog('[Error] Not connected to AOS service')
@@ -1230,6 +1265,32 @@ export default function Page({ data, config }: PluginProps) {
 
     let finalCode = languageMode === 'python' ? pythonCodeRef.current : cppCodeRef.current
     let finalYaml = yamlConfigRef.current
+
+    if (autoIncVersion && selectedServiceUuid && serviceVersions.length > 0) {
+      const currentMatch = finalYaml.match(/version:\s*["']([^"']+)["']/i)
+      const currentVersion = currentMatch?.[1] || '0.0.0'
+      const latestVersion = serviceVersions[0].version || '0.0.0'
+      const currentParts = currentVersion.split('.').map(Number)
+      const latestParts = latestVersion.split('.').map(Number)
+      const currentKey = currentParts.reduce((value, part) => value * 1000 + (Number.isFinite(part) ? part : 0), 0)
+      const latestKey = latestParts.reduce((value, part) => value * 1000 + (Number.isFinite(part) ? part : 0), 0)
+
+      if (currentKey <= latestKey) {
+        const nextParts = latestVersion.split('.')
+        nextParts[nextParts.length - 1] = String(Number(nextParts[nextParts.length - 1]) + 1)
+        const nextVersion = nextParts.join('.')
+        if (languageMode === 'python') {
+          finalCode = finalCode.replace(/VERSION\s*=\s*["'][^"']+["']/, `VERSION = "${nextVersion}"`)
+          setPythonCode(finalCode)
+        } else {
+          finalCode = finalCode.replace(/#define\s+VERSION\s+["'][^"']+["']/, `#define VERSION "${nextVersion}"`)
+          setCppCode(finalCode)
+        }
+        finalYaml = finalYaml.replace(/version:\s*["'][^"']+["']/i, `version: "${nextVersion}"`)
+        setYamlConfig(finalYaml)
+        addLog(`[Version] Bumped deployment ${currentVersion} → ${nextVersion} before upload`)
+      }
+    }
 
 
 
@@ -2498,7 +2559,22 @@ export default function Page({ data, config }: PluginProps) {
             React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px' } },
               React.createElement('span', { style: { color: '#6b7280' } }, 'OEM certificate (required for setup):'),
               oemCertStatus?.loaded
-                ? React.createElement('span', { style: { color: '#16a34a' } }, oemCertStatus.identity?.cn ? `Loaded — ${oemCertStatus.identity.cn}` : 'Loaded')
+                ? React.createElement(React.Fragment, null,
+                    React.createElement('span', { style: { color: '#16a34a' } }, oemCertStatus.identity?.cn ? `Loaded — ${oemCertStatus.identity.cn}` : 'Loaded'),
+                    React.createElement('label', {
+                      style: {
+                        color: '#2563eb', cursor: isUploadingOemCert || isRemovingOemCert ? 'not-allowed' : 'pointer',
+                        padding: '2px 8px', borderRadius: '4px', border: '1px solid #bfdbfe', backgroundColor: '#eff6ff',
+                        opacity: isUploadingOemCert || isRemovingOemCert ? 0.5 : 1
+                      }
+                    },
+                      React.createElement('input', {
+                        type: 'file', accept: '.p12,.pfx', onChange: handleOemCertUpload,
+                        disabled: isUploadingOemCert || isRemovingOemCert, style: { display: 'none' }
+                      }),
+                      isUploadingOemCert ? 'Uploading…' : 'Replace .p12'
+                    )
+                  )
                 : React.createElement('label', {
                     style: {
                       color: '#2563eb', cursor: 'pointer', padding: '2px 8px', borderRadius: '4px',
@@ -2512,15 +2588,27 @@ export default function Page({ data, config }: PluginProps) {
                     isUploadingOemCert ? 'Uploading…' : 'Upload OEM .p12'
                   )
             ),
-            React.createElement('button', {
-              onClick: runAosSetupAutomation,
-              disabled: isRunningAutomation || !selectedMonitorUnit,
-              style: {
-                ...styles.button, ...styles.buttonPrimary,
-                ...(isRunningAutomation || !selectedMonitorUnit ? styles.buttonDisabled : {})
-              },
-              title: 'Runs unit config update, unit set, subject, and service assignment — same steps as aos-automation.py'
-            }, isRunningAutomation ? 'Running setup…' : 'Run AosEdge Setup'),
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
+              React.createElement('button', {
+                onClick: runAosSetupAutomation,
+                disabled: isRunningAutomation || !selectedMonitorUnit,
+                style: {
+                  ...styles.button, ...styles.buttonPrimary, flex: 1,
+                  ...(isRunningAutomation || !selectedMonitorUnit ? styles.buttonDisabled : {})
+                },
+                title: 'Runs unit config update, unit set, subject, and service assignment — same steps as aos-automation.py'
+              }, isRunningAutomation ? 'Running setup…' : 'Run AosEdge Setup'),
+              oemCertStatus?.loaded && React.createElement('button', {
+                onClick: handleOemCertRemove,
+                disabled: isUploadingOemCert || isRemovingOemCert,
+                style: {
+                  ...styles.button, ...styles.buttonSm, fontSize: '11px',
+                  ...(isUploadingOemCert || isRemovingOemCert ? styles.buttonDisabled : {}),
+                  backgroundColor: 'transparent', color: '#dc2626', border: '1px solid #fca5a5'
+                },
+                title: 'Remove the OEM certificate — the SP certificate and build environment are not affected'
+              }, isRemovingOemCert ? 'Removing…' : 'Remove')
+            ),
             automationResult && React.createElement('div', {
               style: {
                 fontSize: '11px', padding: '8px', borderRadius: '4px',

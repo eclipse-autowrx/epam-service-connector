@@ -986,6 +986,10 @@ async function handleBuildDeploy(data, buildId) {
   const cfg = parseYamlConfig(yamlConfig);
   const appName = cfg.codename || 'hello-python';
 
+  if (cfg.tlsKey && cfg.tlsKey !== 'aos-user-sp.p12') {
+    throw new Error(`Build signing requires tlsKey: aos-user-sp.p12; OEM certificate is reserved for AosEdge setup.`);
+  }
+
   if (!buildId) buildId = crypto.randomBytes(6).toString('hex');
   const buildDir = path.join('/workspace/builds', buildId);
 
@@ -1469,10 +1473,20 @@ async function assignServiceToSubject(subjectLabel, serviceCodename) {
   const subjectId = await findSubjectIdByLabel(subjectLabel);
   if (!subjectId) throw new Error(`No subject found with label '${subjectLabel}'`);
   const serviceId = await resolveServiceIdOrRaise(serviceCodename);
+
+  // Skip the POST entirely if already assigned — re-sending the assignment
+  // causes AosCloud to redeploy the current version to the unit even when
+  // nothing changed, so this isn't just an optimization, it avoids a real redeploy.
+  const { status: listStatus, json: listJson } = await curlJson('GET', `subjects/${subjectId}/services/`);
+  if (listStatus < 400) {
+    const assigned = (listJson.items || listJson || []).some((s) => (s.id || s.service_id) === serviceId);
+    if (assigned) return 'already-assigned';
+  }
+
   const { status, json } = await curlJson('POST', `subjects/${subjectId}/services/`, { body: { service_ids: [serviceId] } });
-  if (status === 200 || status === 201 || status === 204 || status === 409) return;
+  if (status === 200 || status === 201 || status === 204 || status === 409) return 'assigned';
   const text = JSON.stringify(json).toLowerCase();
-  if (text.includes('already contains') || text.includes('already assigned') || text.includes('already exists')) return;
+  if (text.includes('already contains') || text.includes('already assigned') || text.includes('already exists')) return 'already-assigned';
   if (status === 400 && text.includes('without versions in "ready" state cannot be assigned')) {
     throw new Error(`Service '${serviceCodename}' (${serviceId}) is not assignable: ${JSON.stringify(json)}`);
   }
@@ -1515,8 +1529,8 @@ async function handleRunAutomation(data) {
     const failures = [];
     for (const codename of AOS_SERVICE_CODENAMES) {
       try {
-        await assignServiceToSubject(AOS_SUBJECT_LABEL, codename);
-        log(`  - ${codename}: assigned`);
+        const result = await assignServiceToSubject(AOS_SUBJECT_LABEL, codename);
+        log(`  - ${codename}: ${result === 'already-assigned' ? 'already assigned (skipped, no redeploy)' : 'assigned'}`);
       } catch (err) {
         failures.push(`${codename}: ${err.message}`);
         log(`  - ${codename}: FAILED — ${err.message}`);

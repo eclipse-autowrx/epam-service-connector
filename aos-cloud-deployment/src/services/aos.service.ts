@@ -10,7 +10,7 @@
 // Based on vehicle-edge-runtime runtime.service.ts pattern
 
 import { io as ioClient } from 'socket.io-client'
-import type { AosApp, BuildRequest, BuildResponse, DeploymentStatus } from '../types'
+import type { AosApp, BuildRequest, BuildResponse, DeploymentStatus, DeploymentStatusResponse } from '../types'
 
 type MessageHandler = (message: any) => void
 
@@ -207,8 +207,8 @@ export class AosService {
     if (response.status === 'started' || response.result === 'success' || response.status === 'building' || response.status === 'success') {
       return {
         status: response.status || 'building',
-        appId: response.appId || response.executionId || response.app_id || request.name,
-        executionId: response.executionId || response.appId || request.name,
+        appId: response.appId || response.executionId || response.app_id,
+        executionId: response.executionId || response.appId,
         message: response.message || 'Build started'
       }
     } else {
