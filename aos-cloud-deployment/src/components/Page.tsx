@@ -1429,9 +1429,9 @@ export default function Page({ data, config }: PluginProps) {
 
       // Append recovery hints for known error patterns
       if (msg.includes('re-upload')) {
-        statusText += ' → Go to Setup panel and upload your .p12 again'
+        statusText += ' → Go to Setup panel and upload your SP.p12 certificate again'
       } else if (msg.includes('No certificate uploaded')) {
-        statusText += ' → Go to Setup panel and upload your .p12 first'
+        statusText += ' → Go to Setup panel and upload your SP.p12 certificate first'
       }
 
       setBuildStatus(statusText)
@@ -1598,12 +1598,13 @@ export default function Page({ data, config }: PluginProps) {
 
         React.createElement('div', { style: { fontSize: '13px', lineHeight: 1.8, color: '#374151' } },
 
-          React.createElement('h3', { style: { fontSize: '14px', marginTop: 0, marginBottom: '8px' } }, '1. Upload your certificate'),
+          React.createElement('h3', { style: { fontSize: '14px', marginTop: 0, marginBottom: '8px' } }, '1. Upload your SP.p12 certificate'),
           React.createElement('p', { style: { color: '#6b7280', marginBottom: '16px' } },
-            'Click ', React.createElement('strong', null, 'Choose File'), ' in the Setup card and select your .p12 certificate. ',
-            'The orchestrator extracts your identity (CN) and creates a dedicated, isolated build environment just for you. ',
+            'Click ', React.createElement('strong', null, 'Choose File'), ' in the Setup card and select your SP.p12 certificate. ',
+            'This is the Service Provider signing certificate used to create your dedicated build environment. ',
+            'The orchestrator extracts your identity (CN) and creates an isolated build environment just for you. ',
             'Once loaded, the Certificate card shows your CN, toolchain versions (aos-signer, aos-keys, aos-prov), and unit info when a unit is selected. ',
-            'If your worker becomes unresponsive, Remove and re-upload the certificate to get a fresh environment.'
+            'If your worker becomes unresponsive, Remove and re-upload the SP.p12 certificate to get a fresh environment.'
           ),
 
           React.createElement('h3', { style: { fontSize: '14px', marginBottom: '8px' } }, '2. Choose an AosCloud Service'),
@@ -2043,10 +2044,10 @@ export default function Page({ data, config }: PluginProps) {
           React.createElement('span', { style: { fontSize: '18px', flexShrink: 0 } }, '🔐'),
           React.createElement('div', { style: { flex: 1 } },
             React.createElement('div', { style: { fontSize: '13px', fontWeight: 600, color: '#92400e' } },
-              'Upload your .p12 certificate to provision a build environment'
+              'Upload your SP.p12 certificate to provision a build environment'
             ),
             React.createElement('div', { style: { fontSize: '11px', color: '#a16207', marginTop: '2px' } },
-              'A dedicated, isolated workspace is created per certificate identity. Deployment is unavailable without a valid certificate.'
+              'A dedicated, isolated workspace is created per SP.p12 certificate identity. Deployment is unavailable without a valid SP.p12 certificate.'
             )
           )
         ),
@@ -2102,7 +2103,7 @@ export default function Page({ data, config }: PluginProps) {
                             disabled: connectionStatus !== 'connected' || isUploadingCert,
                             style: { display: 'none' }
                           }),
-                          'Upload .p12'
+                          'Upload SP.p12'
                         )
                       )
               )
@@ -2243,7 +2244,7 @@ export default function Page({ data, config }: PluginProps) {
                 disabled: connectionStatus !== 'connected' || isUploadingCert || isRemovingCert,
                 style: { display: 'none' }
               }),
-              isUploadingCert ? 'Uploading...' : 'Replace .p12'
+              isUploadingCert ? 'Uploading...' : 'Replace SP.p12'
             ),
             certStatus?.loaded && React.createElement('button', {
               onClick: handleCertRemove,
@@ -2572,7 +2573,7 @@ export default function Page({ data, config }: PluginProps) {
                         type: 'file', accept: '.p12,.pfx', onChange: handleOemCertUpload,
                         disabled: isUploadingOemCert || isRemovingOemCert, style: { display: 'none' }
                       }),
-                      isUploadingOemCert ? 'Uploading…' : 'Replace .p12'
+                      isUploadingOemCert ? 'Uploading…' : 'Replace OEM .p12'
                     )
                   )
                 : React.createElement('label', {

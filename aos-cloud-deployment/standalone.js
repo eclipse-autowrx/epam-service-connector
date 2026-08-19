@@ -21729,7 +21729,7 @@
   var React = __toESM(require_react(), 1);
   globalThis.React = React;
 
-  // src/standalone.ts
+  // src/standalone-python.ts
   var React3 = __toESM(require_react(), 1);
   var ReactDOM = __toESM(require_client(), 1);
 
@@ -29736,9 +29736,9 @@ items:
         const lastLine = msg.split("\n").filter((l) => l.trim()).pop() || msg;
         let statusText = `Build failed: ${lastLine.replace(/^\[.*?\]\s*/, "").slice(0, 80)}`;
         if (msg.includes("re-upload")) {
-          statusText += " \u2192 Go to Setup panel and upload your .p12 again";
+          statusText += " \u2192 Go to Setup panel and upload your SP.p12 certificate again";
         } else if (msg.includes("No certificate uploaded")) {
-          statusText += " \u2192 Go to Setup panel and upload your .p12 first";
+          statusText += " \u2192 Go to Setup panel and upload your SP.p12 certificate first";
         }
         setBuildStatus(statusText);
         setIsBuilding(false);
@@ -29931,16 +29931,17 @@ items:
           React2.createElement(
             "div",
             { style: { fontSize: "13px", lineHeight: 1.8, color: "#374151" } },
-            React2.createElement("h3", { style: { fontSize: "14px", marginTop: 0, marginBottom: "8px" } }, "1. Upload your certificate"),
+            React2.createElement("h3", { style: { fontSize: "14px", marginTop: 0, marginBottom: "8px" } }, "1. Upload your SP.p12 certificate"),
             React2.createElement(
               "p",
               { style: { color: "#6b7280", marginBottom: "16px" } },
               "Click ",
               React2.createElement("strong", null, "Choose File"),
-              " in the Setup card and select your .p12 certificate. ",
-              "The orchestrator extracts your identity (CN) and creates a dedicated, isolated build environment just for you. ",
+              " in the Setup card and select your SP.p12 certificate. ",
+              "This is the Service Provider signing certificate used to create your dedicated build environment. ",
+              "The orchestrator extracts your identity (CN) and creates an isolated build environment just for you. ",
               "Once loaded, the Certificate card shows your CN, toolchain versions (aos-signer, aos-keys, aos-prov), and unit info when a unit is selected. ",
-              "If your worker becomes unresponsive, Remove and re-upload the certificate to get a fresh environment."
+              "If your worker becomes unresponsive, Remove and re-upload the SP.p12 certificate to get a fresh environment."
             ),
             React2.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "2. Choose an AosCloud Service"),
             React2.createElement(
@@ -30558,12 +30559,12 @@ items:
               React2.createElement(
                 "div",
                 { style: { fontSize: "13px", fontWeight: 600, color: "#92400e" } },
-                "Upload your .p12 certificate to provision a build environment"
+                "Upload your SP.p12 certificate to provision a build environment"
               ),
               React2.createElement(
                 "div",
                 { style: { fontSize: "11px", color: "#a16207", marginTop: "2px" } },
-                "A dedicated, isolated workspace is created per certificate identity. Deployment is unavailable without a valid certificate."
+                "A dedicated, isolated workspace is created per SP.p12 certificate identity. Deployment is unavailable without a valid SP.p12 certificate."
               )
             )
           ),
@@ -30641,7 +30642,7 @@ items:
                         disabled: connectionStatus !== "connected" || isUploadingCert,
                         style: { display: "none" }
                       }),
-                      "Upload .p12"
+                      "Upload SP.p12"
                     )
                   )
                 )
@@ -30849,7 +30850,7 @@ items:
                   disabled: connectionStatus !== "connected" || isUploadingCert || isRemovingCert,
                   style: { display: "none" }
                 }),
-                isUploadingCert ? "Uploading..." : "Replace .p12"
+                isUploadingCert ? "Uploading..." : "Replace SP.p12"
               ),
               certStatus?.loaded && React2.createElement(
                 "button",
@@ -31298,7 +31299,7 @@ items:
                       disabled: isUploadingOemCert || isRemovingOemCert,
                       style: { display: "none" }
                     }),
-                    isUploadingOemCert ? "Uploading\u2026" : "Replace .p12"
+                    isUploadingOemCert ? "Uploading\u2026" : "Replace OEM .p12"
                   )
                 ) : React2.createElement(
                   "label",
@@ -31764,7 +31765,7 @@ items:
     );
   }
 
-  // src/standalone.ts
+  // src/standalone-python.ts
   var container = document.getElementById("root");
   var root = ReactDOM.createRoot(container);
   root.render(
