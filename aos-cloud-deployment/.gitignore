@@ -6,3 +6,7 @@ standalone_python.js.map
 .env
 *.p12
 *.pfx
+standalone-local.ts
+standalone-local.html
+standalone-local.js
+standalone-local.js.map

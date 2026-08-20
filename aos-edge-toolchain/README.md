@@ -137,6 +137,32 @@ Then update the dropdown in `aos-cloud-deployment/src/components/Page.tsx`.
 
 ---
 
+## AosEdge Setup Automation (`aos_run_automation`)
+
+`handleRunAutomation()` in `aos-broadcaster.js` is a native JS re-implementation
+of `eclipse-sdv-blueprint/Aosedge-Automation/aos-automation.py` (no Python
+process is spawned). It performs, against the real AosCloud API:
+
+1. Update the target unit's config from `scripts/aos-unitconfig-template.json` and verify it
+2. Create the unit set (idempotent lookup-by-title first)
+3. Assign the unit to the unit set
+4. Create the subject (idempotent lookup-by-label first)
+5. Assign the unit to the subject
+6. Resolve and assign each required service codename to the subject
+
+This requires an **OEM certificate** (`aos-user-oem.p12`), not just the SP
+cert — AosCloud returns `403 Forbidden` for these writes from an SP-only
+identity. Upload it via `aos_upload_cert` with `certName: 'aos-user-oem'`
+(the deployment UI has a dedicated "Upload OEM .p12" control for this).
+
+Step 6 checks each service's current assignment via `GET subjects/{id}/services/`
+before assigning — if already assigned, the `POST` is skipped entirely. AosCloud
+redeploys the current version to the unit on every successful assignment `POST`,
+even if the service was already assigned, so re-running the automation without
+a version bump does not trigger a redundant redeploy.
+
+---
+
 ## Certificate Management
 
 Certificates are **not stored** in the Docker image or source repo. They are

@@ -10,7 +10,7 @@
 // Based on vehicle-edge-runtime runtime.service.ts pattern
 
 import { io as ioClient } from 'socket.io-client'
-import type { AosApp, BuildRequest, BuildResponse, DeploymentStatus } from '../types'
+import type { AosApp, BuildRequest, BuildResponse, DeploymentStatus, DeploymentStatusResponse } from '../types'
 
 type MessageHandler = (message: any) => void
 
@@ -158,7 +158,7 @@ export class AosService {
     const messageId = 'aos-msg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9)
 
     return new Promise((resolve, reject) => {
-      const timeoutMs = cmd === 'aos_build_deploy' ? 180000 : 60000
+      const timeoutMs = cmd === 'aos_build_deploy' ? 180000 : cmd === 'aos_run_automation' ? 120000 : 60000
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(messageId)
         reject(new Error(`Request timeout (${timeoutMs / 1000}s) — check if the Docker instance is responding`))
@@ -207,8 +207,8 @@ export class AosService {
     if (response.status === 'started' || response.result === 'success' || response.status === 'building' || response.status === 'success') {
       return {
         status: response.status || 'building',
-        appId: response.appId || response.executionId || response.app_id || request.name,
-        executionId: response.executionId || response.appId || request.name,
+        appId: response.appId || response.executionId || response.app_id,
+        executionId: response.executionId || response.appId,
         message: response.message || 'Build started'
       }
     } else {
@@ -341,6 +341,12 @@ export class AosService {
   // Get unit version info from AosCloud (aos_version, os_version, etc.)
   async getUnitInfo(unitUid: string): Promise<any> {
     return this.sendCommand('aos_get_unit_info', { unitUid })
+  }
+
+  // Run the AosEdge setup automation (unit config, unit set, subject, service assignment)
+  // for the given unit's system UID — mirrors aos-automation.py, executed natively on the toolchain.
+  async runAosAutomation(systemUid: string): Promise<any> {
+    return this.sendCommand('aos_run_automation', { systemUid })
   }
 
   // Restart an AOS application

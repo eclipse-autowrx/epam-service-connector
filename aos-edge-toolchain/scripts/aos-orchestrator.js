@@ -624,7 +624,8 @@ async function main() {
         'aos_get_service_stdout',
         'aos_signal_stream',
         'aos_get_toolchain_info',
-        'aos_get_unit_info'
+        'aos_get_unit_info',
+        'aos_run_automation'
       ],
       type: 'aos-edge-toolchain',
       suffix: 'AET',
@@ -765,6 +766,52 @@ async function handleUploadCert(data, requestFrom) {
     };
   }
 
+  // OEM setup credentials belong in the existing SP worker and must not
+  // create/rebind a worker or replace its signing certificate.
+  if ((data.certName || 'aos-user-sp') === 'aos-user-oem') {
+    const userCN = sessionMap.get(requestFrom);
+    if (!userCN) {
+      return {
+        kit_id: instanceId,
+        type: 'aos_upload_cert',
+        status: 'error',
+        message: 'Upload the SP certificate before uploading the OEM certificate.'
+      };
+    }
+
+    const worker = userMap.get(userCN);
+    if (!worker || worker.status !== 'running') {
+      return {
+        kit_id: instanceId,
+        type: 'aos_upload_cert',
+        status: 'error',
+        message: 'The SP build environment is not available. Re-upload the SP certificate first.'
+      };
+    }
+
+    try {
+      const response = await httpForward(worker.port, data);
+      return {
+        ...response,
+        kit_id: instanceId,
+        identity: { cn: await extractCertCN(data.certData) },
+        worker: {
+          instanceId: worker.instanceId,
+          port: worker.port,
+          signalRelayPort: worker.port,
+          userCN,
+        }
+      };
+    } catch (err) {
+      return {
+        kit_id: instanceId,
+        type: 'aos_upload_cert',
+        status: 'error',
+        message: `Failed to upload OEM certificate to the SP worker: ${err.message}`
+      };
+    }
+  }
+
   // Extract CN from the uploaded p12
   const userCN = await extractCertCN(data.certData);
   if (!userCN) {
@@ -877,6 +924,30 @@ async function handleRemoveCert(data, requestFrom) {
       status: 'success',
       message: 'No certificate to remove'
     };
+  }
+
+  if ((data.certName || 'aos-user-sp') === 'aos-user-oem') {
+    const worker = userMap.get(userCN);
+    if (!worker || worker.status !== 'running') {
+      return {
+        kit_id: instanceId,
+        type: 'aos_remove_cert',
+        status: 'success',
+        message: 'OEM certificate already removed; SP build environment is unchanged.'
+      };
+    }
+
+    try {
+      const response = await httpForward(worker.port, data);
+      return { ...response, kit_id: instanceId };
+    } catch (err) {
+      return {
+        kit_id: instanceId,
+        type: 'aos_remove_cert',
+        status: 'error',
+        message: `Failed to remove OEM certificate from the SP worker: ${err.message}`
+      };
+    }
   }
 
   await stopWorker(userCN);

@@ -21729,7 +21729,7 @@
   var React = __toESM(require_react(), 1);
   globalThis.React = React;
 
-  // src/standalone.ts
+  // src/standalone-python.ts
   var React3 = __toESM(require_react(), 1);
   var ReactDOM = __toESM(require_client(), 1);
 
@@ -25243,7 +25243,7 @@
       }
       const messageId = "aos-msg-" + Date.now() + "-" + Math.random().toString(36).substr(2, 9);
       return new Promise((resolve, reject) => {
-        const timeoutMs = cmd === "aos_build_deploy" ? 18e4 : 6e4;
+        const timeoutMs = cmd === "aos_build_deploy" ? 18e4 : cmd === "aos_run_automation" ? 12e4 : 6e4;
         const timeout = setTimeout(() => {
           this.pendingRequests.delete(messageId);
           reject(new Error(`Request timeout (${timeoutMs / 1e3}s) \u2014 check if the Docker instance is responding`));
@@ -25284,8 +25284,8 @@
       if (response.status === "started" || response.result === "success" || response.status === "building" || response.status === "success") {
         return {
           status: response.status || "building",
-          appId: response.appId || response.executionId || response.app_id || request.name,
-          executionId: response.executionId || response.appId || request.name,
+          appId: response.appId || response.executionId || response.app_id,
+          executionId: response.executionId || response.appId,
           message: response.message || "Build started"
         };
       } else {
@@ -25394,6 +25394,11 @@
     // Get unit version info from AosCloud (aos_version, os_version, etc.)
     async getUnitInfo(unitUid) {
       return this.sendCommand("aos_get_unit_info", { unitUid });
+    }
+    // Run the AosEdge setup automation (unit config, unit set, subject, service assignment)
+    // for the given unit's system UID — mirrors aos-automation.py, executed natively on the toolchain.
+    async runAosAutomation(systemUid) {
+      return this.sendCommand("aos_run_automation", { systemUid });
     }
     // Restart an AOS application
     async restartApp(appId) {
@@ -25779,15 +25784,23 @@ items:
 #include <cstdlib>
 #include <cmath>
 #include <atomic>
-
+#include <csignal>
 #include <grpcpp/grpcpp.h>
 #include "kuksa/val/v1/val.grpc.pb.h"
 #include "kuksa/val/v1/types.pb.h"
-
-#define VERSION "1.0.0"
-#define SOC_THRESHOLD 20.0f
+#define VERSION "1.0.7"
+#define SOC_THRESHOLD 30.0f
+#define SOC_THRESHOLD_1 50.0f
 #define NORMAL_EFFICIENCY 5.5f
 #define DEGRADED_EFFICIENCY 4.0f
+
+static const char* RANGE_PATH     = "Vehicle.Powertrain.Range";
+static const char* SOC_PATH       = "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current";
+static const char* HVAC_PATH      = "Vehicle.Cabin.HVAC.AmbientAirTemperature";
+static const char* SEAT_HEAT_PATH = "Vehicle.Cabin.Seat.Row1.DriverSide.Heating";
+static const char* SEAT_HC_PATH   = "Vehicle.Cabin.Seat.Row1.DriverSide.HeatingCooling";
+
+static std::atomic<bool> g_running{true};
 
 static float get_signal(kuksa::val::v1::VAL::Stub* stub,
                         const std::string& path) {
@@ -25796,15 +25809,12 @@ static float get_signal(kuksa::val::v1::VAL::Stub* stub,
     entry->set_path(path);
     entry->set_view(kuksa::val::v1::VIEW_CURRENT_VALUE);
     entry->add_fields(kuksa::val::v1::FIELD_VALUE);
-
     kuksa::val::v1::GetResponse response;
     grpc::ClientContext context;
     context.set_deadline(std::chrono::system_clock::now() +
                          std::chrono::seconds(3));
-
     auto status = stub->Get(&context, request, &response);
     if (!status.ok() || response.entries_size() == 0) return -1.0f;
-
     const auto& dp = response.entries(0).value();
     switch (dp.value_case()) {
         case kuksa::val::v1::Datapoint::kFloat:  return dp.float_();
@@ -25822,51 +25832,153 @@ static bool set_signal(kuksa::val::v1::VAL::Stub* stub,
     update->mutable_entry()->set_path(path);
     update->mutable_entry()->mutable_value()->set_float_(value);
     update->add_fields(kuksa::val::v1::FIELD_VALUE);
-
     kuksa::val::v1::SetResponse response;
     grpc::ClientContext context;
     context.set_deadline(std::chrono::system_clock::now() +
                          std::chrono::seconds(3));
-
     return stub->Set(&context, request, &response).ok();
+}
+
+static bool set_acct_signal(kuksa::val::v1::VAL::Stub* stub,
+                       const std::string& path, int value) {
+    kuksa::val::v1::SetRequest request;
+    auto* update = request.add_updates();
+    update->mutable_entry()->set_path(path);
+    update->mutable_entry()->mutable_value()->set_int32(value);
+    update->add_fields(kuksa::val::v1::FIELD_VALUE);
+    kuksa::val::v1::SetResponse response;
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() +
+                         std::chrono::seconds(3));
+    return stub->Set(&context, request, &response).ok();
+}
+
+static float as_float(const kuksa::val::v1::Datapoint& dp) {
+    switch (dp.value_case()) {
+        case kuksa::val::v1::Datapoint::kFloat:  return dp.float_();
+        case kuksa::val::v1::Datapoint::kDouble: return static_cast<float>(dp.double_());
+        case kuksa::val::v1::Datapoint::kInt32:  return static_cast<float>(dp.int32());
+        case kuksa::val::v1::Datapoint::kUint32: return static_cast<float>(dp.uint32());
+        default: return 0.0f;
+    }
+}
+
+static int as_int(const kuksa::val::v1::Datapoint& dp) {
+    switch (dp.value_case()) {
+        case kuksa::val::v1::Datapoint::kInt32: return dp.int32();
+        case kuksa::val::v1::Datapoint::kUint32: return static_cast<int>(dp.uint32());
+        case kuksa::val::v1::Datapoint::kFloat: return static_cast<int>(dp.float_());
+        case kuksa::val::v1::Datapoint::kBool: return dp.bool_() ? 1 : 0;
+        default: return 0;
+    }
+}
+
+static void run(kuksa::val::v1::VAL::Stub* stub,
+                float hvac_threshold, float seat_threshold) {
+    float soc = 100.0f;
+    float vehicle_range = 0.0f;
+    bool hvac_cut = false;
+    bool seat_cut = false;
+
+    kuksa::val::v1::SubscribeRequest sub_req;
+    for (const char* path : { RANGE_PATH, SOC_PATH, HVAC_PATH, SEAT_HEAT_PATH, SEAT_HC_PATH }) {
+        auto* entry = sub_req.add_entries();
+        entry->set_path(path);
+        entry->set_view(kuksa::val::v1::VIEW_CURRENT_VALUE);
+        entry->add_fields(kuksa::val::v1::FIELD_VALUE);
+    }
+
+    while (g_running) {
+        grpc::ClientContext ctx;
+        auto reader = stub->Subscribe(&ctx, sub_req);
+        kuksa::val::v1::SubscribeResponse response;
+
+        while (g_running && reader->Read(&response)) {
+            for (const auto& update : response.updates()) {
+                const std::string& path = update.entry().path();
+                const auto& dp = update.entry().value();
+
+                if (path == RANGE_PATH) {
+                    vehicle_range = as_float(dp);
+                } else if (path == SOC_PATH) {
+                    soc = as_float(dp);
+                    std::cout << "Charge: " << soc << "% | Range: " << vehicle_range << std::endl;
+
+                    if (soc < hvac_threshold && !hvac_cut) {
+                        std::cout << "[!] Charge=" << soc << "% | Range=" << vehicle_range
+                                  << " < " << hvac_threshold << "% -> Turning HVAC off" << std::endl;
+                        set_signal(stub, HVAC_PATH, 0.0f);
+                        hvac_cut = true;
+                    } else if (soc >= hvac_threshold && hvac_cut) {
+                        std::cout << "[+] Charge=" << soc << "% | Range=" << vehicle_range
+                                  << " >= " << hvac_threshold << "% -> HVAC restriction lifted" << std::endl;
+                        hvac_cut = false;
+                    }
+
+                    if (soc < seat_threshold && !seat_cut) {
+                        std::cout << "[!] Charge=" << soc << "% | Range=" << vehicle_range
+                                  << " < " << seat_threshold << "% -> Turning Seat Heating/Cooling off" << std::endl;
+                        set_acct_signal(stub, SEAT_HEAT_PATH, 0);
+                        set_acct_signal(stub, SEAT_HC_PATH, 0);
+                        seat_cut = true;
+                    } else if (soc >= seat_threshold && seat_cut) {
+                        std::cout << "[+] Charge=" << soc << "% | Range=" << vehicle_range
+                                  << " >= " << seat_threshold << "% -> Seat restriction lifted" << std::endl;
+                        seat_cut = false;
+                    }
+                } else if (path == HVAC_PATH && hvac_cut && as_float(dp) != 0.0f) {
+                    std::cout << "[!] Battery low -> blocking HVAC re-activation" << std::endl;
+                    set_signal(stub, HVAC_PATH, 0.0f);
+                } else if (path == SEAT_HEAT_PATH && seat_cut && as_int(dp) != 0) {
+                    std::cout << "[!] Battery low -> blocking Seat Heating re-activation" << std::endl;
+                    set_acct_signal(stub, SEAT_HEAT_PATH, 0);
+                } else if (path == SEAT_HC_PATH && seat_cut && as_int(dp) != 0) {
+                    std::cout << "[!] Battery low -> blocking Seat HeatingCooling re-activation" << std::endl;
+                    set_acct_signal(stub, SEAT_HC_PATH, 0);
+                }
+            }
+        }
+
+        if (!g_running) break;
+        auto status = reader->Finish();
+        std::cerr << "[RangeExt] Stream ended: " << status.error_message() << std::endl;
+        std::cout << "[RangeExt] Reconnecting in 5s..." << std::endl;
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+    }
 }
 
 int main(int argc, char* argv[]) {
     std::string target = "10.0.0.100:55555";
-    int interval = 2;
-
+    float hvac_threshold = std::getenv("HVAC_OFF_THRESHOLD")
+        ? std::atof(std::getenv("HVAC_OFF_THRESHOLD")) : 50.0f;
+    float seat_threshold = std::getenv("SEAT_OFF_THRESHOLD")
+        ? std::atof(std::getenv("SEAT_OFF_THRESHOLD")) : 30.0f;
     if (auto t = std::getenv("KUKSA_DATABROKER_ADDR")) target = t;
-    if (auto i = std::getenv("CHECK_INTERVAL"))        interval = std::atoi(i);
-    if (argc > 1) target   = argv[1];
-    if (argc > 2) interval = std::atoi(argv[2]);
+    if (argc > 1) target = argv[1];
+    if (argc > 2) hvac_threshold = std::atof(argv[2]);
+    if (argc > 3) seat_threshold = std::atof(argv[3]);
 
-    const float soc_threshold = std::getenv("SOC_THRESHOLD")
-        ? std::atof(std::getenv("SOC_THRESHOLD"))
-        : SOC_THRESHOLD;
+    std::signal(SIGINT, [](int) { g_running = false; });
+    std::signal(SIGTERM, [](int) { g_running = false; });
 
     std::cout << "========================================" << std::endl;
     std::cout << "  EV Range Extender" << std::endl;
     std::cout << "  Version:       " << VERSION << std::endl;
     std::cout << "  Databroker:    " << target << std::endl;
-    std::cout << "  Interval:      " << interval << "s" << std::endl;
-    std::cout << "  SoC threshold: " << soc_threshold << "%" << std::endl;
+    std::cout << "  HVAC off below: " << hvac_threshold << "%" << std::endl;
+    std::cout << "  Seat off below: " << seat_threshold << "%" << std::endl;
     std::cout << "========================================" << std::endl;
-    std::cout.flush();
 
-    auto channel = grpc::CreateChannel(target,
-                                       grpc::InsecureChannelCredentials());
+    auto channel = grpc::CreateChannel(target, grpc::InsecureChannelCredentials());
     auto stub = kuksa::val::v1::VAL::NewStub(channel);
-
     for (int r = 1; r <= 15; r++) {
         kuksa::val::v1::GetServerInfoRequest req;
         kuksa::val::v1::GetServerInfoResponse resp;
         grpc::ClientContext ctx;
-        ctx.set_deadline(std::chrono::system_clock::now() +
-                         std::chrono::seconds(3));
-        auto st = stub->GetServerInfo(&ctx, req, &resp);
-        if (st.ok()) {
-            std::cout << "[RangeExt] Connected: " << resp.name()
-                      << " " << resp.version() << std::endl;
+        ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(3));
+        auto status = stub->GetServerInfo(&ctx, req, &resp);
+        if (status.ok()) {
+            std::cout << "[RangeExt] Connected: " << resp.name() << " " << resp.version() << std::endl;
             break;
         }
         if (r == 15) {
@@ -25874,65 +25986,11 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         std::cout << "[RangeExt] Waiting (" << r << "/15)..." << std::endl;
-        std::cout.flush();
         std::this_thread::sleep_for(std::chrono::seconds(2));
     }
 
-    std::string prev_mode = "";
-    int cycle = 0;
-
-    while (true) {
-        cycle++;
-
-        float soc  = get_signal(stub.get(),
-            "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current");
-        float temp = get_signal(stub.get(),
-            "Vehicle.Cabin.HVAC.AmbientAirTemperature");
-
-        if (soc < 0) soc = 50.0f;
-
-        std::string mode;
-        float range;
-        float light_intensity;
-        float seat_heating;
-
-        if (soc < soc_threshold) {
-            mode = "POWER_SAVE";
-            range = soc * DEGRADED_EFFICIENCY;
-            light_intensity = 30.0f;
-            seat_heating = 0.0f;
-        } else {
-            mode = "NORMAL";
-            range = soc * NORMAL_EFFICIENCY;
-            light_intensity = 100.0f;
-            seat_heating = 1.0f;
-        }
-
-        set_signal(stub.get(), "Vehicle.Powertrain.Range", range);
-        set_signal(stub.get(),
-            "Vehicle.Cabin.Lights.AmbientLight.Intensity", light_intensity);
-        set_signal(stub.get(), "Vehicle.Cabin.Seat.Heating", seat_heating);
-
-        if (mode != prev_mode) {
-            std::cout << "[RangeExt] *** MODE CHANGE: " << mode << " ***"
-                      << std::endl;
-            prev_mode = mode;
-        }
-
-        if (cycle % 5 == 1) {
-            std::cout << "[RangeExt] cycle=" << cycle
-                      << " mode=" << mode
-                      << " SoC=" << soc << "%"
-                      << " Temp=" << (temp >= 0 ? std::to_string((int)temp) : "N/A") << "C"
-                      << " Range=" << range << "km"
-                      << " Lights=" << light_intensity
-                      << " SeatHeat=" << seat_heating
-                      << std::endl;
-            std::cout.flush();
-        }
-
-        std::this_thread::sleep_for(std::chrono::seconds(interval));
-    }
+    run(stub.get(), hvac_threshold, seat_threshold);
+    std::cout << "EV Range Extender: shutdown, no signal reset needed." << std::endl;
     return 0;
 }`,
       yaml: `# Configuration for AosEdge Update Bundle (schemaVersion: 2)
@@ -25952,7 +26010,7 @@ items:
       codename: "ev-range-extender"
       title: "EV Range Extender - HPC Domain"
       description: "Battery management, range computation, power-saving mode control"
-    version: "1.0.0"
+    version: "3.0.1"
     sourceFolder: "ev-range-extender"
 
     images:
@@ -25964,7 +26022,7 @@ items:
       workingDir: "/"
       cmd: "/ev-range-extender"
       env:
-        - "KUKSA_DATABROKER_ADDR=172.17.0.1:55555"
+        - "KUKSA_DATABROKER_ADDR=10.0.0.100:55555"
       instances:
         minInstances: 1
         priority: 10
@@ -25999,6 +26057,7 @@ static const char* RANGE_PATH     = "Vehicle.Powertrain.Range";
 static const char* SOC_PATH       = "Vehicle.Powertrain.TractionBattery.StateOfCharge.Current";
 static const char* HVAC_PATH      = "Vehicle.Cabin.HVAC.AmbientAirTemperature";
 static const char* SEAT_HEAT_PATH = "Vehicle.Cabin.Seat.Row1.DriverSide.Heating";
+static const char* SEAT_HC_PATH   = "Vehicle.Cabin.Seat.Row1.DriverSide.HeatingCooling";
 
 static std::atomic<bool> g_running{true};
 
@@ -26054,7 +26113,7 @@ static void run(kuksa::val::v1::VAL::Stub* stub,
     bool  hvac_cut = false, seat_cut = false;
 
     kuksa::val::v1::SubscribeRequest sub_req;
-    for (const char* path : { RANGE_PATH, SOC_PATH, HVAC_PATH, SEAT_HEAT_PATH }) {
+    for (const char* path : { RANGE_PATH, SOC_PATH, HVAC_PATH, SEAT_HEAT_PATH, SEAT_HC_PATH }) {
         auto* entry = sub_req.add_entries();
         entry->set_path(path);
         entry->set_view(kuksa::val::v1::VIEW_CURRENT_VALUE);
@@ -26086,8 +26145,9 @@ static void run(kuksa::val::v1::VAL::Stub* stub,
                         hvac_cut = false;
                     }
                     if (soc < seat_threshold && !seat_cut) {
-                        std::cout << "[!] SoC=" << soc << "% < " << seat_threshold << "%  ->  Turning Seat Heating off" << std::endl;
+                        std::cout << "[!] SoC=" << soc << "% < " << seat_threshold << "%  ->  Turning Seat Heating/Cooling off" << std::endl;
                         set_int(stub, SEAT_HEAT_PATH, 0);
+                        set_int(stub, SEAT_HC_PATH, 0);
                         seat_cut = true;
                     } else if (soc >= seat_threshold && seat_cut) {
                         std::cout << "[+] SoC=" << soc << "%  ->  Seat restriction lifted" << std::endl;
@@ -26102,6 +26162,11 @@ static void run(kuksa::val::v1::VAL::Stub* stub,
                     if (as_int(dp) != 0) {
                         std::cout << "[!] Battery low  ->  blocking Seat Heating re-activation" << std::endl;
                         set_int(stub, SEAT_HEAT_PATH, 0);
+                    }
+                } else if (path == SEAT_HC_PATH && seat_cut) {
+                    if (as_int(dp) != 0) {
+                        std::cout << "[!] Battery low  ->  blocking Seat HeatingCooling re-activation" << std::endl;
+                        set_int(stub, SEAT_HC_PATH, 0);
                     }
                 }
             }
@@ -28416,6 +28481,11 @@ items:
     const [selectedUnitUid, setSelectedUnitUid] = React2.useState("");
     const [selectedSubjectId, setSelectedSubjectId] = React2.useState("");
     const aosCloudLoadedRef = React2.useRef(false);
+    const [isRunningAutomation, setIsRunningAutomation] = React2.useState(false);
+    const [automationResult, setAutomationResult] = React2.useState(null);
+    const [oemCertStatus, setOemCertStatus] = React2.useState(null);
+    const [isUploadingOemCert, setIsUploadingOemCert] = React2.useState(false);
+    const [isRemovingOemCert, setIsRemovingOemCert] = React2.useState(false);
     const aosServiceRef = React2.useRef(null);
     const buildLogsRef = React2.useRef(null);
     const pollingIntervalRef = React2.useRef(null);
@@ -29024,6 +29094,7 @@ items:
         }
         setTimeout(async () => {
           await checkCertificate();
+          await checkOemCertificate();
           await fetchAosCloudServices();
         }, 500);
       }).catch((err) => {
@@ -29139,6 +29210,15 @@ items:
         setCertError("");
       } catch (err) {
         setCertError(err.message || "Failed to check certificate");
+      }
+    };
+    const checkOemCertificate = async () => {
+      if (!aosServiceRef.current)
+        return;
+      try {
+        const result = await aosServiceRef.current.checkCertificate("aos-user-oem");
+        setOemCertStatus({ loaded: result.certLoaded, identity: result.identity ?? null });
+      } catch (err) {
       }
     };
     const fetchAosCloudServices = async () => {
@@ -29359,6 +29439,37 @@ items:
       } catch (e) {
       }
     };
+    const runAosSetupAutomation = async () => {
+      if (!aosServiceRef.current)
+        return;
+      const units = showAllUnits ? allUnits : serviceUnits;
+      const unit = units.find((u) => u.uid === selectedMonitorUnit);
+      const systemUid = unit?.systemUid || "";
+      if (!systemUid) {
+        addLog("[Automation] Select a unit first");
+        return;
+      }
+      setIsRunningAutomation(true);
+      setAutomationResult(null);
+      addLog(`[Automation] Starting AosEdge setup for unit ${systemUid}...`);
+      try {
+        const res = await aosServiceRef.current.runAosAutomation(systemUid);
+        for (const step of res.steps || [])
+          addLog(`[Automation] ${step}`);
+        if (res.status === "success") {
+          setAutomationResult({ status: "success", message: res.message, dashboardUrl: res.dashboardUrl });
+          addLog("[Automation] Completed successfully");
+        } else {
+          setAutomationResult({ status: "error", message: res.message || "Automation failed" });
+          addLog(`[Automation] Failed: ${res.message}`);
+        }
+      } catch (err) {
+        setAutomationResult({ status: "error", message: err.message || "Automation failed" });
+        addLog(`[Automation] Error: ${err.message}`);
+      } finally {
+        setIsRunningAutomation(false);
+      }
+    };
     const [workerInfo, setWorkerInfo] = React2.useState(null);
     const [toolchainVersions, setToolchainVersions] = React2.useState(null);
     const [showAllUnits, setShowAllUnits] = React2.useState(false);
@@ -29437,6 +29548,49 @@ items:
         setIsRemovingCert(false);
       }
     };
+    const handleOemCertUpload = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file || !aosServiceRef.current)
+        return;
+      setIsUploadingOemCert(true);
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+        const result = await aosServiceRef.current.uploadCertificate(base64, "aos-user-oem");
+        if (result.status === "success") {
+          setOemCertStatus({ loaded: true, identity: result.identity ?? null });
+          addLog(`[OEM Cert] Uploaded${result.identity?.cn ? `: CN=${result.identity.cn}` : ""}`);
+        } else {
+          addLog(`[OEM Cert] Upload failed: ${result.message}`);
+        }
+      } catch (err) {
+        addLog(`[OEM Cert] Upload failed: ${err.message}`);
+      } finally {
+        setIsUploadingOemCert(false);
+        e.target.value = "";
+      }
+    };
+    const handleOemCertRemove = async () => {
+      if (!aosServiceRef.current)
+        return;
+      if (typeof window !== "undefined" && !window.confirm("Remove the OEM certificate? This only affects AosEdge Setup \u2014 your SP certificate and build environment stay intact.")) {
+        return;
+      }
+      setIsRemovingOemCert(true);
+      try {
+        const result = await aosServiceRef.current.removeCertificate("aos-user-oem");
+        if (result.status === "success") {
+          addLog(`[OEM Cert] ${result.message}`);
+          setOemCertStatus({ loaded: false, identity: null });
+        } else {
+          addLog(`[OEM Cert] Remove failed: ${result.message}`);
+        }
+      } catch (err) {
+        addLog(`[OEM Cert] Remove failed: ${err.message}`);
+      } finally {
+        setIsRemovingOemCert(false);
+      }
+    };
     const handleBuildDeploy = async () => {
       if (!aosServiceRef.current || !aosServiceRef.current.isServiceConnected()) {
         addLog("[Error] Not connected to AOS service");
@@ -29445,6 +29599,30 @@ items:
       setBuildLogs([]);
       let finalCode = languageMode === "python" ? pythonCodeRef.current : cppCodeRef.current;
       let finalYaml = yamlConfigRef.current;
+      if (autoIncVersion && selectedServiceUuid && serviceVersions.length > 0) {
+        const currentMatch = finalYaml.match(/version:\s*["']([^"']+)["']/i);
+        const currentVersion = currentMatch?.[1] || "0.0.0";
+        const latestVersion = serviceVersions[0].version || "0.0.0";
+        const currentParts = currentVersion.split(".").map(Number);
+        const latestParts = latestVersion.split(".").map(Number);
+        const currentKey = currentParts.reduce((value2, part) => value2 * 1e3 + (Number.isFinite(part) ? part : 0), 0);
+        const latestKey = latestParts.reduce((value2, part) => value2 * 1e3 + (Number.isFinite(part) ? part : 0), 0);
+        if (currentKey <= latestKey) {
+          const nextParts = latestVersion.split(".");
+          nextParts[nextParts.length - 1] = String(Number(nextParts[nextParts.length - 1]) + 1);
+          const nextVersion = nextParts.join(".");
+          if (languageMode === "python") {
+            finalCode = finalCode.replace(/VERSION\s*=\s*["'][^"']+["']/, `VERSION = "${nextVersion}"`);
+            setPythonCode(finalCode);
+          } else {
+            finalCode = finalCode.replace(/#define\s+VERSION\s+["'][^"']+["']/, `#define VERSION "${nextVersion}"`);
+            setCppCode(finalCode);
+          }
+          finalYaml = finalYaml.replace(/version:\s*["'][^"']+["']/i, `version: "${nextVersion}"`);
+          setYamlConfig(finalYaml);
+          addLog(`[Version] Bumped deployment ${currentVersion} \u2192 ${nextVersion} before upload`);
+        }
+      }
       setIsBuilding(true);
       setBuildStatus("Starting build...");
       addLog(`[Build] Target: ${selectedInstance}`);
@@ -29558,9 +29736,9 @@ items:
         const lastLine = msg.split("\n").filter((l) => l.trim()).pop() || msg;
         let statusText = `Build failed: ${lastLine.replace(/^\[.*?\]\s*/, "").slice(0, 80)}`;
         if (msg.includes("re-upload")) {
-          statusText += " \u2192 Go to Setup panel and upload your .p12 again";
+          statusText += " \u2192 Go to Setup panel and upload your SP.p12 certificate again";
         } else if (msg.includes("No certificate uploaded")) {
-          statusText += " \u2192 Go to Setup panel and upload your .p12 first";
+          statusText += " \u2192 Go to Setup panel and upload your SP.p12 certificate first";
         }
         setBuildStatus(statusText);
         setIsBuilding(false);
@@ -29753,16 +29931,17 @@ items:
           React2.createElement(
             "div",
             { style: { fontSize: "13px", lineHeight: 1.8, color: "#374151" } },
-            React2.createElement("h3", { style: { fontSize: "14px", marginTop: 0, marginBottom: "8px" } }, "1. Upload your certificate"),
+            React2.createElement("h3", { style: { fontSize: "14px", marginTop: 0, marginBottom: "8px" } }, "1. Upload your SP.p12 certificate"),
             React2.createElement(
               "p",
               { style: { color: "#6b7280", marginBottom: "16px" } },
               "Click ",
               React2.createElement("strong", null, "Choose File"),
-              " in the Setup card and select your .p12 certificate. ",
-              "The orchestrator extracts your identity (CN) and creates a dedicated, isolated build environment just for you. ",
+              " in the Setup card and select your SP.p12 certificate. ",
+              "This is the Service Provider signing certificate used to create your dedicated build environment. ",
+              "The orchestrator extracts your identity (CN) and creates an isolated build environment just for you. ",
               "Once loaded, the Certificate card shows your CN, toolchain versions (aos-signer, aos-keys, aos-prov), and unit info when a unit is selected. ",
-              "If your worker becomes unresponsive, Remove and re-upload the certificate to get a fresh environment."
+              "If your worker becomes unresponsive, Remove and re-upload the SP.p12 certificate to get a fresh environment."
             ),
             React2.createElement("h3", { style: { fontSize: "14px", marginBottom: "8px" } }, "2. Choose an AosCloud Service"),
             React2.createElement(
@@ -30350,12 +30529,6 @@ items:
             React2.createElement(
               "div",
               { style: { padding: "6px 12px 10px", display: "flex", flexDirection: "column", gap: "4px" } },
-              React2.createElement(
-                "div",
-                { style: { fontSize: "11px", color: "#6b7280", display: "flex", justifyContent: "space-between" } },
-                React2.createElement("span", null, "Active workers"),
-                React2.createElement("span", { style: { fontWeight: 600, color: "#374151" } }, String(dockerInstances.filter((d) => d.online).length))
-              ),
               workerInfo && React2.createElement(
                 "div",
                 { style: { fontSize: "11px", color: "#6b7280", display: "flex", justifyContent: "space-between" } },
@@ -30386,12 +30559,12 @@ items:
               React2.createElement(
                 "div",
                 { style: { fontSize: "13px", fontWeight: 600, color: "#92400e" } },
-                "Upload your .p12 certificate to provision a build environment"
+                "Upload your SP.p12 certificate to provision a build environment"
               ),
               React2.createElement(
                 "div",
                 { style: { fontSize: "11px", color: "#a16207", marginTop: "2px" } },
-                "A dedicated, isolated workspace is created per certificate identity. Deployment is unavailable without a valid certificate."
+                "A dedicated, isolated workspace is created per SP.p12 certificate identity. Deployment is unavailable without a valid SP.p12 certificate."
               )
             )
           ),
@@ -30469,7 +30642,7 @@ items:
                         disabled: connectionStatus !== "connected" || isUploadingCert,
                         style: { display: "none" }
                       }),
-                      "Upload .p12"
+                      "Upload SP.p12"
                     )
                   )
                 )
@@ -30677,7 +30850,7 @@ items:
                   disabled: connectionStatus !== "connected" || isUploadingCert || isRemovingCert,
                   style: { display: "none" }
                 }),
-                isUploadingCert ? "Uploading..." : "Replace .p12"
+                isUploadingCert ? "Uploading..." : "Replace SP.p12"
               ),
               certStatus?.loaded && React2.createElement(
                 "button",
@@ -31070,6 +31243,140 @@ items:
                 )
               );
             })()
+          ),
+          // AosEdge setup automation — native equivalent of aos-automation.py, run
+          // against the unit currently selected above (no Python process involved).
+          React2.createElement(
+            "div",
+            { style: styles.card },
+            React2.createElement(
+              "div",
+              { style: styles.cardHeader },
+              React2.createElement(
+                "div",
+                { style: styles.cardTitle },
+                React2.createElement(Icon, { name: "settings", size: 16, color: "#6366f1" }),
+                "AosEdge Setup"
+              )
+            ),
+            React2.createElement(
+              "div",
+              { style: { padding: "12px", display: "flex", flexDirection: "column", gap: "8px" } },
+              React2.createElement(
+                "div",
+                { style: { fontSize: "11px", color: "#6b7280" } },
+                (() => {
+                  const units = showAllUnits ? allUnits : serviceUnits;
+                  const unit = units.find((u) => u.uid === selectedMonitorUnit);
+                  return unit ? `Target unit: ${unit.name} (${unit.systemUid || unit.uid})` : "Select a unit above to run setup";
+                })()
+              ),
+              React2.createElement(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "8px", fontSize: "11px" } },
+                React2.createElement("span", { style: { color: "#6b7280" } }, "OEM certificate (required for setup):"),
+                oemCertStatus?.loaded ? React2.createElement(
+                  React2.Fragment,
+                  null,
+                  React2.createElement("span", { style: { color: "#16a34a" } }, oemCertStatus.identity?.cn ? `Loaded \u2014 ${oemCertStatus.identity.cn}` : "Loaded"),
+                  React2.createElement(
+                    "label",
+                    {
+                      style: {
+                        color: "#2563eb",
+                        cursor: isUploadingOemCert || isRemovingOemCert ? "not-allowed" : "pointer",
+                        padding: "2px 8px",
+                        borderRadius: "4px",
+                        border: "1px solid #bfdbfe",
+                        backgroundColor: "#eff6ff",
+                        opacity: isUploadingOemCert || isRemovingOemCert ? 0.5 : 1
+                      }
+                    },
+                    React2.createElement("input", {
+                      type: "file",
+                      accept: ".p12,.pfx",
+                      onChange: handleOemCertUpload,
+                      disabled: isUploadingOemCert || isRemovingOemCert,
+                      style: { display: "none" }
+                    }),
+                    isUploadingOemCert ? "Uploading\u2026" : "Replace OEM .p12"
+                  )
+                ) : React2.createElement(
+                  "label",
+                  {
+                    style: {
+                      color: "#2563eb",
+                      cursor: "pointer",
+                      padding: "2px 8px",
+                      borderRadius: "4px",
+                      border: "1px solid #bfdbfe",
+                      backgroundColor: "#eff6ff"
+                    }
+                  },
+                  React2.createElement("input", {
+                    type: "file",
+                    accept: ".p12,.pfx",
+                    onChange: handleOemCertUpload,
+                    disabled: isUploadingOemCert,
+                    style: { display: "none" }
+                  }),
+                  isUploadingOemCert ? "Uploading\u2026" : "Upload OEM .p12"
+                )
+              ),
+              React2.createElement(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "6px" } },
+                React2.createElement("button", {
+                  onClick: runAosSetupAutomation,
+                  disabled: isRunningAutomation || !selectedMonitorUnit,
+                  style: {
+                    ...styles.button,
+                    ...styles.buttonPrimary,
+                    flex: 1,
+                    ...isRunningAutomation || !selectedMonitorUnit ? styles.buttonDisabled : {}
+                  },
+                  title: "Runs unit config update, unit set, subject, and service assignment \u2014 same steps as aos-automation.py"
+                }, isRunningAutomation ? "Running setup\u2026" : "Run AosEdge Setup"),
+                oemCertStatus?.loaded && React2.createElement("button", {
+                  onClick: handleOemCertRemove,
+                  disabled: isUploadingOemCert || isRemovingOemCert,
+                  style: {
+                    ...styles.button,
+                    ...styles.buttonSm,
+                    fontSize: "11px",
+                    ...isUploadingOemCert || isRemovingOemCert ? styles.buttonDisabled : {},
+                    backgroundColor: "transparent",
+                    color: "#dc2626",
+                    border: "1px solid #fca5a5"
+                  },
+                  title: "Remove the OEM certificate \u2014 the SP certificate and build environment are not affected"
+                }, isRemovingOemCert ? "Removing\u2026" : "Remove")
+              ),
+              automationResult && React2.createElement(
+                "div",
+                {
+                  style: {
+                    fontSize: "11px",
+                    padding: "8px",
+                    borderRadius: "4px",
+                    backgroundColor: automationResult.status === "success" ? "#f0fdf4" : "#fef2f2",
+                    color: automationResult.status === "success" ? "#16a34a" : "#dc2626",
+                    whiteSpace: "pre-wrap"
+                  }
+                },
+                automationResult.message,
+                automationResult.dashboardUrl && React2.createElement(
+                  "div",
+                  { style: { marginTop: "4px" } },
+                  React2.createElement("a", {
+                    href: automationResult.dashboardUrl,
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                    style: { color: "#2563eb" }
+                  }, "Open Playground dashboard")
+                )
+              )
+            )
           )
           // Monitoring + Alerts moved to the Unit Detail overlay (opens on
           // unit-row click) to avoid duplication with the inline cards.
@@ -31458,7 +31765,7 @@ items:
     );
   }
 
-  // src/standalone.ts
+  // src/standalone-python.ts
   var container = document.getElementById("root");
   var root = ReactDOM.createRoot(container);
   root.render(
