@@ -167,7 +167,7 @@ Perform these steps on WSL or Ubuntu.
 
   - Required steps: 
     1. [Setup your host](https://docs.aosedge.tech/docs/quick-start/set-up/)
-     1. [Get access](https://docs.aosedge.tech/docs/quick-start/get-access)
+     2. [Get access](https://docs.aosedge.tech/docs/quick-start/get-access)
 
 - Access the main node with `ssh root@10.0.0.100` and the secondary node with `ssh root@10.0.0.x`, where the address can be discovered with:
 
@@ -175,7 +175,7 @@ Perform these steps on WSL or Ubuntu.
   ip neigh
   ```
 
-- Use `Password1` as the password when prompted to log in to the VMs.
+- Use `Password1` as the password when prompted to log in to the main node and secondary node VMs.
 
 - If needed, monitor the boot and service logs with `journalctl -f`.
 
