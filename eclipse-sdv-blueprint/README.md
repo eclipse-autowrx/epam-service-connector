@@ -15,7 +15,7 @@
   - [System Setup Workflow](#system-setup-workflow)
     - [Section 1 — VM setup and deployment flow](#section-1--vm-setup-and-deployment-flow)
     - [Section 2 — Build and deploy the SDV application](#section-2--build-and-deploy-the-sdv-application)
-    - [Section 3 — AOSEdge setup](#section-3--aosedge-setup)
+    - [Section 3 — AosEdge setup](#section-3--aosedge-setup)
   - [Steps to demo](#steps-to-demo)
   - [Signal Flow and Internals](#signal-flow-and-internals)
   - [Debug steps for network on VM's](#debug-steps-for-network-on-vms)
@@ -102,9 +102,9 @@ Phase 1 is designed for rapid application development and validation. By running
         ↓
 2. App is published to the AosCloud App Registry once it is successfully build
         ↓
-3. AosCore fetches the latest app and deploy it to the qemu VM
+3. AosCore fetches the latest app and deploy it to the QEMU VM
         ↓
-4. AosCore on the qemu VM configure the app and systemd is running this app as service
+4. AosCore on the QEMU VM configure the app and systemd is running this app as service
         ↓
 5. The app(service) reads/writes vehicle signals via eclipse-kuksa
         ↓
@@ -138,108 +138,109 @@ The setup is organized into sub-sections that guide the VM setup and deployment 
 
 - [Section 1 — VM setup and deployment flow](#section-1--vm-setup-and-deployment-flow)
 - [Section 2 — Build and deploy the SDV application](#section-2--build-and-deploy-the-sdv-application)
-- [Section 3 — AOSEdge setup](#section-3--aosedge-setup)
+- [Section 3 — AosEdge setup](#section-3--aosedge-setup)
 
 
 #### Section 1 — VM setup and deployment flow
 
 **Prepare the VM environment**
 
-This step sets up two qemu VM instances where the SDV application and its surrounding components are run.
+This step sets up two QEMU VM instances where the SDV application and its surrounding components are run.
 
-- Download the latest AOS VM image package of bosch and provisioning script from the AOS Edge meta-aos-vm release page: [meta-aos-vm releases](https://github.com/aosedge/meta-aos-vm/releases/) VM images named Version 6.x.x-bosch.x (download latest release)
+- Download the latest Aos VM image package of bosch and provisioning script from the AosEdge meta-aos-vm release page: [meta-aos-vm releases](https://github.com/aosedge/meta-aos-vm/releases/) VM images named Version 6.x.x-bosch.x (download latest release)
+
+  - As an alternative to using the release images, you can build the VM image yourself by following [meta-aos-vm](https://github.com/aosedge/meta-aos-vm) on the `demo-bosch` branch.
 
 - Extract the image archive and start the QEMU-based VMs from the same directory:
 
-```bash
-tar -xvf aos-vm-image-genericx86-64-6.1.1-bosch.2.tar.xz
-sudo ./aos_vm.sh run -f .
-```
-- If the AOS certificates are unavailable or the setup has not been completed, please follow the steps on [Aos QuickStart](https://docs.aosedge.tech/docs/quick-start/)
-- Complete the QuickStart guide only up to get-access step. No additional steps are required.
+  ```bash
+  tar -xvf aos-vm-image-genericx86-64-6.1.1-bosch.2.tar.xz
+  sudo ./aos_vm.sh run -f .
+  ```
+
+- You may need to run `chmod +x aos_vm.sh` to allow the execution of `aos_vm.sh`.
+
+- If the Aos certificates are unavailable or the setup has not been completed, please follow the steps on [Aos QuickStart](https://docs.aosedge.tech/docs/quick-start/)
+
+  - Complete the QuickStart guide only up to get-access step. No additional steps are required.
 Perform these steps on WSL or Ubuntu.
 
-- Required steps:
- 1. [Setup your host](https://docs.aosedge.tech/docs/quick-start/set-up/)
- 1. [Get access](https://docs.aosedge.tech/docs/quick-start/get-access)
+  - Required steps: 
+    1. [Setup your host](https://docs.aosedge.tech/docs/quick-start/set-up/)
+     2. [Get access](https://docs.aosedge.tech/docs/quick-start/get-access)
 
-- Access the VM1 with `ssh root@10.0.0.100` and the secondary node with `ssh root@10.0.0.x`, where the address can be discovered with:
+- Access the main node with `ssh root@10.0.0.100` and the secondary node with `ssh root@10.0.0.x`, where the address can be discovered with:
 
-```bash
-ip neigh
-```
+  ```bash
+  ip neigh
+  ```
 
-- Use `Password1` as the password when prompted to log in to the VMs.
+- Use `Password1` as the password when prompted to log in to the main node and secondary node VMs.
 
-- Monitor the boot and service logs with:
+- If needed, monitor the boot and service logs with `journalctl -f`.
 
-```bash
-journalctl -f
-```
-- Provision the VMs to AOS Cloud on Host:
+- Provision the VMs to AosCloud on Host:
 
-```bash
-source ~/.aos/venv/bin/activate
-aos-prov provision -u 10.0.0.100
-```
+  ```bash
+  source ~/.aos/venv/bin/activate
+  aos-prov provision -u 10.0.0.100
+  ```
 
-- As an alternative to using the release images, you can build the VM image yourself by following [meta-aos-vm](https://github.com/aosedge/meta-aos-vm) on the `demo-bosch` branch.
+- Log in to the [Aos Dashboard](https://api.aoscloud.io/account/start), select the OEM login option, and choose the certificate-based sign-in that appears when you open the [Units tab](https://oem.aoscloud.io/oem/units).
 
-- Log in to the [AOS Dashboard](https://api.aoscloud.io/account/start), select the OEM login option, and choose the certificate-based sign-in that appears when you open the [Units tab](https://oem.aoscloud.io/oem/units).
-
-- If Unit shown offline on AOS Dashboard follow the [Debug Steps](#debug-steps-for-network-on-vms)
+- If Unit shown offline on Aos Dashboard follow the [Debug Steps](#debug-steps-for-network-on-vms)
 
 **Install the core components**
 
 This step installs the core components e.g. `kuksa-client`, `zenoh`, and `pylibs`
 
-- Download the AOS VM layers package from the same release page: [aos-vm layers package](https://github.com/aosedge/meta-aos-vm/releases/tag/v6.1.1-bosch.2)
+- Download the Aos VM layers package from the same release page: [aos-vm layers package](https://github.com/aosedge/meta-aos-vm/releases/tag/v6.1.1-bosch.2)
 
 - Extract the archive and publish the layers using the signing flow:
 
-```bash
-source ~/.aos/venv/bin/activate
-tar -xvf aos-vm-layers-genericx86-64-6.1.1-bosch.2.tar.gz
-cd layers
-aos-signer go
-```
+  ```bash
+  source ~/.aos/venv/bin/activate
+  tar -xvf aos-vm-layers-genericx86-64-6.1.1-bosch.2.tar.gz
+  cd layers
+  aos-signer go
+  ```
 
-- After the publish step, verify in the [AOS Cloud Layers-Service Provider](https://sp.aoscloud.io/sp/layers) portal that the expected layers are available in the Layers section. The layers that should appear are `kuksa-client`, `zenoh`, and `pylibs`.
+- After the publish step, verify in the [AosCloud Layers-Service Provider](https://sp.aoscloud.io/sp/layers) portal that the expected layers are available in the Layers section. The layers that should appear are `kuksa-client`, `zenoh`, and `pylibs`.
 
 - Check the [deployment bundles](https://oem.aoscloud.io/oem/deployment-bundles) to confirm that the layers were deployed successfully.
 
--If the deployment does not appear or is rejected, update the service version in `demo-services/ev-range-extender/config.yaml` and re-run `aos-signer go`.
+- If the deployment does not appear or is rejected, update the service version in `demo-services/ev-range-extender/config.yaml` and re-run `aos-signer go`.
 
 **Deploy the demo services**
 
-This step deploys the components which produces the data required for the SDV application (ev-range-extender).
+This step deploys the components that produce the data required for the SDV application (ev-range-extender).
 
 - Please perform these steps before deploying demo-services [Debug Steps for Application Deployment](#debug-steps-for-application-deployment).
 
-- The demo-services contains the deployment bundles for the EV Range Extender use case: `bms`, `range-ai`, `seat-ecu`, and `hvac`.
+- The `demo-services` folder contains the deployment bundles for the EV Range Extender use case: `bms`, `range-ai`, `seat-ecu`, and `hvac`.
 
 - In the VM, navigate to the EV Range Extender service directory and package it for deployment:
 
-```bash
-source ~/.aos/venv/bin/activate
-cd epam-service-connector/eclipse-sdv-blueprint/demo-services/ev-range-extender
-aos-signer go
-```
-- After the publish step, verify in the [AOS Cloud Service-Service Provider](https://sp.aoscloud.io/sp/services).
+  ```bash
+  source ~/.aos/venv/bin/activate
+  cd epam-service-connector/eclipse-sdv-blueprint/demo-services/ev-range-extender
+  aos-signer go
+  ```
+- After the publish step, verify in the [AosCloud Service-Service Provider](https://sp.aoscloud.io/sp/services).
 
 **Playground Dashboard Connectivity**
 
-- Kuksa-syncer is used for dashboard connectivity of playground which will be deployed on AOS Cloud platform .
+- Kuksa-syncer is used for dashboard connectivity of playground which will be deployed on AosCloud platform .
 
-```bash
-source ~/.aos/venv/bin/activate
-cd epam-service-connector/eclipse-sdv-blueprint/kuksa-syncer
-aos-signer go
-```
+  ```bash
+  source ~/.aos/venv/bin/activate
+  cd epam-service-connector/eclipse-sdv-blueprint/kuksa-syncer
+  aos-signer go
+  ```
 
 - Verify the deployment result in [Aos Dashboard Services](https://sp.aoscloud.io/sp/services).
 - If the deployment does not appear or is rejected, update the service version in `kuksa-syncer/config.yaml` and re-run `aos-signer go`.
-- Please verfiy [deployment bundles](https://sp.aoscloud.io/sp/deployment-bundles) if any errors occured during deployment.
+- Please verify [deployment bundles](https://sp.aoscloud.io/sp/deployment-bundles) if any errors occur during deployment.
 
 #### Section 2 — Build and deploy the SDV application
 
@@ -247,11 +248,11 @@ aos-signer go
 - Open the EV Range Extender application from the playground at [this link](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/view).
 - For ev-range-extender application deployment select [aos-cloud-deployment plugin](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/plug?plugid=aos-cloud-deployment).
 - Upload sp.12 on the aos-deployment plugin (certificates will be available in .aos/security).
-- In the AOS Cloud Deployment plugin, choose the C++ option, then select the EV Range Extender application from the dropdown menu and click Build and Deploy.
+- In the AosCloud Deployment plugin, choose the `C++` option, then select the `EV Range Extender` application from the dropdown menu and click `Build and Deploy` button.
 
-#### Section 3 — AOSEdge setup
+#### Section 3 — AosEdge setup
 
-**Automated AOS Edge setup**
+The script `aos-automation.py` performs the end-to-end [AosEdge setup](AosEdge%20setup%20(manual).md), including unit config updates, unit-set creation, subject creation, and service assignment. 
 
 1. Change into the automation directory
    ```bash
@@ -273,63 +274,43 @@ aos-signer go
    ```bash
    python aos-automation.py
    ```
+   It will prompt for the target unit system ID and then update the unit configuration automatically.
 
-This script performs the end-to-end AOS Edge setup, including unit config updates, unit set creation, subject creation, and service assignment. It will prompt for the target unit system ID and then update the unit configuration automatically, removing the need for those manual steps in the AOS Cloud dashboard.
+5. After deployment, log in to the units via SSH and verify that the services are running:
 
-After deployment, log in to the units via SSH and verify that the services are running:
-
-```bash
-crun --root=/run/crun list
-```
-- Even deployment of services can be verfied on [units portal](https://oem.aoscloud.io/oem/units) on respective unit.
-
-**Manual steps for AOS-Edge**
-
-Hint: This step is optional if the automation setup has already been completed.
-
-- Sign in to the AOS Service Provider or OEM portal at [AOS Cloud](https://api.aoscloud.io/account/start) and import the required `.p12` certificate, such as `aos-user-oem.p12` or `aos-user-sp.p12`.
-- Select [Service Provider](https://sp.aoscloud.io/sp/dashboard) and [OEM](https://oem.aoscloud.io/oem/dashboard) 
-- Download the unit configuration template from [unitconfig.json](https://github.com/aosedge/meta-aos-vm/blob/demo_bosch/misc/unitconfig.json) and import it in [AosEdge Dashboard Target System](https://oem.aoscloud.io/oem/systems) edit the target system UNIT CONFIG.
-- Create a [unit set](https://oem.aoscloud.io/oem/unit-sets) `ev-range-extender-unitset` and assign it to the provisioned VM so verification does not block the demo deployment.
-  - Configure: Title `ev-range-extender-unitset`, Description `Optional`, Update Strategy `Minimize Unit Restart`, and enable `Is Verification Set`.
-
-- Create a [subject](https://oem.aoscloud.io/oem/subjects) `ev-range-extender-subject` under Subjects on OEM, attach the target VM, bind the service to it.
-
-  - On service add the services that are deployed `Range-Ai`,`Seat ECU`,`HVAC ECU`,`kuksa-syncer`,`ev-range-application`and `BMS`.
-
-  - After creating the required unit_set and subject in the AOS dashboard, deployment can be bound to the target VM and services will be deployed on respective VM's.
-
-  - Check application deployment on both VMs by login to units using ssh and verify the serivces deployed or not using 
-
-```bash
-crun --root=/run/crun list
-```
- - Even deployment of services can be verfied on [AOS dashboard - units portal](https://oem.aoscloud.io/oem/units) on respective unit .
+    ```bash
+    crun --root=/run/crun list
+    ```
+    Service deployments can be verified on the [units portal](https://oem.aoscloud.io/oem/units) for the respective unit.
 
 ### Steps to demo
-1. After performing above steps of Section 1,2 and 3.
-1. Start the hardware simulator by running `./hardware-sim/pytk_hwsim.py` from the `eclipse-sdv-blueprint` directory (see [hardware-sim/README.md](hardware-sim/README.md)).
-1. Add ev-range-extender runtime and select ev-range-extender runtime on [playground dashboard](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/dashboard).
+ _*Above Section 1,2 and 3 should be completed._
+
+1. Open [Playground dashboard](https://playground.digital.auto/model/67f76c0d8c609a0027662a69/library/prototype/69ce30f438bb8e98f0af5ac8/dashboard). In the right pane, click `Add Runtime`, input `Runtime-ev-range-extender` runtime, and click `Add`. Find `Runtime-ev-range-extender` in the Runtime drop down and select it.
 
 ![EV Range Extender runtime selection on the playground dashboard](./images/image.png)
 
-1. Once the hardware simulator is running, Click the Start button in the hardware simulator to start simulating driving vehicle.
+1. On your Host, start the hardware simulator by running `./hardware-sim/pytk_hwsim.py` from the `eclipse-sdv-blueprint` directory (see [hardware-sim/README.md](hardware-sim/README.md)).
+
+1. Click `Start` button in the hardware simulator to start simulating driving vehicle.
 
 **Observe the threshold-based behaviour**:
 1. When the battery level reaches 50%, the HVAC fan is automatically turned off.
 2. When the battery level reaches 30%, additional power-saving measures are applied, and the seat heating/cooling functions are turned off.
 3. When the HVAC fan is turned off, a slight increase in the estimated driving range can be observed.
-4. When the seat heating/cooling functions are also disabled, the estimated driving range increases furthe
+4. When the seat heating/cooling functions are also disabled, the estimated driving range increases further.
 5. Log in to VM1 using SSH:
 
-```bash
-ssh root@10.0.0.100
-```
+    ```bash
+    ssh root@10.0.0.100
+    ```
+
 6. Monitor the application logs by running:
 
-```bash
-journalctl -f | grep "range-ext"
-```
+    ```bash
+    journalctl -f | grep "range-ext"
+    ```
+
 7. Check the application level logs
 
 ### Signal Flow and Internals
@@ -346,76 +327,75 @@ The demo runs as a closed loop across host, virtual machines, and the playground
 
 Before performing these checks, verify the bridge and external interface names on your host and replace `aos-br0` / `eth0` if they differ.
 
-2. Check the bridge and IP forwarding still exist
+1. Check the bridge and IP forwarding still exist
 
-```bash
-ip addr show aos-br0
-cat /proc/sys/net/ipv4/ip_forward
-```
+    ```bash
+    ip addr show aos-br0
+    cat /proc/sys/net/ipv4/ip_forward
+    ```
 
-This should show `10.0.0.1/24` on the bridge and `1` for forwarding. If forwarding shows `0`:
+2. This should show `10.0.0.1/24` on the bridge and `1` for forwarding. 
+<br>
+<br>
+If forwarding shows `0`:
 
-```bash
-sudo sysctl -w net.ipv4.ip_forward=1
-```
+    ```bash
+    sudo sysctl -w net.ipv4.ip_forward=1
+    ```
 
 3. Check MASQUERADE rule exists (this is the one that keeps disappearing)
 
-```bash
-sudo iptables -t nat -L POSTROUTING -n -v
-```
+    ```bash
+    sudo iptables -t nat -L POSTROUTING -n -v
+    ```
 
-If it's empty, re-add it using your external interface name instead of `eth0`:
+    If it's empty, re-add it using your external interface name instead of `eth0`:
 
-```bash
-sudo iptables -t nat -A POSTROUTING -o <external-interface> -j MASQUERADE
-```
+   ```bash
+   sudo iptables -t nat -A POSTROUTING -o <external-interface> -j MASQUERADE
+   ```
 
 4. Check FORWARD chain allows traffic both ways
 
-```bash
-sudo iptables -L FORWARD -n -v
-```
-
-It should show `aos-br0→<external-interface> ACCEPT` and `<external-interface>→aos-br0 ACCEPT` with state `RELATED,ESTABLISHED`. If missing:
-
-```bash
-sudo iptables -A FORWARD -i aos-br0 -o <external-interface> -j ACCEPT
-sudo iptables -A FORWARD -i <external-interface> -o aos-br0 -m state --state RELATED,ESTABLISHED -j ACCEPT
-```
-
-Use the actual interface name on your machine, for example `eth0`, `ens33`, `enp3s0`, or another host-facing NIC.
+    ```bash
+    sudo iptables -L FORWARD -n -v
+    ```
+    It should show `aos-br0→<external-interface> ACCEPT` and `<external-interface>→aos-br0 ACCEPT` with state `RELATED,ESTABLISHED`. If missing:
+    ```bash
+    sudo iptables -A FORWARD -i aos-br0 -o <external-interface> -j ACCEPT
+    sudo iptables -A FORWARD -i <external-interface> -o aos-br0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+    ```
+    Use the actual interface name on your machine, for example `eth0`, `ens33`, `enp3s0`, or another host-facing NIC.
 
 ### Debug Steps for Application Deployment
 
 1. SSH into the Secondary-VM :
 
-```bash
-ssh ubuntu@10.0.0.X 
-```
+    ```bash
+    ssh ubuntu@10.0.0.X 
+    ```
+    If the filesystem is mounted read-only, remount it as writable:
+    
+    ```bash
+    mount -o rw,remount /
+    ```
 
-- If the filesystem is mounted read-only, remount it as writable:
-
-```bash
-mount -o rw,remount /
-```
-
-- note:To get to know Secondary-VM ip 
-```bash
-ip neigh
-```
+- note: To find the secondary-VM ip 
+    ```bash
+    ip neigh
+    ```
 
 2. Open `/etc/hosts` for editing with `vi`:
 
-```bash
-vi /etc/hosts
-```
+    ```bash
+    vi /etc/hosts
+    ```
 
 3. Add the following entry to the file:
 
-```text
-10.0.0.100 main
-```
+    ```text
+    10.0.0.100 main
+    ```
 
 4. Save and exit `vi`:
 
@@ -425,9 +405,9 @@ vi /etc/hosts
 
 5. Verify DNS resolution for `main`:
 
-```bash
-nslookup main
-```
+    ```bash
+    nslookup main
+    ```
 
 
 ---
@@ -511,5 +491,5 @@ A key addition in Phase 2 is the **End ECU layer** (STM32), which represents the
 | digital.auto Playground | [playground.digital.auto](https://playground.digital.auto) |
 | Development Repository | [eclipse-autowrx/epam-service-connector](https://github.com/eclipse-autowrx/epam-service-connector) |
 | digital.auto Website | [www.digital.auto](https://www.digital.auto) |
-| Aos Cloud | [AOS Cloud](https://api.aoscloud.io/account/start) |
+| AosCloud | [AosCloud](https://api.aoscloud.io/account/start) |
 ---
